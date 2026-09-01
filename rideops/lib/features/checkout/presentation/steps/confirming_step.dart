@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import '../../../../core/api/dto/checkout_session.dart';
 import '../../../../core/api/enums.dart';
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/l10n/odometer_format.dart';
+import '../../../../core/telemetry/event_logger.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../../../core/widgets/ride_buttons.dart';
 import '../../application/checkout_wizard_controller.dart';
@@ -46,14 +48,21 @@ class ConfirmingStep extends ConsumerStatefulWidget {
 class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
   final _scroll = ScrollController();
 
-  /// Hay una re-consulta del agente en vuelo ("Actualizar datos del cliente").
-  /// Vive aquí y no en el controller porque es una acción de PANTALLA: el
-  /// wizard no distingue este refresh de los del poll.
+  /// Hay una re-consulta del agente en vuelo ("Actualizar datos del cliente"
+  /// o "Reintentar la consulta"). Vive aquí y no en el controller porque es
+  /// una acción de PANTALLA: el wizard no distingue este refresh de los del
+  /// poll.
   bool _rechecking = false;
 
-  /// Ya terminó una re-consulta y el servidor SIGUE sin los datos. Es el acuse
-  /// que faltaba (review GD-MC-5): antes el botón disparaba dos peticiones y no
-  /// mostraba absolutamente nada, así que el agente lo volvía a tocar.
+  /// Ya terminó una re-consulta lanzada a mano. Es el acuse que faltaba
+  /// (review GD-MC-5): antes el botón disparaba dos peticiones y no mostraba
+  /// absolutamente nada, así que el agente lo volvía a tocar.
+  ///
+  /// **Qué acuse se muestra lo decide el VEREDICTO, no esta bandera**: con
+  /// `answered` el subtexto nombra los campos que el servidor sigue sin tener;
+  /// con `unreachable` habla solo de la consulta. Mezclarlos era el defecto:
+  /// una petición caída acababa diciendo "el servidor sigue sin el nombre, la
+  /// licencia y el teléfono" con el servidor teniendo los tres.
   bool _recheckedStill = false;
 
   @override
@@ -62,6 +71,10 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
     super.dispose();
   }
 
+  /// Vuelve a preguntarle al servidor. Es la MISMA acción para los dos
+  /// bloqueos —datos faltantes y consulta caída— porque la salida honesta de
+  /// ambos es idéntica: RideOps no captura datos de cliente (ADR-1), así que
+  /// lo único que puede hacer es volver a consultar.
   Future<void> _recheck() async {
     if (_rechecking) return;
     setState(() {
@@ -70,11 +83,23 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
     });
     final controller =
         ref.read(checkoutWizardProvider(widget.reservationId).notifier);
+    // De qué bloqueo salió el toque: el evento mide si el reintento del dato
+    // inalcanzable sirve de algo en el patio.
+    final wasUnreachable = ref
+            .read(checkoutWizardProvider(widget.reservationId))
+            .contextVerdict ==
+        ContextVerdict.unreachable;
     try {
       // Las dos lecturas: la sesión (por si otra superficie avanzó mientras
       // tanto) y display-data, que es donde viven los datos del cliente.
       await controller.refresh();
-      await controller.reloadContext();
+      final verdict = await controller.retryContext();
+      if (wasUnreachable && mounted) {
+        ref.read(eventLoggerProvider).log(
+          CheckoutEvents.contextRetry,
+          data: {'result': verdict.name},
+        );
+      }
     } finally {
       // El acuse se enciende SIEMPRE que la consulta terminó; si los datos ya
       // llegaron, el bloqueo entero desaparece y con él este texto.
@@ -113,6 +138,7 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
 
     final ctx = state.context;
     final check = customerCheck(
+      verdict: state.contextVerdict,
       customer: ctx?.customer,
       agreement: ctx?.agreement,
     );
@@ -123,8 +149,14 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
 
     final customerCard = _CustomerCard(
       check: check,
+      // Sin consulta tampoco se sabe si hubo pre-checkin: `precheckinDone`
+      // es otro campo de display-data y su default `false` diría "Pendiente"
+      // sobre un dato que nadie leyó.
       precheckinDone: ctx?.precheckinDone ?? false,
       precheckinAt: ctx?.precheckinAt,
+      // El cuerpo CRUDO de la negativa (DoD #5). Vacío o ausente ⇒ la tarjeta
+      // no inventa diagnóstico y se queda con su copy traducido.
+      serverMessage: check.unreachable ? _serverMessage(state) : null,
     );
 
     final cards = <Widget>[
@@ -180,24 +212,20 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
                   // nunca por inferencia sobre el catálogo (ADR-4).
                   toStep: CheckoutStep.tcPending,
                   label: l10n.coConfirmCta,
-                  // Tras una re-consulta que no trajo nada, el subtexto ES el
-                  // acuse: "consultado ahora, el servidor sigue sin X". Sigue
-                  // siendo non-null, así que el CTA sigue bloqueado con causa.
-                  blockedWhy: check.complete
-                      ? null
-                      : (_recheckedStill
-                          ? l10n.coConfirmRecheckedStill(
-                              _missingLabel(l10n, check))
-                          : l10n.coConfirmBlockedWhy(
-                              _missingLabel(l10n, check))),
+                  blockedWhy: _blockedWhy(l10n, check),
                   // Bloquear sin salida sería dejar al agente encerrado: la
                   // captura de datos del cliente NO vive en esta app (ADR-1,
                   // se queda en el mostrador web / pre-checkin), así que la
                   // salida honesta es volver a preguntarle al servidor.
-                  secondary: check.complete
+                  //
+                  // Mientras la consulta VIAJA no hay botón: reintentar algo
+                  // que ya está en vuelo es una puerta falsa. El why lo dice.
+                  secondary: check.complete || check.checking
                       ? null
                       : RideGhostButton(
-                          label: l10n.coConfirmRecheck,
+                          label: check.unreachable
+                              ? l10n.coConfirmRetryLookup
+                              : l10n.coConfirmRecheck,
                           loading: _rechecking,
                           loadingLabel: l10n.coConfirmRecheckPending,
                           onPressed: _recheck,
@@ -210,6 +238,37 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
 
   Future<void> _openSwapSheet(BuildContext context, WidgetRef ref) =>
       showVehicleSwapSheet(context, reservationId: widget.reservationId);
+
+  /// El cuerpo crudo de la negativa de display-data, o null si no hay ninguno
+  /// que citar (la petición murió sin respuesta, o el servidor mandó un cuerpo
+  /// vacío). Null ⇒ la tarjeta no escribe un renglón hueco.
+  String? _serverMessage(CheckoutWizardState state) {
+    final message = state.contextError?.message.trim() ?? '';
+    return message.isEmpty ? null : message;
+  }
+
+  /// La causa del bloqueo, y **de qué naturaleza es**.
+  ///
+  /// Las tres ramas son tres historias distintas y esa distinción es el
+  /// arreglo entero:
+  ///  - `checking`: nadie ha contestado todavía ⇒ no se afirma nada.
+  ///  - `unreachable`: la consulta no llegó ⇒ se bloquea porque sin ella no
+  ///    hay identidad que confirmar, NO porque falten datos. El texto no dice
+  ///    qué tiene el servidor porque no se sabe.
+  ///  - `answered`: el servidor contestó ⇒ y solo aquí se pueden nombrar los
+  ///    campos que faltan.
+  String? _blockedWhy(AppLocalizations l10n, ConfirmCustomerCheck check) =>
+      switch (check.verdict) {
+        ContextVerdict.checking => l10n.coConfirmCheckingWhy,
+        ContextVerdict.unreachable => _recheckedStill
+            ? l10n.coConfirmRetryStillUnreachable
+            : l10n.coConfirmUnreachableWhy,
+        ContextVerdict.answered => check.complete
+            ? null
+            : (_recheckedStill
+                ? l10n.coConfirmRecheckedStill(_missingLabel(l10n, check))
+                : l10n.coConfirmBlockedWhy(_missingLabel(l10n, check))),
+      };
 
   /// "licencia y teléfono" — lista legible, no una enumeración de campos de
   /// base de datos.
@@ -233,6 +292,7 @@ class _CustomerCard extends StatelessWidget {
     required this.check,
     required this.precheckinDone,
     required this.precheckinAt,
+    required this.serverMessage,
   });
 
   final ConfirmCustomerCheck check;
@@ -241,6 +301,10 @@ class _CustomerCard extends StatelessWidget {
   /// Cuándo se selló el pre-checkin. El controller ya leía este campo y solo
   /// guardaba el bool (review GD-MC-6).
   final DateTime? precheckinAt;
+
+  /// Negativa del servidor, sin tocar. Solo llega en el veredicto
+  /// `unreachable` y solo cuando hubo cuerpo que citar.
+  final String? serverMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -255,26 +319,59 @@ class _CustomerCard extends StatelessWidget {
                 check.license!,
                 DateFormat.yMMM(locale).format(expiry.toLocal()),
               ));
+
+    // Los tres estados de la tarjeta. `unreachable` toma el ámbar de 19A-bis
+    // —el escalón entre "todo bien" y "el servidor dijo que no"— porque eso es
+    // exactamente lo que hay: ignorancia, no un hecho negativo. Pintarla en
+    // rojo con "Faltan datos" era el bug: mismo color y misma palabra para una
+    // acusación que nadie puede sostener.
+    final (tone, pill) = switch (check.verdict) {
+      ContextVerdict.checking =>
+        (VerifyTone.neutral, l10n.coConfirmCheckingPill),
+      ContextVerdict.unreachable =>
+        (VerifyTone.warn, l10n.coConfirmUnknownPill),
+      ContextVerdict.answered => check.complete
+          ? (VerifyTone.ok, l10n.coConfirmVerified)
+          : (VerifyTone.bad, l10n.coConfirmMissingPill),
+    };
+
+    // Valor de una fila que NO tiene dato. Con respuesta del servidor se dice
+    // "Sin capturar" (un hecho suyo); sin ella, "No se pudo consultar" — que
+    // es lo único cierto.
+    String blank() => switch (check.verdict) {
+          ContextVerdict.checking => l10n.coConfirmCheckingValue,
+          ContextVerdict.unreachable => l10n.coConfirmUnknownValue,
+          ContextVerdict.answered => l10n.coConfirmMissingValue,
+        };
+    final answered = check.verdict == ContextVerdict.answered;
+
     return VerifyCard(
       title: l10n.coConfirmCustomer,
-      tone: check.complete ? VerifyTone.ok : VerifyTone.bad,
-      pillLabel:
-          check.complete ? l10n.coConfirmVerified : l10n.coConfirmMissingPill,
+      tone: tone,
+      pillLabel: pill,
       children: [
         KvRow(
           label: l10n.coConfirmName,
-          value: check.name ?? l10n.coConfirmMissingValue,
-          missing: check.name == null,
+          value: check.name ?? blank(),
+          // `missing` pinta en rojo "el servidor no lo tiene". Solo se puede
+          // afirmar cuando el servidor contestó.
+          missing: answered && check.name == null,
+          warn: check.unreachable,
+          busy: check.checking,
         ),
         KvRow(
           label: l10n.coConfirmLicense,
-          value: license ?? l10n.coConfirmMissingValue,
-          missing: license == null,
+          value: license ?? blank(),
+          missing: answered && license == null,
+          warn: check.unreachable,
+          busy: check.checking,
         ),
         KvRow(
           label: l10n.coConfirmPhone,
-          value: check.phone ?? l10n.coConfirmMissingValue,
-          missing: check.phone == null,
+          value: check.phone ?? blank(),
+          missing: answered && check.phone == null,
+          warn: check.unreachable,
+          busy: check.checking,
           tabular: check.phone != null,
         ),
         KvRow(
@@ -283,14 +380,30 @@ class _CustomerCard extends StatelessWidget {
           // listo" (review GD-MC-6): la clave ya nombró el campo, el valor solo
           // tiene que decir su estado — y la hora, que es el dato con el que el
           // agente decide si confía en esa captura.
-          value: !precheckinDone
-              ? l10n.coConfirmPrecheckinPending
-              : precheckinAt == null
-                  ? l10n.coConfirmPrecheckinDone
-                  : l10n.coConfirmPrecheckinDoneAt(
-                      DateFormat.Hm(locale).format(precheckinAt!.toLocal()),
-                    ),
+          //
+          // Sin consulta NO se dice "Pendiente": el sello del pre-checkin vive
+          // en el mismo payload que no llegó.
+          value: !answered
+              ? blank()
+              : !precheckinDone
+                  ? l10n.coConfirmPrecheckinPending
+                  : precheckinAt == null
+                      ? l10n.coConfirmPrecheckinDone
+                      : l10n.coConfirmPrecheckinDoneAt(
+                          DateFormat.Hm(locale).format(precheckinAt!.toLocal()),
+                        ),
+          warn: check.unreachable,
+          busy: check.checking,
         ),
+        // La negativa del servidor, literal. Va DENTRO de la tarjeta que no
+        // pudo llenarse: es la explicación de por qué está vacía, no un error
+        // suelto del paso.
+        if (serverMessage != null)
+          KvRow(
+            label: l10n.coConfirmUnknownPill,
+            value: l10n.coConfirmUnreachableServer(serverMessage!),
+            warn: true,
+          ),
       ],
     );
   }
@@ -318,6 +431,12 @@ class _VehicleCard extends StatelessWidget {
         .nonNulls
         .where((p) => p.isNotEmpty)
         .join(' · ');
+    // La unidad viene del MISMO display-data que el cliente: sin consulta,
+    // "Sin capturar" sería la misma acusación falsa un renglón más abajo.
+    final unreachable =
+        state.contextVerdict == ContextVerdict.unreachable && unit.isEmpty;
+    final checking =
+        state.contextVerdict == ContextVerdict.checking && unit.isEmpty;
     return VerifyCard(
       title: l10n.coConfirmVehicle,
       tone: conflict ? VerifyTone.bad : VerifyTone.neutral,
@@ -331,15 +450,21 @@ class _VehicleCard extends StatelessWidget {
       children: [
         KvRow(
           label: l10n.coConfirmUnit,
-          value: unit.isEmpty ? l10n.coConfirmMissingValue : unit,
-          missing: unit.isEmpty,
+          value: unit.isNotEmpty
+              ? unit
+              : unreachable
+                  ? l10n.coConfirmUnknownValue
+                  : checking
+                      ? l10n.coConfirmCheckingValue
+                      : l10n.coConfirmMissingValue,
+          missing: unit.isEmpty && !unreachable && !checking,
+          warn: unreachable,
+          busy: checking,
         ),
         if (odometer != null)
           KvRow(
             label: l10n.coConfirmOdometerLabel,
-            value: l10n.coOdometerValue(
-              NumberFormat.decimalPattern(locale).format(odometer),
-            ),
+            value: formatOdometer(l10n, locale, odometer),
             tabular: true,
           ),
         if (onSwap != null)

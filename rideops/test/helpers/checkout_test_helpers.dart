@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:clock/clock.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/checkout_api.dart';
 import 'package:rideops/core/api/dto/available_vehicle.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
@@ -22,6 +23,47 @@ import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/features/checkout/presentation/widgets/join_view.dart';
 
 import 'auth_test_helpers.dart';
+
+/// La negativa de `display-data` armada por el MISMO camino que en producción:
+/// una `DioException` con la respuesta del servidor pasada por
+/// `ApiError.fromDio`. Nada de construir el ApiError a mano — si el mapeo de
+/// status→kind cambiara, estas pruebas tienen que enterarse.
+///
+/// El cuerpo por defecto es el literal del backend
+/// (`reservations.routes.js:595`: `res.status(404).json({ error: 'Reservation
+/// not found' })`), que es lo que devolvió en la corrida e2e cuando el id de
+/// la reserva dev colisionaba con la ruta de `reservationNumber`.
+ApiError displayDataDenial({
+  int status = 404,
+  String serverError = 'Reservation not found',
+}) {
+  final request = RequestOptions(
+    path: '/api/reservations/$kReservationId/display-data',
+  );
+  return ApiError.fromDio(
+    DioException(
+      requestOptions: request,
+      response: Response<Map<String, dynamic>>(
+        requestOptions: request,
+        statusCode: status,
+        data: {'error': serverError},
+      ),
+      type: DioExceptionType.badResponse,
+    ),
+  );
+}
+
+/// La otra mitad: la petición que muere SIN respuesta. No hay cuerpo que citar
+/// y la pantalla tiene que decirlo con su copy, no con un hueco.
+ApiError displayDataNetworkDeath() => ApiError.fromDio(
+      DioException(
+        requestOptions: RequestOptions(
+          path: '/api/reservations/$kReservationId/display-data',
+        ),
+        type: DioExceptionType.connectionTimeout,
+        message: '',
+      ),
+    );
 
 /// Utilería compartida de los tests del wizard de checkout (M2-H1).
 
@@ -373,10 +415,21 @@ class FakeReservationsApi extends ReservationsApi {
   /// existe para hacer expresable.
   Completer<void>? displayGate;
 
+  /// La NEGATIVA que devuelve display-data, exactamente como la produce
+  /// `ReservationsApi` en producción (`ApiError.fromDio`). Se pone y se quita
+  /// en vivo: eso es lo que permite probar el reintento —consulta caída,
+  /// backend sano después— sin dos fakes.
+  ///
+  /// Distinto de [fail], que lanza un `StateError`: ese es el otro camino real
+  /// (un fallo de parseo, sin cuerpo del servidor que citar) y la pantalla
+  /// tiene que sobrevivirlo igual.
+  ApiError? failWith;
+
   @override
   Future<ReservationDisplayData> getDisplayData(String reservationId) async {
     displayDataCalls++;
     if (displayGate != null) await displayGate!.future;
+    if (failWith != null) throw failWith!;
     if (fail) throw StateError('display-data caído');
     final raw = readJsonFixture('reservation_display_data.json');
     return ReservationDisplayData.fromJson(

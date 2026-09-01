@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/l10n/odometer_format.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../application/inspection_controller.dart';
 import '../../application/inspection_state.dart';
@@ -132,24 +135,70 @@ class _InspectionMetricsBodyState extends State<InspectionMetricsBody> {
   late final TextEditingController _odometer;
   late final TextEditingController _notes;
 
+  /// El foco del odómetro y el ancla de su bloque. Los dos existen por el
+  /// mismo hallazgo e2e: con el teclado numérico abierto, el viewport del
+  /// paso se encoge hasta el pie del wizard y la fila de LIMPIEZA —que está
+  /// debajo del combustible— queda recortada contra el dock. El agente tenía
+  /// que cerrar el teclado con el BACK físico para volver a verla.
+  final _odometerFocus = FocusNode();
+  final _odometerAnchor = GlobalKey();
+
   @override
   void initState() {
     super.initState();
     _odometer =
         TextEditingController(text: widget.state.odometer?.toString() ?? '');
     _notes = TextEditingController(text: widget.state.notes);
+    _odometerFocus.addListener(_onOdometerFocus);
   }
 
   @override
   void dispose() {
+    _odometerFocus.removeListener(_onOdometerFocus);
+    _odometerFocus.dispose();
     _odometer.dispose();
     _notes.dispose();
     super.dispose();
   }
 
+  /// Al enfocar el odómetro, su bloque sube al TOPE del viewport.
+  ///
+  /// El auto-scroll que trae `EditableText` solo garantiza que se vea el
+  /// CURSOR: si el campo ya estaba visible no mueve nada, y todo lo que va
+  /// debajo (combustible, limpieza, notas) se queda fuera. Alineando el
+  /// bloque arriba, el espacio que el teclado deja libre se gasta entero en
+  /// los controles que siguen, que es lo que el agente necesita tocar a
+  /// continuación.
+  ///
+  /// Se agenda tras el frame porque el inset del teclado todavía no llegó
+  /// cuando el foco cambia: pedir `ensureVisible` con la altura vieja
+  /// dejaría el scroll donde no sirve.
+  void _onOdometerFocus() {
+    if (!_odometerFocus.hasFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _odometerAnchor.currentContext;
+      if (!mounted || context == null) return;
+      unawaited(
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        ),
+      );
+    });
+  }
+
+  /// Cierra el teclado. Lo llaman la tecla de acción del IME y el toque
+  /// fuera del campo: en Android el `onTapOutside` por defecto NO desenfoca
+  /// (solo lo hace en escritorio/web), así que sin esto un toque en el
+  /// selector de limpieza seleccionaba el número y dejaba el teclado puesto.
+  void _dismissKeyboard() => _odometerFocus.unfocus();
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final locale = Localizations.localeOf(context).toString();
     final state = widget.state;
     final controller = widget.controller;
     final prev = state.previousOdometer;
@@ -161,26 +210,39 @@ class _InspectionMetricsBodyState extends State<InspectionMetricsBody> {
       mainAxisSize: MainAxisSize.min,
       children: [
         ...widget.leading,
-        _FieldLabel(l10n.metricsOdometer),
+        _FieldLabel(key: _odometerAnchor, l10n.metricsOdometer),
         TextField(
           controller: _odometer,
+          focusNode: _odometerFocus,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          // El odómetro es el ÚNICO campo numérico del paso y no hay ninguno
+          // después: la acción del IME es "listo", no "siguiente". Explícita y
+          // no heredada del default de Flutter, porque de este renglón depende
+          // que el teclado tenga una salida propia.
+          textInputAction: TextInputAction.done,
+          onEditingComplete: _dismissKeyboard,
+          onTapOutside: (_) => _dismissKeyboard(),
           style: const TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w800,
             color: RideTokens.n900,
             fontFeatures: [FontFeature.tabularFigures()],
           ),
-          decoration: _inputDecoration(suffixText: l10n.metricsOdometerUnit),
+          // La unidad sale del catálogo compartido: este sufijo y el "9,800 mi"
+          // del paso 1 ya no pueden discrepar (hallazgo e2e).
+          decoration: _inputDecoration(suffixText: l10n.odometerUnit),
           onChanged: (v) => controller.setOdometer(int.tryParse(v)),
         ),
         if (prev != null) ...[
           const SizedBox(height: 6),
           Text(
             // Fuente: endpoint autenticado (display-data → Vehicle.mileage)
-            // — nota 7 del mockup: el token de inspección NO trae esto.
-            l10n.metricsPrevReading('$prev'),
+            // — nota 7 del mockup: el token de inspección NO trae esto. Se
+            // formatea con el MISMO helper que el paso 1: antes esta línea
+            // interpolaba el entero crudo ("9800 mi") mientras la tarjeta de
+            // confirmación decía "9.800 km".
+            l10n.metricsPrevReading(formatOdometer(l10n, locale, prev)),
             style: const TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
@@ -412,7 +474,7 @@ class InspectionWarnBanner extends StatelessWidget {
 }
 
 class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.text);
+  const _FieldLabel(this.text, {super.key});
 
   final String text;
 

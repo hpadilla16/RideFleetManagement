@@ -151,7 +151,9 @@ void main() {
     expect(find.text('+52 998 123 4567'), findsOneWidget);
     // El estado del vehículo se afirma solo porque el servidor dice AVAILABLE.
     expect(find.text('Available'), findsOneWidget);
-    expect(find.textContaining('48,190 km'), findsOneWidget);
+    // Millas, no kilómetros: es lo que factura el backend (computeExcessMileage
+    // cobra por milla) y lo que rotula el mostrador web.
+    expect(find.textContaining('48,190 mi'), findsOneWidget);
     // El switch dice su estado EN PALABRAS, no solo con color.
     await scrollBody(tester, find.text('Customer declines insurance'));
     expect(find.text('Customer declines insurance'), findsOneWidget);
@@ -913,8 +915,186 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('el paso se dibuja aunque display-data no responda: sin contexto '
-      'no se inventan datos, se nombran como faltantes', (tester) async {
+  // ── el dato inalcanzable NO es un dato faltante (hallazgo e2e, MAJOR) ──
+  //
+  // La corrida contra backend real pegó aquí: display-data devolvía 404 (el id
+  // de la reserva dev colisionaba con la ruta de `reservationNumber`, arreglado
+  // en 5ff8422e) y esta pantalla decía «Consultado ahora: el servidor sigue sin
+  // el nombre, la licencia y el teléfono» — con el servidor teniendo los tres —
+  // y bloqueaba la entrega. Cada aserción de aquí abajo cita el TEXTO, porque
+  // el defecto era exactamente el texto.
+
+  testWidgets('display-data 404: la pantalla NO acusa al servidor de no tener '
+      'los datos — dice que no pudo consultar, cita la negativa cruda y ofrece '
+      'reintentar', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    // LO QUE NO PUEDE APARECER. Los tres textos son afirmaciones sobre lo que
+    // el servidor tiene, y aquí no se sabe nada de eso.
+    expect(
+      find.textContaining("the server still doesn't have"),
+      findsNothing,
+      reason: 'la petición falló: el servidor no dijo que le faltara nada',
+    );
+    expect(
+      find.textContaining('are missing'),
+      findsNothing,
+      reason: 'ese copy nombra campos faltantes; no hay respuesta que nombrar',
+    );
+    expect(find.text('Not captured'), findsNothing);
+    expect(find.text('Missing data'), findsNothing);
+
+    // LO QUE SÍ. Un veredicto de ignorancia, en palabras, no solo en color.
+    expect(find.text('Not checked'), findsWidgets);
+    expect(find.text('Could not be checked'), findsWidgets);
+    expect(
+      find.textContaining('identity cannot be confirmed'),
+      findsOneWidget,
+      reason: 'el bloqueo cambia de naturaleza: no falta un dato, falta la '
+          'consulta',
+    );
+    // La negativa del servidor, literal (DoD #5) — sin diagnóstico inventado.
+    expect(
+      find.textContaining('The server replied: Reservation not found'),
+      findsOneWidget,
+    );
+    // Y una acción que PUEDE tener éxito, no una puerta falsa.
+    expect(find.text('Retry the lookup'), findsOneWidget);
+    expect(
+      find.text('Refresh customer data'),
+      findsNothing,
+      reason: 'ese botón promete refrescar DATOS; aquí se reintenta la consulta',
+    );
+
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
+    );
+    expect(cta.onPressed, isNull, reason: 'sin consulta no se confirma nada');
+
+    // Telemetría del defecto: cuántas entregas se quedan sin poder confirmarse
+    // por una consulta caída (y con qué status), no por datos faltantes.
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_unreachable')
+          .map((e) => e.$2['status']),
+      contains('404'),
+    );
+  });
+
+  testWidgets('el reintento con el backend ya sano deja la pantalla NORMAL: '
+      'datos reales, verde y CTA vivo', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+    expect(find.text('Retry the lookup'), findsOneWidget);
+
+    // El backend vuelve en sí entre un toque y el siguiente.
+    f.reservations.failWith = null;
+    await tester.tap(find.text('Retry the lookup'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('María González'), findsOneWidget);
+    expect(find.textContaining('B-4482913'), findsOneWidget);
+    expect(find.text('+52 998 123 4567'), findsOneWidget);
+    expect(find.text('Verified'), findsOneWidget);
+    expect(find.text('Could not be checked'), findsNothing);
+    expect(find.text('Retry the lookup'), findsNothing);
+    expect(
+      find.textContaining('The server replied'),
+      findsNothing,
+      reason: 'la negativa vieja no puede sobrevivir a una consulta buena',
+    );
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
+    );
+    expect(cta.onPressed, isNotNull);
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_retry')
+          .map((e) => e.$2['result']),
+      ['answered'],
+    );
+  });
+
+  testWidgets('el reintento que vuelve a fallar acusa la CONSULTA, jamás los '
+      'datos', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial(
+      status: 500,
+      serverError: 'Internal Server Error',
+    );
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    await tester.tap(find.text('Retry the lookup'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining("still isn't getting through"),
+      findsOneWidget,
+      reason: 'el acuse habla del intento; el de campos faltantes sería falso',
+    );
+    expect(find.textContaining("the server still doesn't have"), findsNothing);
+    // El botón sigue vivo: reintentar OTRA vez es legítimo — la consulta puede
+    // funcionar en el siguiente toque, a diferencia de un FORWARD ya negado.
+    expect(find.text('Retry the lookup'), findsOneWidget);
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_retry')
+          .map((e) => e.$2['result']),
+      ['unreachable'],
+    );
+  });
+
+  testWidgets('la petición que muere SIN respuesta no inventa un cuerpo: mismo '
+      'veredicto, sin renglón de cita', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataNetworkDeath();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    expect(find.text('Could not be checked'), findsWidgets);
+    expect(find.textContaining('identity cannot be confirmed'), findsOneWidget);
+    expect(
+      find.textContaining('The server replied'),
+      findsNothing,
+      reason: 'no hubo respuesta: citar una sería inventarla',
+    );
+    expect(find.text('Retry the lookup'), findsOneWidget);
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_unreachable')
+          .map((e) => e.$2['status']),
+      contains('network'),
+    );
+  });
+
+  testWidgets('un fallo SIN ApiError (parseo) cae en el mismo veredicto y '
+      'tampoco acusa', (tester) async {
     final f = fakes();
     await pumpConfirming(
       tester,
@@ -925,10 +1105,42 @@ void main() {
     );
 
     expect(find.byType(VerifyCard), findsWidgets);
-    expect(find.text('Not captured'), findsWidgets);
+    expect(find.text('Could not be checked'), findsWidgets);
+    expect(find.text('Not captured'), findsNothing);
     final cta = tester.widget<RidePrimaryButton>(
       find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
     );
     expect(cta.onPressed, isNull, reason: 'sin datos no se afirma verificado');
+  });
+
+  testWidgets('9B sigue intacto: cuando el servidor SÍ contesta y el campo '
+      'viene vacío, ahí sí se nombra', (tester) async {
+    final f = fakes();
+    f.reservations.patchDisplayData = (raw) {
+      final reservation = raw['reservation'] as Map<String, dynamic>;
+      (reservation['customer'] as Map<String, dynamic>)['phone'] = null;
+      (reservation['rentalAgreement'] as Map<String, dynamic>)['customerPhone'] =
+          null;
+      return raw;
+    };
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    expect(find.text('Not captured'), findsOneWidget);
+    expect(find.text('Missing data'), findsOneWidget);
+    expect(find.textContaining('the phone'), findsOneWidget);
+    expect(find.text('Could not be checked'), findsNothing);
+    expect(find.text('Retry the lookup'), findsNothing);
+    expect(find.text('Refresh customer data'), findsOneWidget);
+    expect(
+      f.logger.has('checkout.context_unreachable'),
+      isFalse,
+      reason: 'la consulta llegó perfectamente: no hay nada que reportar',
+    );
   });
 }

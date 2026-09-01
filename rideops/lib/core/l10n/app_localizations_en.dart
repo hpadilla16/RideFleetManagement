@@ -725,11 +725,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get metricsOdometer => 'Odometer';
 
   @override
-  String get metricsOdometerUnit => 'mi';
+  String get odometerUnit => 'mi';
 
   @override
-  String metricsPrevReading(String value) {
-    return 'Last recorded reading: $value mi';
+  String odometerValue(String value, String unit) {
+    return '$value $unit';
+  }
+
+  @override
+  String metricsPrevReading(String reading) {
+    return 'Last recorded reading: $reading';
   }
 
   @override
@@ -1586,11 +1591,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coConfirmOdometerLabel => 'Odometer';
 
   @override
-  String coOdometerValue(String km) {
-    return '$km km';
-  }
-
-  @override
   String get coConfirmVehicleAvailable => 'Available';
 
   @override
@@ -1626,6 +1626,37 @@ class AppLocalizationsEn extends AppLocalizations {
   String coConfirmRecheckedStill(String fields) {
     return 'Checked just now: the server still doesn\'t have $fields.';
   }
+
+  @override
+  String get coConfirmCheckingPill => 'Checking';
+
+  @override
+  String get coConfirmCheckingValue => 'Checking…';
+
+  @override
+  String get coConfirmCheckingWhy => 'Checking the customer\'s record…';
+
+  @override
+  String get coConfirmUnknownPill => 'Not checked';
+
+  @override
+  String get coConfirmUnknownValue => 'Could not be checked';
+
+  @override
+  String get coConfirmUnreachableWhy =>
+      'The customer\'s record could not be checked, so their identity cannot be confirmed. This says nothing about what data the server has.';
+
+  @override
+  String coConfirmUnreachableServer(String message) {
+    return 'The server replied: $message';
+  }
+
+  @override
+  String get coConfirmRetryLookup => 'Retry the lookup';
+
+  @override
+  String get coConfirmRetryStillUnreachable =>
+      'Retried just now: the lookup still isn\'t getting through.';
 
   @override
   String get coDeclineTitle => 'Customer declines insurance';

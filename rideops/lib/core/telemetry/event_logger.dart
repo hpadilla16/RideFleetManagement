@@ -152,6 +152,26 @@ abstract final class CheckoutEvents {
 
   // ── M2-H2 (CONFIRMING + T&C) ──────────────────────────────────────────────
 
+  /// `GET /reservations/:id/display-data` NO respondió. Tags:
+  ///  - `status`: el código del servidor cuando hubo respuesta, `network`
+  ///    cuando murió sin ella, `none` cuando ni siquiera fue un ApiError.
+  ///  - `stale` (bool): ya había una respuesta previa en pantalla. Con `true`
+  ///    el agente sigue trabajando sobre datos buenos (regla 8D); con `false`
+  ///    el paso 1 se queda SIN poder verificar identidad. Son dos incidentes
+  ///    de gravedad distinta y no se pueden sumar.
+  ///
+  /// Es la señal del defecto que lo hizo nacer: sin esta consulta el paso 1 no
+  /// puede verificar identidad, y hasta el hallazgo e2e lo convertía en una
+  /// acusación al servidor. Su frecuencia mide cuántas entregas se quedan sin
+  /// poder confirmarse por una consulta caída, no por datos faltantes.
+  static const contextUnreachable = 'checkout.context_unreachable';
+
+  /// "Reintentar la consulta" (paso 1, dato inalcanzable): el agente volvió a
+  /// pedir display-data a mano. Tag `result`: `answered` | `unreachable`.
+  /// Hermano de `checkout.handover_recheck` — misma forma, misma regla (una
+  /// CONSULTA, nunca una escritura a ciegas).
+  static const contextRetry = 'checkout.context_retry';
+
   /// `POST /:id/declined-insurance` aceptado. Tag `declined` (bool).
   static const declinedInsuranceSet = 'checkout.declined_insurance_set';
 

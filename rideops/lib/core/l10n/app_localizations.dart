@@ -1226,17 +1226,23 @@ abstract class AppLocalizations {
   /// **'Odómetro'**
   String get metricsOdometer;
 
-  /// No description provided for @metricsOdometerUnit.
+  /// LA unidad del odómetro, escrita UNA sola vez en todo el catálogo. El paso 1 decía 'km' y el paso de métricas 'mi' para el MISMO número (hallazgo e2e). La verdad es millas y sale del backend: Vehicle.targetFleetMiles, includedMilesPerDay y computeExcessMileage() facturan por milla (fee-engine.service.js:163-176), y el mostrador web ya rotula 'mi'. No hay ninguna configuración de unidad por tenant — se buscó y no existe.
   ///
   /// In es, this message translates to:
   /// **'mi'**
-  String get metricsOdometerUnit;
+  String get odometerUnit;
 
-  /// No description provided for @metricsPrevReading.
+  /// Número ya formateado + la unidad. La unidad se INYECTA desde odometerUnit para que ninguna traducción pueda volver a inventar una distinta.
   ///
   /// In es, this message translates to:
-  /// **'Última lectura registrada: {value} mi'**
-  String metricsPrevReading(String value);
+  /// **'{value} {unit}'**
+  String odometerValue(String value, String unit);
+
+  /// {reading} llega ya compuesto por odometerValue — mismo separador de miles y misma unidad que el paso 1.
+  ///
+  /// In es, this message translates to:
+  /// **'Última lectura registrada: {reading}'**
+  String metricsPrevReading(String reading);
 
   /// No description provided for @metricsOdometerLower.
   ///
@@ -2588,12 +2594,6 @@ abstract class AppLocalizations {
   /// **'Odómetro'**
   String get coConfirmOdometerLabel;
 
-  /// No description provided for @coOdometerValue.
-  ///
-  /// In es, this message translates to:
-  /// **'{km} km'**
-  String coOdometerValue(String km);
-
   /// No description provided for @coConfirmVehicleAvailable.
   ///
   /// In es, this message translates to:
@@ -2654,11 +2654,65 @@ abstract class AppLocalizations {
   /// **'Consultando al servidor…'**
   String get coConfirmRecheckPending;
 
-  /// Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo.
+  /// Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo. SOLO se usa cuando display-data RESPONDIÓ: afirmar esto sobre una consulta caída era la acusación falsa que encontró la corrida e2e.
   ///
   /// In es, this message translates to:
   /// **'Consultado ahora: el servidor sigue sin {fields}.'**
   String coConfirmRecheckedStill(String fields);
+
+  /// No description provided for @coConfirmCheckingPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultando'**
+  String get coConfirmCheckingPill;
+
+  /// No description provided for @coConfirmCheckingValue.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultando…'**
+  String get coConfirmCheckingValue;
+
+  /// Bloqueo mientras la consulta VIAJA. No afirma nada del servidor: todavía no ha contestado.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultando la ficha del cliente…'**
+  String get coConfirmCheckingWhy;
+
+  /// No description provided for @coConfirmUnknownPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin consultar'**
+  String get coConfirmUnknownPill;
+
+  /// Valor de cada fila cuando display-data no respondió. NO es 'Sin capturar': ese texto afirma que el servidor no tiene el dato, y aquí no se sabe.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo consultar'**
+  String get coConfirmUnknownValue;
+
+  /// Hallazgo e2e (MAJOR): el bloqueo cambia de naturaleza. No se bloquea por 'faltan datos' —que sería una acusación al servidor— sino porque sin consulta no hay identidad que confirmar.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad. Esto no dice nada sobre qué datos tenga el servidor.'**
+  String get coConfirmUnreachableWhy;
+
+  /// Negativa CRUDA del servidor (DoD #5), sin diagnóstico inventado. Se omite cuando la petición murió sin cuerpo.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor respondió: {message}'**
+  String coConfirmUnreachableServer(String message);
+
+  /// Acción que SÍ puede tener éxito (nada de puertas falsas): repite el GET de display-data. Distinta de 'Actualizar datos del cliente', que se ofrece cuando el servidor sí contestó y faltan campos.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintentar la consulta'**
+  String get coConfirmRetryLookup;
+
+  /// Acuse del reintento fallido. Habla de la CONSULTA, jamás de los datos.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintentado ahora: la consulta sigue sin llegar.'**
+  String get coConfirmRetryStillUnreachable;
 
   /// No description provided for @coDeclineTitle.
   ///

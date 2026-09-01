@@ -5,6 +5,7 @@ import '../../../core/api/dto/checkout_session.dart';
 import '../../../core/api/dto/reservation_display.dart';
 import '../../../core/api/enums.dart';
 import '../domain/checkout_changes.dart';
+import '../domain/checkout_confirm.dart';
 import '../domain/checkout_event_log.dart';
 import '../domain/checkout_step_catalog.dart';
 
@@ -286,6 +287,8 @@ class CheckoutWizardState {
     this.advance,
     this.conflict,
     this.context,
+    this.contextVerdict = ContextVerdict.checking,
+    this.contextError,
     this.pending = false,
     this.baseline,
     this.joinAcknowledged = false,
@@ -338,6 +341,23 @@ class CheckoutWizardState {
   final ForeignAdvanceNotice? advance;
   final CheckoutConflict? conflict;
   final CheckoutReservationContext? context;
+
+  /// Qué pasó con la ÚLTIMA consulta a `display-data`.
+  ///
+  /// **`context == null` ya no significa "el servidor no tiene los datos"**.
+  /// Antes sí lo parecía —`_loadContext` devolvía null tanto cuando la reserva
+  /// venía vacía como cuando la petición se caía— y el paso CONFIRMING
+  /// convertía ese null en "faltan el nombre, la licencia y el teléfono",
+  /// bloqueaba la entrega y se lo decía al agente como un hecho del servidor.
+  /// El veredicto de tres valores es lo que separa las dos historias, igual
+  /// que `HandoverVerdict` las separa en el cierre (M2-H5).
+  final ContextVerdict contextVerdict;
+
+  /// La negativa CRUDA de la última consulta fallida, para poder citarla sin
+  /// inventar diagnóstico (DoD #5). Null cuando la consulta fue bien o cuando
+  /// murió sin cuerpo (red): ahí la pantalla pone su copy traducido.
+  final ApiError? contextError;
+
   final bool pending;
 
   /// PRIMERA lectura de esta visita, congelada. Es el "desde que entraste" del
@@ -450,6 +470,9 @@ class CheckoutWizardState {
     CheckoutConflict? conflict,
     bool clearConflict = false,
     CheckoutReservationContext? context,
+    ContextVerdict? contextVerdict,
+    ApiError? contextError,
+    bool clearContextError = false,
     bool? pending,
     CheckoutSessionDto? baseline,
     bool? joinAcknowledged,
@@ -468,6 +491,9 @@ class CheckoutWizardState {
       advance: clearAdvance ? null : (advance ?? this.advance),
       conflict: clearConflict ? null : (conflict ?? this.conflict),
       context: context ?? this.context,
+      contextVerdict: contextVerdict ?? this.contextVerdict,
+      contextError:
+          clearContextError ? null : (contextError ?? this.contextError),
       // Se REENVÍA: sin esto, cualquier copyWith sobre un estado `.pending()`
       // lo apagaba en silencio (hoy lo enmascaran las otras condiciones de
       // [firstLoad], pero es una trampa puesta para H2-H7).

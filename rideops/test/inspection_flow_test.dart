@@ -189,8 +189,11 @@ void main() {
     await tester.tap(find.text('Continue to metrics'));
     await tester.pumpAndSettle();
     expect(find.text('Vehicle metrics'), findsOneWidget);
-    // Última lectura desde display-data (Vehicle.mileage del fixture).
-    expect(find.text('Last recorded reading: 48190 mi'), findsOneWidget);
+    // Última lectura desde display-data (Vehicle.mileage del fixture), con el
+    // MISMO formato y la MISMA unidad que la tarjeta del paso 1: antes esta
+    // línea decía "48190 mi" mientras confirmación decía "48,190 km" para el
+    // mismo entero (hallazgo e2e, menor 1).
+    expect(find.text('Last recorded reading: 48,190 mi'), findsOneWidget);
 
     // Las filas encoladas llevan la sede activa SELLADA (criterio H5).
     final rows = await db.allFor(userId: kFixtureUserId, tenantId: tenantId);

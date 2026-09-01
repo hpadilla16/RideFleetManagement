@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../core/api/api_error.dart';
 import '../../../../core/api/api_providers.dart';
 import '../../../../core/api/dto/available_vehicle.dart';
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/l10n/odometer_format.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../../../core/widgets/ride_buttons.dart';
 import '../../application/checkout_wizard_controller.dart';
@@ -349,9 +349,7 @@ class _Option extends StatelessWidget {
             ? l10n.coSwapSameGroup
             : l10n.coSwapOtherGroup,
       if (vehicle.mileage != null)
-        l10n.coOdometerValue(
-          NumberFormat.decimalPattern(locale).format(vehicle.mileage),
-        ),
+        formatOdometer(l10n, locale, vehicle.mileage!),
       if (vehicle.homeLocation?.name != null) vehicle.homeLocation!.name!,
       if (!vehicle.isAvailableNow && (vehicle.status ?? '').isNotEmpty)
         vehicle.status!,

@@ -729,11 +729,16 @@ class AppLocalizationsEs extends AppLocalizations {
   String get metricsOdometer => 'Odómetro';
 
   @override
-  String get metricsOdometerUnit => 'mi';
+  String get odometerUnit => 'mi';
 
   @override
-  String metricsPrevReading(String value) {
-    return 'Última lectura registrada: $value mi';
+  String odometerValue(String value, String unit) {
+    return '$value $unit';
+  }
+
+  @override
+  String metricsPrevReading(String reading) {
+    return 'Última lectura registrada: $reading';
   }
 
   @override
@@ -1589,11 +1594,6 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coConfirmOdometerLabel => 'Odómetro';
 
   @override
-  String coOdometerValue(String km) {
-    return '$km km';
-  }
-
-  @override
   String get coConfirmVehicleAvailable => 'Disponible';
 
   @override
@@ -1629,6 +1629,37 @@ class AppLocalizationsEs extends AppLocalizations {
   String coConfirmRecheckedStill(String fields) {
     return 'Consultado ahora: el servidor sigue sin $fields.';
   }
+
+  @override
+  String get coConfirmCheckingPill => 'Consultando';
+
+  @override
+  String get coConfirmCheckingValue => 'Consultando…';
+
+  @override
+  String get coConfirmCheckingWhy => 'Consultando la ficha del cliente…';
+
+  @override
+  String get coConfirmUnknownPill => 'Sin consultar';
+
+  @override
+  String get coConfirmUnknownValue => 'No se pudo consultar';
+
+  @override
+  String get coConfirmUnreachableWhy =>
+      'No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad. Esto no dice nada sobre qué datos tenga el servidor.';
+
+  @override
+  String coConfirmUnreachableServer(String message) {
+    return 'El servidor respondió: $message';
+  }
+
+  @override
+  String get coConfirmRetryLookup => 'Reintentar la consulta';
+
+  @override
+  String get coConfirmRetryStillUnreachable =>
+      'Reintentado ahora: la consulta sigue sin llegar.';
 
   @override
   String get coDeclineTitle => 'El cliente declina el seguro';

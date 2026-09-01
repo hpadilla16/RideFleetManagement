@@ -88,9 +88,39 @@ bool insuranceEditable(CheckoutSessionDto session) =>
 /// la licencia física. NO se inventan requisitos que el servidor no tiene.
 enum ConfirmMissingField { customerName, license, phone }
 
+/// **Qué sabemos de `display-data`**, la ÚNICA consulta que trae los datos del
+/// cliente al paso CONFIRMING.
+///
+/// Existe por el mismo motivo que `HandoverVerdict` en el cierre (M2-H5/H6):
+/// sin un tercer valor, "no pude preguntar" y "pregunté y no está" colapsan en
+/// el mismo null, y la pantalla acaba ACUSANDO al servidor de no tener el
+/// nombre, la licencia y el teléfono cuando lo que falló fue la petición. Esa
+/// acusación además bloqueaba la entrega, así que el defecto costaba una
+/// salida del patio, no un renglón.
+///
+/// La regla que impone el tipo: **`missing` solo significa algo en
+/// [answered]**. En los otros dos veredictos la lista viene vacía y la
+/// pantalla no puede escribir nada sobre lo que el servidor tiene o deja de
+/// tener.
+enum ContextVerdict {
+  /// La consulta está EN VUELO (o todavía no ha vuelto la primera de esta
+  /// visita). No se afirma nada: ni que falta, ni que está.
+  checking,
+
+  /// `display-data` RESPONDIÓ. Lo que diga [ConfirmCustomerCheck.missing] es
+  /// un hecho del servidor y se puede nombrar.
+  answered,
+
+  /// `display-data` NO respondió (404, 5xx, red, 403 de sede…). **No es
+  /// "faltan datos"**: es "no lo sé", y la pantalla lo dice así — con el
+  /// mensaje crudo del servidor si lo hubo, y con una consulta que reintentar.
+  unreachable,
+}
+
 /// Verificación del cliente lista para pintar (9A/9B).
 class ConfirmCustomerCheck {
   const ConfirmCustomerCheck({
+    required this.verdict,
     required this.name,
     required this.license,
     required this.licenseExpiry,
@@ -98,15 +128,31 @@ class ConfirmCustomerCheck {
     required this.missing,
   });
 
+  /// Qué sabemos de la consulta que produjo (o no) estos campos.
+  final ContextVerdict verdict;
+
   final String? name;
   final String? license;
   final DateTime? licenseExpiry;
   final String? phone;
 
   /// En orden de lectura de la tarjeta (nombre → licencia → teléfono).
+  /// **Siempre vacía fuera de [ContextVerdict.answered]**.
   final List<ConfirmMissingField> missing;
 
-  bool get complete => missing.isEmpty;
+  /// El servidor respondió Y tiene los tres datos. Es la única combinación que
+  /// deja avanzar: `missing.isEmpty` por sí solo también es cierto cuando no
+  /// hubo respuesta, y ahí no hay nada verificado.
+  bool get complete =>
+      verdict == ContextVerdict.answered && missing.isEmpty;
+
+  /// La consulta no llegó. La pantalla cambia de NATURALEZA aquí: no bloquea
+  /// por "faltan datos" sino por "sin consulta no se puede confirmar la
+  /// identidad".
+  bool get unreachable => verdict == ContextVerdict.unreachable;
+
+  /// Hay una consulta viva y todavía no hay veredicto.
+  bool get checking => verdict == ContextVerdict.checking;
 }
 
 String? _clean(String? value) {
@@ -119,15 +165,33 @@ String? _clean(String? value) {
 /// El snapshot GANA cuando existe: es lo que se imprime y lo que se firma. La
 /// ficha del cliente es el respaldo (una reserva puede llegar al wizard antes
 /// de que el contrato copie los datos del pre-checkin).
+///
+/// [verdict] manda sobre todo lo demás: fuera de [ContextVerdict.answered] los
+/// campos se devuelven en null y `missing` VACÍA. Que vengan null sin
+/// respuesta no es un descuido — es que no hay nada que decir, y una lista de
+/// faltantes construida sobre una consulta que nunca volvió es exactamente la
+/// acusación falsa que este parámetro existe para impedir.
 ConfirmCustomerCheck customerCheck({
+  required ContextVerdict verdict,
   DisplayCustomer? customer,
   DisplayAgreement? agreement,
 }) {
+  if (verdict != ContextVerdict.answered) {
+    return ConfirmCustomerCheck(
+      verdict: verdict,
+      name: null,
+      license: null,
+      licenseExpiry: null,
+      phone: null,
+      missing: const [],
+    );
+  }
   final name = _clean(customer?.fullName);
   final license =
       _clean(agreement?.licenseNumber) ?? _clean(customer?.licenseNumber);
   final phone = _clean(agreement?.customerPhone) ?? _clean(customer?.phone);
   return ConfirmCustomerCheck(
+    verdict: verdict,
     name: name,
     license: license,
     licenseExpiry: agreement?.licenseExpiry,

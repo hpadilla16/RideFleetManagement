@@ -17,6 +17,7 @@ import '../../../core/session/session_controller.dart';
 import '../../../core/telemetry/event_logger.dart';
 import '../domain/checkout_attribution.dart';
 import '../domain/checkout_changes.dart';
+import '../domain/checkout_confirm.dart';
 import '../domain/checkout_entry.dart';
 import '../domain/checkout_event_log.dart';
 import '../domain/checkout_step_catalog.dart';
@@ -367,15 +368,45 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         ?.handoverRecorded;
   }
 
+  /// Vuelve a preguntarle a `display-data`, y NADA MÁS.
+  ///
+  /// Es la salida del paso CONFIRMING cuando la consulta no llegó: una acción
+  /// que de verdad puede tener éxito (misma regla de puertas falsas que 19A-bis
+  /// — "Volver a comprobar" es una consulta, jamás un reintento del cierre).
+  /// Devuelve el veredicto que quedó, para que la pantalla lo cuente.
+  Future<ContextVerdict> retryContext() async {
+    await _loadContext(_generation);
+    return state.contextVerdict;
+  }
+
   /// Contexto de la reserva para el header de sesión y las tarjetas de
-  /// verificación (9A/9B) — best-effort, no bloquea el wizard.
+  /// verificación (9A/9B).
+  ///
+  /// **Ya NO es "best-effort silencioso".** Lo era —`catch (_) { return
+  /// null; }` con el comentario "el header muestra menos, nada más"— y ese
+  /// comentario era falso: display-data es la única fuente del nombre, la
+  /// licencia y el teléfono que el paso 1 confronta con la licencia física.
+  /// Con la consulta caída, el null bajaba a `customerCheck`, se contaba como
+  /// datos FALTANTES, bloqueaba "Continuar a T&C" y le decía al agente que "el
+  /// servidor sigue sin el nombre, la licencia y el teléfono" — con el
+  /// servidor teniendo los tres. El fallo se anota en el estado (veredicto +
+  /// negativa cruda) y la pantalla decide qué contar.
   Future<ReservationDisplayData?> _loadContext(int gen) async {
+    // Solo se declara "consultando" cuando NO hay nada en la mano. Con una
+    // respuesta previa guardada manda la regla 8D del wizard: el dato viejo se
+    // queda: parpadear a "Consultando…" en cada re-lectura (la del swap, por
+    // ejemplo) vaciaría la tarjeta que el agente está leyendo en voz alta.
+    if (gen == _generation && ref.mounted && state.context == null) {
+      state = state.copyWith(contextVerdict: ContextVerdict.checking);
+    }
     try {
       final display =
           await ref.read(reservationsApiProvider).getDisplayData(reservationId);
       if (gen != _generation || !ref.mounted) return null;
       final reservation = display.reservation;
       state = state.copyWith(
+        contextVerdict: ContextVerdict.answered,
+        clearContextError: true,
         context: CheckoutReservationContext(
           reservationNumber: reservation.reservationNumber,
           customerName: reservation.customer?.fullName,
@@ -402,8 +433,35 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         ),
       );
       return display;
-    } catch (_) {
-      // Sin display-data el wizard sigue: el header muestra menos, nada más.
+    } catch (e) {
+      if (gen != _generation || !ref.mounted) return null;
+      final error = e is ApiError ? e : null;
+      // **El dato viejo NO se borra ni se degrada** (regla 8D del wizard). Si
+      // una lectura anterior SÍ respondió, esa respuesta sigue siendo lo que
+      // el servidor dijo y la tarjeta la sigue mostrando; la edad de la
+      // lectura ya la cuenta el shell. `unreachable` es para el caso que
+      // rompió en el patio: NUNCA hubo respuesta, y ahí no se sabe nada.
+      final stale = state.context != null;
+      state = stale
+          ? state
+          : state.copyWith(
+              contextVerdict: ContextVerdict.unreachable,
+              contextError: error,
+              clearContextError: error == null,
+            );
+      _logger.log(
+        CheckoutEvents.contextUnreachable,
+        data: {
+          // `status` es el del servidor cuando hubo respuesta; sin respuesta el
+          // tag es `network`, que es una causa distinta y se mide aparte.
+          'status': error?.status?.toString() ??
+              (error?.kind == ApiErrorKind.network ? 'network' : 'none'),
+          // Con `stale:true` el agente sigue viendo datos buenos y la entrega
+          // no se detiene; con `false` el paso 1 queda sin poder verificar.
+          // Son dos incidentes distintos y la métrica no puede sumarlos.
+          'stale': stale,
+        },
+      );
       return null;
     }
   }

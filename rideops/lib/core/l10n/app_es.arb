@@ -339,10 +339,22 @@
   "langEnglish": "English",
   "metricsTitle": "Métricas del vehículo",
   "metricsOdometer": "Odómetro",
-  "metricsOdometerUnit": "mi",
-  "metricsPrevReading": "Última lectura registrada: {value} mi",
+  "odometerUnit": "mi",
+  "@odometerUnit": {
+    "description": "LA unidad del odómetro, escrita UNA sola vez en todo el catálogo. El paso 1 decía 'km' y el paso de métricas 'mi' para el MISMO número (hallazgo e2e). La verdad es millas y sale del backend: Vehicle.targetFleetMiles, includedMilesPerDay y computeExcessMileage() facturan por milla (fee-engine.service.js:163-176), y el mostrador web ya rotula 'mi'. No hay ninguna configuración de unidad por tenant — se buscó y no existe."
+  },
+  "odometerValue": "{value} {unit}",
+  "@odometerValue": {
+    "description": "Número ya formateado + la unidad. La unidad se INYECTA desde odometerUnit para que ninguna traducción pueda volver a inventar una distinta.",
+    "placeholders": {
+      "value": { "type": "String" },
+      "unit": { "type": "String" }
+    }
+  },
+  "metricsPrevReading": "Última lectura registrada: {reading}",
   "@metricsPrevReading": {
-    "placeholders": { "value": { "type": "String" } }
+    "description": "{reading} llega ya compuesto por odometerValue — mismo separador de miles y misma unidad que el paso 1.",
+    "placeholders": { "reading": { "type": "String" } }
   },
   "metricsOdometerLower": "La lectura es menor que la última registrada. Revísala — se enviará tal cual.",
   "metricsFuel": "Combustible",
@@ -804,10 +816,6 @@
   "coConfirmMissingValue": "Sin capturar",
   "coConfirmUnit": "Unidad",
   "coConfirmOdometerLabel": "Odómetro",
-  "coOdometerValue": "{km} km",
-  "@coOdometerValue": {
-    "placeholders": { "km": { "type": "String" } }
-  },
   "coConfirmVehicleAvailable": "Disponible",
   "coConfirmChangeVehicle": "Cambiar vehículo",
   "coConfirmCta": "Continuar a T&C",
@@ -827,8 +835,36 @@
   "coConfirmRecheckPending": "Consultando al servidor…",
   "coConfirmRecheckedStill": "Consultado ahora: el servidor sigue sin {fields}.",
   "@coConfirmRecheckedStill": {
-    "description": "Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo.",
+    "description": "Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo. SOLO se usa cuando display-data RESPONDIÓ: afirmar esto sobre una consulta caída era la acusación falsa que encontró la corrida e2e.",
     "placeholders": { "fields": { "type": "String" } }
+  },
+  "coConfirmCheckingPill": "Consultando",
+  "coConfirmCheckingValue": "Consultando…",
+  "coConfirmCheckingWhy": "Consultando la ficha del cliente…",
+  "@coConfirmCheckingWhy": {
+    "description": "Bloqueo mientras la consulta VIAJA. No afirma nada del servidor: todavía no ha contestado."
+  },
+  "coConfirmUnknownPill": "Sin consultar",
+  "coConfirmUnknownValue": "No se pudo consultar",
+  "@coConfirmUnknownValue": {
+    "description": "Valor de cada fila cuando display-data no respondió. NO es 'Sin capturar': ese texto afirma que el servidor no tiene el dato, y aquí no se sabe."
+  },
+  "coConfirmUnreachableWhy": "No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad. Esto no dice nada sobre qué datos tenga el servidor.",
+  "@coConfirmUnreachableWhy": {
+    "description": "Hallazgo e2e (MAJOR): el bloqueo cambia de naturaleza. No se bloquea por 'faltan datos' —que sería una acusación al servidor— sino porque sin consulta no hay identidad que confirmar."
+  },
+  "coConfirmUnreachableServer": "El servidor respondió: {message}",
+  "@coConfirmUnreachableServer": {
+    "description": "Negativa CRUDA del servidor (DoD #5), sin diagnóstico inventado. Se omite cuando la petición murió sin cuerpo.",
+    "placeholders": { "message": { "type": "String" } }
+  },
+  "coConfirmRetryLookup": "Reintentar la consulta",
+  "@coConfirmRetryLookup": {
+    "description": "Acción que SÍ puede tener éxito (nada de puertas falsas): repite el GET de display-data. Distinta de 'Actualizar datos del cliente', que se ofrece cuando el servidor sí contestó y faltan campos."
+  },
+  "coConfirmRetryStillUnreachable": "Reintentado ahora: la consulta sigue sin llegar.",
+  "@coConfirmRetryStillUnreachable": {
+    "description": "Acuse del reintento fallido. Habla de la CONSULTA, jamás de los datos."
   },
   "coDeclineTitle": "El cliente declina el seguro",
   "coDeclineOff": "Apagado · se cobra la cobertura estándar",
