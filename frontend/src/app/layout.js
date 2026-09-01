@@ -2,6 +2,7 @@ import './globals.css';
 import { SentryBoot } from '../components/SentryBoot';
 import { I18nBoot } from '../components/I18nBoot';
 import { TourMount } from '../components/training/TourMount';
+import { CopilotMount } from '../components/copilot/CopilotMount';
 import { PracticeBanner } from '../components/training/PracticeBanner';
 import { WelcomeOffer } from '../components/training/WelcomeOffer';
 import { StaleBuildWatcher } from '../components/StaleBuildWatcher';
@@ -139,6 +140,11 @@ export default function RootLayout({ children }) {
             imported per page, so it remounts on every navigation and would
             drop the tour's state mid-walk. The layout persists. */}
         <TourMount />
+        {/* The Agent Copilot lives beside the tour for the same reason: its
+            conversation and its hand-off to the tour must survive navigation.
+            Renders nothing without a cached staff user (customer-facing pages)
+            and nothing while the screen lock is up. */}
+        <CopilotMount />
         {/* Same reason as TourMount: both survive navigation. The banner
             frames practice mode; the offer greets a first login exactly once. */}
         {/* A counter tablet keeps one tab open for days; after a deploy its

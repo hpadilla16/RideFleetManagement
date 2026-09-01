@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken, api, readViewLocation, writeViewLocation } from '../lib/client';
+import { API_BASE, TOKEN_KEY, USER_KEY, SCREEN_LOCK_EVENT, readStoredToken, api, readViewLocation, writeViewLocation } from '../lib/client';
 import { isModuleEnabled, pathnameToModule } from '../lib/moduleAccess';
 import { useTranslation } from 'react-i18next';
 import { setLanguage } from '../lib/i18n';
@@ -460,6 +460,13 @@ export function AppShell({ me, logout, children }) {
     if (!locked) return;
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
+  }, [locked]);
+
+  // Tell the layout-mounted surfaces (the Agent Copilot) about lock changes.
+  // They cannot read this component's state and the localStorage mirror fires
+  // no event in the same tab — see SCREEN_LOCK_EVENT in lib/client.
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent(SCREEN_LOCK_EVENT, { detail: { locked } })); } catch { /* SSR/no window */ }
   }, [locked]);
 
   const armIdleLock = useMemo(() => () => {
