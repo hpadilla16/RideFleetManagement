@@ -169,6 +169,23 @@ customerInspectionRouter.post('/reports/:reportId/fix', express.json({ limit: '1
   }
 });
 
+// POST /api/customer-inspections/reports/:reportId/clear — body: { reason }
+// The no-repair exit from the damage baseline (2026-09-03): reason REQUIRED,
+// audit-logged, sets the FIXED-equivalent cleared state (clearedReason set,
+// no repair photo). Real repairs keep going through /fix above.
+customerInspectionRouter.post('/reports/:reportId/clear', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    res.json(await customerInspectionService.clearDamageReport({
+      reportId: req.params.reportId,
+      reason: req.body?.reason,
+      actorUserId: req.user?.id || req.user?.sub || null,
+      scope: scopeFor(req),
+    }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // GET /api/customer-inspections?status=SUBMITTED | ?reservationId=...
 customerInspectionRouter.get('/', async (req, res) => {
   try {

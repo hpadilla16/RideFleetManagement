@@ -27,6 +27,10 @@ export const NAV_SECTIONS = [
     // scopes and role-gates server-side.
     { href: '/notifications', labelKey: 'nav.notifications', icon: 'bell' },
     { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations', tour: 'nav-reservations', icon: 'calcheck' },
+    // Check-in Audit (2026-09-03, approved mockup): the post-return T1 review
+    // queue. Rides the reservations module — the audience is exactly the staff
+    // who close check-ins.
+    { href: '/checkin-audit', labelKey: 'nav.checkinAudit', moduleKey: 'reservations', icon: 'clipboard' },
     { href: '/quotes', labelKey: 'nav.quotes', moduleKey: 'quotes', icon: 'quote' },
     { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner', icon: 'planner' },
     { href: '/customers', labelKey: 'nav.customers', moduleKey: 'customers', icon: 'users' },

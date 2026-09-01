@@ -81,6 +81,9 @@ const OLD_FLAT_NAV = [
   // moduleKey) — the API scopes and role-gates server-side.
   { href: '/notifications' },
   { href: '/reservations', moduleKey: 'reservations' },
+  // Check-in Audit (2026-09-03): the post-return T1 review queue — rides the
+  // reservations module (its audience is the staff who close check-ins).
+  { href: '/checkin-audit', moduleKey: 'reservations' },
   { href: '/quotes', moduleKey: 'quotes' },
   { href: '/vehicles', moduleKey: 'vehicles' },
   { href: '/vehicles/inventory-helper', moduleKey: 'vehicles' },

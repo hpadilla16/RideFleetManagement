@@ -626,8 +626,15 @@ async function reportDamage({ token, view, xPct, yPct, description, photoDataUrl
  * inspection/customer involved). Goes straight to HARD_APPROVED so it shows on the
  * vehicle's damage history (and can later be Fixed or rolled into a Repair Order).
  * Photo is required, same as a customer report. source = 'MANUAL'.
+ *
+ * `opts` is INTERNAL-ONLY provenance (2026-09-03, damage-baseline slice) —
+ * routes pass only `body`, so an HTTP caller can never spoof it. The
+ * check-in audit's "real but pre-existing" dismissal calls through here with
+ * { source: 'AUDIT_PREEXISTING', sourceAuditFindingId } so the ledger entry
+ * keeps the exact create path (validation, required photo, HARD_APPROVED,
+ * reviewer stamp) while recording which audit flag birthed it.
  */
-async function addManualDamage(vehicleId, body = {}, scope = {}) {
+async function addManualDamage(vehicleId, body = {}, scope = {}, opts = {}) {
   const tenantId = scope?.tenantId;
   if (!tenantId || tenantId === '__no_tenant__') throw new CheckoutSessionError('tenantId required', 400);
   const vehicle = await prisma.vehicle.findFirst({ where: { id: String(vehicleId), tenantId }, select: { id: true } });
@@ -658,7 +665,12 @@ async function addManualDamage(vehicleId, body = {}, scope = {}) {
       yPct: y,
       description: body.description ? String(body.description).slice(0, 500) : null,
       status: 'HARD_APPROVED',
-      source: 'MANUAL',
+      // Internal callers may stamp a specific origin (dismiss-fork appends use
+      // AUDIT_PREEXISTING; the future walk-around uses ONBOARDING). The HTTP
+      // route never forwards opts, so 'MANUAL' stays the only reachable value
+      // from the profile UI.
+      source: ['AUDIT_PREEXISTING', 'ONBOARDING'].includes(opts?.source) ? opts.source : 'MANUAL',
+      sourceAuditFindingId: opts?.sourceAuditFindingId ? String(opts.sourceAuditFindingId) : null,
       reviewedByUserId: scope.userId || null,
       reviewedAt: new Date(),
       reservationId: body.reservationId ? String(body.reservationId) : null,
@@ -878,6 +890,17 @@ async function getVehicleDamageHistory(vehicleId, scope = {}) {
     // DB per vehicle-profile view (QA m4).
     omit: { customerAckSignatureDataUrl: true, customerAckStatementText: true },
   });
+  // Damage-baseline tab (2026-09-03): every entry carries its origin + the
+  // reviewer's name so the source chips can say WHO put it on the record —
+  // accountability is the anti-abuse control on the dismiss fork.
+  const reviewerIds = [...new Set(rows.map((d) => d.reviewedByUserId).filter(Boolean))];
+  const reviewers = reviewerIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: reviewerIds } },
+        select: { id: true, fullName: true, email: true },
+      }).catch(() => [])
+    : [];
+  const reviewerName = new Map(reviewers.map((u) => [u.id, u.fullName || u.email || null]));
   const project = async (d) => ({
     id: d.id,
     view: d.view,
@@ -890,6 +913,13 @@ async function getVehicleDamageHistory(vehicleId, scope = {}) {
     reportedAt: d.createdAt,
     approvedAt: d.reviewedAt,
     fixedAt: d.fixedAt,
+    // Baseline provenance: CUSTOMER | MANUAL | ONBOARDING | AUDIT_PREEXISTING
+    source: d.source,
+    sourceAuditFindingId: d.sourceAuditFindingId || null,
+    reviewedByName: reviewerName.get(d.reviewedByUserId) || null,
+    repairOrderId: d.repairOrderId || null,
+    lastVerifiedAt: d.lastVerifiedAt || null,
+    clearedReason: d.clearedReason || null,
     photoUrl: await reportPhotoUrl(d.photoJson),
     fixedPhotoUrl: await reportPhotoUrl(d.fixedPhotoJson),
   });
@@ -928,6 +958,64 @@ async function fixDamageReport({ reportId, photoDataUrl, actorUserId, scope = {}
   return { ok: true, status: 'FIXED' };
 }
 
+/**
+ * Clear a baseline entry WITHOUT a repair (2026-09-03, damage-baseline
+ * NOTES §D3 "Shrinks"): "was dirt", "double entry" — the no-repair exit, so
+ * FIXED-with-photo never has to lie. Reason is REQUIRED and the clear is
+ * audit-logged; fixDamageReport keeps requiring a photo for real repairs.
+ * The entry leaves the diagram (FIXED-equivalent cleared state, clearedReason
+ * set) but stays in history like every other resolved entry.
+ */
+async function clearDamageReport({ reportId, reason, actorUserId, scope = {} }) {
+  const cleanReason = String(reason || '').trim();
+  if (!cleanReason) throw new CheckoutSessionError('A reason is required to clear a damage record', 400, 'REASON_REQUIRED');
+  const report = await prisma.vehicleDamageReport.findFirst({
+    where: { id: reportId, ...tenantWhere(scope) },
+    select: { id: true, status: true, tenantId: true, vehicleId: true, reservationId: true, description: true, source: true },
+  });
+  if (!report) throw new CheckoutSessionError('Damage report not found', 404);
+  if (report.status !== 'HARD_APPROVED') {
+    throw new CheckoutSessionError(`Only hard-approved damages can be cleared (is ${report.status})`, 409);
+  }
+  const now = new Date();
+  await prisma.vehicleDamageReport.update({
+    where: { id: reportId },
+    data: {
+      status: 'FIXED',
+      fixedAt: now,
+      fixedByUserId: actorUserId || null,
+      clearedReason: cleanReason.slice(0, 500),
+    },
+  });
+  // Audited like the admin edit/delete failsafe (report-damage.service.js) —
+  // best-effort: AuditLog is reservation-anchored, so entries with no
+  // reservation still clear (the row itself records who/why via clearedReason
+  // + fixedByUserId).
+  if (report.reservationId) {
+    await prisma.auditLog.create({ data: {
+      tenantId: report.tenantId || null,
+      reservationId: report.reservationId,
+      action: 'ADMIN_OVERRIDE',
+      actorUserId: actorUserId || null,
+      reason: `Damage baseline entry cleared without repair: ${cleanReason.slice(0, 400)}`,
+      metadata: JSON.stringify({
+        kind: 'damage_report_clear_no_repair',
+        damageReportId: report.id,
+        vehicleId: report.vehicleId,
+        description: report.description,
+        source: report.source,
+        clearedReason: cleanReason.slice(0, 500),
+      }),
+    } }).catch((e) => {
+      logger.warn('[customer-inspection] clear-with-reason audit log failed (non-fatal)', {
+        reportId, message: e?.message || String(e),
+      });
+    });
+  }
+  logger.info('[customer-inspection] damage cleared with reason (no repair)', { reportId });
+  return { ok: true, status: 'FIXED', clearedReason: cleanReason.slice(0, 500) };
+}
+
 export const customerInspectionService = {
   sendCustomerInspection,
   sendCheckinInspection,
@@ -944,4 +1032,5 @@ export const customerInspectionService = {
   getVehicleDamageHistory,
   addManualDamage,
   fixDamageReport,
+  clearDamageReport,
 };

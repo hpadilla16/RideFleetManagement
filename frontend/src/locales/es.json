@@ -34,6 +34,7 @@
       "maintenance": "Mantenimiento",
       "shuttle": "Shuttle",
       "documents": "Documentos y marbete",
+      "checkinAudit": "Auditoría de check-in",
       "billing": "Facturación",
       "allInfo": "Todo informativo",
       "all": "Todas las notificaciones"
@@ -50,6 +51,7 @@
       "maintOverdue": "Mantenimiento vencido — {{service}}, {{unit}}",
       "maintSnoozed": "Mantenimiento pospuesto en el check-in — {{unit}}",
       "maintCheckinSent": "Enviado a mantenimiento en el check-in — {{unit}} · {{ro}}",
+      "checkinAuditEntryError": "Error de captura — {{res}}. El odómetro quedó por debajo del de salida ({{out}} → {{in}}).",
       "billingSuspended": "Suscripción suspendida — pago vencido"
     },
     "src": {
@@ -59,7 +61,8 @@
       "KIOSK": "Kiosco",
       "BILLING": "Facturación",
       "MAINTENANCE": "Mantenimiento",
-      "DOCUMENTS": "Documentos"
+      "DOCUMENTS": "Documentos",
+      "CHECKIN_AUDIT": "Auditoría de check-in"
     },
     "ack": {
       "by": "Atendida por {{name}} · {{time}}",
@@ -82,6 +85,7 @@
   },
   "nav": {
     "notifications": "Notificaciones",
+    "checkinAudit": "Auditoría de check-in",
     "dashboard": "Panel",
     "reservations": "Reservaciones",
     "vehicles": "Vehículos",
@@ -2259,5 +2263,115 @@
     "damageHint": "Registra un daño encontrado en el retorno sin salir del check-in. Documenta el daño, agrega el cargo a este contrato e inicia el borrador de incidente.",
     "damageCta": "Reportar daño",
     "damageRecorded": "Reporte de daño registrado — el cargo se agregó a este contrato."
+  },
+  "checkinAudit": {
+    "title": "Auditoría de check-in",
+    "sub": "Revisión post-retorno — auditoría de reglas en cada cierre",
+    "rulesOn": "Auditoría de reglas · activa",
+    "photoAiOff": "IA de fotos no habilitada",
+    "photoAi": "IA de fotos",
+    "rules": "Reglas",
+    "pass": "OK",
+    "flagged": "Con hallazgos",
+    "review": "Revisar",
+    "back": "Volver a la cola",
+    "dismissAction": "Descartar…",
+    "dismissed": "Alerta descartada",
+    "dismissedBy": "Descartada · {{name}}",
+    "laneEmpty": "Nada en este carril.",
+    "damageLaneEmpty": "La IA de fotos no está habilitada — este carril se llena cuando llegue el nivel de fotos (T2). Los hallazgos de reglas viven en Errores de captura y Millaje / gasolina.",
+    "railNote": "El check-in nunca espera por la auditoría. Las alertas aparecen aquí después del cierre.",
+    "t2Placeholder": "La IA de fotos no está habilitada. Cuando llegue el nivel de fotos (opt-in por tenant, llave del tenant), las fotos de salida y regreso de cada ángulo se comparan aquí y el posible daño nuevo cae a la cola — una persona siempre confirma; nada se cobra en automático.",
+    "lanes": {
+      "needsReview": "Por revisar",
+      "resolved": "Resueltos",
+      "everything": "Todo",
+      "damage": "Posible daño",
+      "entry": "Errores de captura",
+      "mileageFuel": "Millaje / gasolina",
+      "passed": "Sin hallazgos",
+      "dismissed": "Descartados",
+      "resolvedOther": "Resueltos",
+      "all": "Todas las auditorías"
+    },
+    "kpis": {
+      "auditedToday": "Auditados · hoy",
+      "cleanPassToday": "Sin hallazgos · hoy",
+      "openDamage": "Posible daño",
+      "openEntryErrors": "Errores de captura"
+    },
+    "cols": {
+      "reservation": "Reservación",
+      "returned": "Regresó",
+      "rules": "Reglas · T1",
+      "photoAi": "IA de fotos · T2",
+      "closedBy": "Check-in por"
+    },
+    "chips": {
+      "PASS": "OK",
+      "ODO_IMPOSSIBLE": "Odómetro menor al de salida",
+      "MILES_OUTLIER": "{{n}} mi/día",
+      "FUEL_UP_NO_RECORD": "Más gasolina sin recarga registrada",
+      "FUEL_DROP_NO_FEE": "Bajó gasolina sin fee de recarga",
+      "ENTRIES_INCOMPLETE": "Capturas incompletas",
+      "BACKDATED_RETURN": "Regreso retrofechado · {{n}}h",
+      "UNKNOWN": "Hallazgo"
+    },
+    "cards": {
+      "mileageFuel": "Auditoría de millaje y gasolina",
+      "entries": "Verificación de capturas del agente",
+      "photoPair": "Comparación de fotos"
+    },
+    "rows": {
+      "odometer": "Odómetro",
+      "perDay": "{{n}}/día",
+      "fuel": "Gasolina",
+      "refillBilled": "fee de recarga cobrado ✓",
+      "refillMissing": "sin fee de recarga",
+      "impossible": "Imposible",
+      "impossibleRule": "Odómetro de entrada ≥ salida",
+      "impossibleFail": "entrada < salida — una captura está mal",
+      "entries": "Capturas",
+      "entriesComplete": "Completas",
+      "entriesMissing": "Faltan {{n}} fotos de ángulo",
+      "noSignature": "sin firma",
+      "backdated": "Hora de regreso",
+      "backdatedOk": "Coincide con las fotos",
+      "backdatedGap": "a {{n}}h de las fotos"
+    },
+    "dismiss": {
+      "title": "Descartar esta alerta",
+      "q": "¿Qué es?",
+      "notIssue": "No es un problema",
+      "notIssueSub": "La regla malinterpretó la situación. Queda registrado como revisado — no pasa nada más.",
+      "preexisting": "Daño real — pero preexistente",
+      "preexistingSub": "Se agrega al historial base del vehículo para que no se señale otra vez — y nunca se cobre a un cliente.",
+      "preexistingT2": "Aplica a hallazgos de daño de la IA de fotos — espera el nivel de fotos (T2). Los hallazgos de reglas son números, no marcas.",
+      "confirm": "Descartar"
+    }
+  },
+  "damageBaseline": {
+    "title": "Historial base de daños",
+    "sub": "Marcas documentadas de este vehículo — el historial base de daños conocidos. Las entradas salen del diagrama al repararse (foto requerida), por una orden de reparación completada, o por limpieza con motivo; todo queda en el historial de abajo.",
+    "open": "registradas",
+    "fixedCount": "reparadas",
+    "none": "Este vehículo no tiene daños registrados.",
+    "since": "registrada desde",
+    "source": {
+      "audit": "Auditoría de check-in · marcada como preexistente por {{user}}",
+      "onboarding": "Recorrido de alta",
+      "manual": "Registrada desde el perfil",
+      "customer": "Inspección del cliente"
+    },
+    "sendRo": "Enviar a orden de reparación",
+    "sendRoConfirm": "¿Agrupar este daño en una orden de reparación nueva? Completar la orden lo marca reparado.",
+    "sentRo": "Enviado a la orden de reparación {{ro}}",
+    "clearAction": "Eliminar con motivo…",
+    "clearPrompt": "Eliminar SIN reparación — ¿por qué? (ej. \"era suciedad\", \"entrada duplicada\"). Queda en la bitácora de auditoría.",
+    "cleared": "Entrada eliminada — queda en el historial con el motivo",
+    "clearedAt": "eliminada",
+    "clearedReason": "Eliminada: {{reason}}",
+    "repairedRo": "Reparado · orden {{ro}}",
+    "repaired": "Reparado"
   }
 }

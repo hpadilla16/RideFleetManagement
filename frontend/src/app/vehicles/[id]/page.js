@@ -8,6 +8,8 @@ import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { api } from '../../../lib/client';
 import { diagramFor, DIAGRAM_VIEWBOX, DIAGRAM_W, DIAGRAM_H, VIEW_LABELS } from '../../../components/vehicleDiagrams';
+import { useTranslation } from 'react-i18next';
+import { baselineSourceChip, clearedLine } from '../../../lib/damage-baseline';
 
 const DAMAGE_VIEWS = ['LEFT', 'RIGHT', 'FRONT', 'REAR', 'INTERIOR'];
 
@@ -283,6 +285,7 @@ export default function VehicleProfilePage() {
 }
 
 function VehicleProfileInner({ token, me, logout }) {
+  const { t } = useTranslation();
   const { id } = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -479,6 +482,35 @@ function VehicleProfileInner({ token, me, logout }) {
       setFixModal((c) => ({ ...c, saving: false }));
       setMsg(e2?.message || 'Failed to mark fixed');
     }
+  };
+
+  // Damage baseline (2026-09-03): the two exits from an open entry that the
+  // baseline design promotes onto the tab — group into an RO (existing
+  // from-damage flow; RO complete flips it FIXED) and clear-with-reason (the
+  // no-repair exit: reason REQUIRED, audit-logged server-side).
+  const sendToRepairOrder = async (report) => {
+    if (!window.confirm(t('damageBaseline.sendRoConfirm', 'Group this damage into a new repair order? Completing the RO marks it repaired.'))) return;
+    try {
+      const out = await api('/api/repair-orders/from-damage', {
+        method: 'POST',
+        body: JSON.stringify({ damageReportIds: [report.id] }),
+      }, token);
+      setMsg(t('damageBaseline.sentRo', { ro: out?.label || out?.id || '', defaultValue: `Sent to repair order ${out?.label || ''}` }));
+      await loadDamage();
+    } catch (e2) { setMsg(e2?.message || 'Failed to open repair order'); }
+  };
+
+  const clearWithReason = async (report) => {
+    const reason = window.prompt(t('damageBaseline.clearPrompt', 'Clear WITHOUT a repair — why? (e.g. "was dirt", "double entry"). This is recorded in the audit log.'));
+    if (reason == null) return;
+    try {
+      await api(`/api/customer-inspections/reports/${report.id}/clear`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }, token);
+      setMsg(t('damageBaseline.cleared', 'Entry cleared — kept in history with the reason'));
+      await loadDamage();
+    } catch (e2) { setMsg(e2?.message || 'Failed to clear entry'); }
   };
 
   const openEditModal = async () => {
@@ -1302,21 +1334,23 @@ function VehicleProfileInner({ token, me, logout }) {
 
               <section className="glass card-lg section-card">
                 <div className="row-between">
-                  <h2>Damage History</h2>
+                  <h2>{t('damageBaseline.title', 'Damage baseline')}</h2>
                   <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                    <span className="status-chip neutral">{damage.active.length} active · {damage.fixed.length} fixed</span>
+                    <span className="status-chip neutral">
+                      {damage.active.length} {t('damageBaseline.open', 'on record')} · {damage.fixed.length} {t('damageBaseline.fixedCount', 'repaired')}
+                    </span>
                     <button type="button" className="btn-sm" onClick={() => setAddDmg({ view: damageView, xPct: null, yPct: null, photo: null, description: '', saving: false })}>
                       + Add damage
                     </button>
                   </div>
                 </div>
                 <p className="ui-muted" style={{ marginTop: 0 }}>
-                  Hard-approved customer damage reports. Active dots must be repaired (photo required) to leave the diagram — fixed ones stay in the history below.
+                  {t('damageBaseline.sub', 'Documented marks on this vehicle — the known-damage baseline. Entries leave the diagram by being repaired (photo required), by a completed repair order, or by clear-with-reason; everything stays in the history below.')}
                 </p>
                 {damage.loading ? (
                   <div className="surface-note">Loading damage history…</div>
                 ) : damage.active.length === 0 && damage.fixed.length === 0 ? (
-                  <div className="surface-note">No hard-approved damages on this vehicle.</div>
+                  <div className="surface-note">{t('damageBaseline.none', 'No damage on record for this vehicle.')}</div>
                 ) : (
                   <>
                     <div style={{ display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 10, overflow: 'hidden', marginBottom: 10, maxWidth: 480 }}>
@@ -1351,14 +1385,27 @@ function VehicleProfileInner({ token, me, logout }) {
                         ) : (
                           <>
                             <span className="ui-muted" style={{ fontSize: 12 }}>Tap a red dot (or a row) to see the damage and mark it fixed.</span>
-                            {damage.active.map((r) => (
+                            {damage.active.map((r) => {
+                              const srcChip = baselineSourceChip(r);
+                              return (
                               <div key={r.id} style={{ border: '1px solid #E5E7EB', borderRadius: 8, overflow: 'hidden' }}>
                                 <button type="button" className="btn-ghost" style={{ textAlign: 'left', padding: 10, width: '100%', border: 'none' }} onClick={() => setFixModal({ report: r, photo: null, saving: false })}>
                                   <strong style={{ fontSize: 13 }}>{r.description || 'Damage'}</strong>
                                   <span className="ui-muted" style={{ display: 'block', fontSize: 12 }}>
-                                    {VIEW_LABELS[r.view]} view · approved {formatDateTime(r.approvedAt)}{r.reservationNumber ? ` · #${r.reservationNumber}` : ''}
+                                    {VIEW_LABELS[r.view]} view · {t('damageBaseline.since', { defaultValue: 'on record since' })} {formatDateTime(r.approvedAt)}{r.reservationNumber ? ` · #${r.reservationNumber}` : ''}
+                                  </span>
+                                  <span className={`chip chip--${srcChip.tone}`} style={{ marginTop: 6 }} data-testid={`src-${srcChip.source}`}>
+                                    <span className="led" />{t(srcChip.labelKey, { ...srcChip.params, defaultValue: srcChip.source })}
                                   </span>
                                 </button>
+                                <div style={{ display: 'flex', gap: 8, padding: '6px 10px', borderTop: '1px solid #F1EFE8', flexWrap: 'wrap' }}>
+                                  <button type="button" className="btn-sm" onClick={() => sendToRepairOrder(r)}>
+                                    {t('damageBaseline.sendRo', 'Send to repair order')}
+                                  </button>
+                                  <button type="button" className="btn-sm" onClick={() => clearWithReason(r)}>
+                                    {t('damageBaseline.clearAction', 'Clear with reason…')}
+                                  </button>
+                                </div>
                                 {canAdminDamage ? (
                                   <div style={{ display: 'flex', gap: 8, padding: '6px 10px', borderTop: '1px solid #F1EFE8', background: 'rgba(0,0,0,0.02)' }}>
                                     <button type="button" onClick={() => editDamageRecord(r)} style={{ background: 'var(--n-0)', color: 'var(--text-1)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Edit</button>
@@ -1366,7 +1413,8 @@ function VehicleProfileInner({ token, me, logout }) {
                                   </div>
                                 ) : null}
                               </div>
-                            ))}
+                              );
+                            })}
                           </>
                         )}
                         {damage.fixed.length ? (
@@ -1375,7 +1423,10 @@ function VehicleProfileInner({ token, me, logout }) {
                             {damage.fixed.map((r) => (
                               <div key={r.id} style={{ padding: '8px 0', borderBottom: '0.5px solid #E5E7EB', fontSize: 12 }}>
                                 <strong>{r.description || 'Damage'}</strong> · {VIEW_LABELS[r.view]} view
-                                <span className="ui-muted"> · fixed {formatDateTime(r.fixedAt)}</span>
+                                <span className="ui-muted"> · {r.clearedReason ? t('damageBaseline.clearedAt', { defaultValue: 'cleared' }) : 'fixed'} {formatDateTime(r.fixedAt)}</span>
+                                {r.clearedReason ? (
+                                  <span className="ui-muted" data-testid="cleared-reason"> · {t('damageBaseline.clearedReason', { reason: r.clearedReason, defaultValue: `Cleared: ${r.clearedReason}` })}</span>
+                                ) : null}
                                 <span style={{ marginLeft: 6 }}>
                                   {r.photoUrl ? <a href={r.photoUrl} target="_blank" rel="noreferrer">damage photo</a> : null}
                                   {r.photoUrl && r.fixedPhotoUrl ? ' · ' : ''}
