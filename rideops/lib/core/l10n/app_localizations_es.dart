@@ -1535,6 +1535,9 @@ class AppLocalizationsEs extends AppLocalizations {
       'El cobro se hace en el mostrador o el kiosco. Este botón se desbloquea cuando el servidor lo registre.';
 
   @override
+  String get coStampsPaidRecheck => 'Consultar el cobro ahora';
+
+  @override
   String get coStampsCtaInspection => 'Continuar a la inspección';
 
   @override

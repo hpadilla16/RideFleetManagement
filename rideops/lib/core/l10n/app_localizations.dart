@@ -2414,6 +2414,12 @@ abstract class AppLocalizations {
   /// **'El cobro se hace en el mostrador o el kiosco. Este botón se desbloquea cuando el servidor lo registre.'**
   String get coStampsPaidBlockedWhy;
 
+  /// No description provided for @coStampsPaidRecheck.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultar el cobro ahora'**
+  String get coStampsPaidRecheck;
+
   /// No description provided for @coStampsCtaInspection.
   ///
   /// In es, this message translates to:

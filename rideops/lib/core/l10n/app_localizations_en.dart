@@ -1524,6 +1524,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'Payment is taken at the counter or the kiosk. This button unlocks once the server records it.';
 
   @override
+  String get coStampsPaidRecheck => 'Check for the payment now';
+
+  @override
   String get coStampsCtaInspection => 'Continue to inspection';
 
   @override

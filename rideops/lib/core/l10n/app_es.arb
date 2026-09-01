@@ -775,6 +775,7 @@
   "coStampsCtaPaid": "Confirmar el cobro",
   "coStampsCtaPaidWhy": "Este botón solo existe porque el servidor ya tiene el cobro registrado.",
   "coStampsPaidBlockedWhy": "El cobro se hace en el mostrador o el kiosco. Este botón se desbloquea cuando el servidor lo registre.",
+  "coStampsPaidRecheck": "Consultar el cobro ahora",
   "coStampsCtaInspection": "Continuar a la inspección",
   "coStampsCtaInspectionWhy": "El cobro está registrado; sigue la inspección del vehículo.",
 

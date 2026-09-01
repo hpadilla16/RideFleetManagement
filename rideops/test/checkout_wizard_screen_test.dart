@@ -327,6 +327,13 @@ void main() {
     // aviso 21C viaja por [WizardDockNotice] como en los otros 15 sitios, y lo
     // que esta prueba fija es que en el camino no se perdió: dentro del pie,
     // encima del primario, fuera del scroll.
+    //
+    // Superficie de teléfono real (convención de la suite): el default de
+    // 800x600 es más ancho que alto y el pie completo —aviso + primario +
+    // secondary + why— no cabe en esa proporción que ningún aparato tiene.
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     final f = fakes();
     // PAYMENT_PENDING con el sello de T&C ya puesto — es como se llega ahí
     // (TC_SIGNED lo exige), así que el estado es producible por el backend.
@@ -417,6 +424,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(f.api.transitions, isEmpty, reason: 'bloqueado = ningún POST');
 
+    // El bloqueo ofrece la SALIDA (contrato de blockedWhy, precedente 9B): un
+    // secondary que vuelve a preguntarle al servidor sin esperar el poll.
+    final recheck =
+        find.widgetWithText(RideGhostButton, 'Check for the payment now');
+    expect(recheck, findsOneWidget);
+    final getsBefore = f.api.getCalls;
+    await tester.tap(recheck);
+    await tester.pumpAndSettle();
+    expect(f.api.getCalls, greaterThan(getsBefore));
+
     // El mostrador cobra: el poll trae el sello y el MISMO botón se habilita
     // (ADR-4 hecho visible — el CTA existe porque el servidor ya lo tiene).
     f.api.current = sessionAt(
@@ -429,6 +446,11 @@ void main() {
     expect(
       find.textContaining('the server already has the payment on record'),
       findsOneWidget,
+    );
+    // Con el sello puesto ya no hay nada que consultar: el secondary se va.
+    expect(
+      find.widgetWithText(RideGhostButton, 'Check for the payment now'),
+      findsNothing,
     );
 
     f.api.current = sessionAt(

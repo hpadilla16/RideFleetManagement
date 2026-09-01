@@ -389,6 +389,7 @@
   "coStampsCtaPaid": "Confirm payment",
   "coStampsCtaPaidWhy": "This button only exists because the server already has the payment on record.",
   "coStampsPaidBlockedWhy": "Payment is taken at the counter or the kiosk. This button unlocks once the server records it.",
+  "coStampsPaidRecheck": "Check for the payment now",
   "coStampsCtaInspection": "Continue to inspection",
   "coStampsCtaInspectionWhy": "Payment is on record; the vehicle inspection is next.",
 

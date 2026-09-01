@@ -338,6 +338,14 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
 
   /// ¿Este paso ya tiene cuerpo propio construido? Decide la variante del
   /// header y a quién le toca dibujar el cuerpo.
+  ///
+  /// Los pasos de sellos (TC_SIGNED/PAYMENT_PENDING/PAID) quedan FUERA a
+  /// propósito aunque desde el fix del E2E del Fold tengan CTA: su cuerpo
+  /// sigue siendo la afirmación del shell (la tarjeta de sellos), son pantallas
+  /// de espera/verificación donde el contexto completo —cliente, unidad,
+  /// salida— vale el alto que ocupa (es lo que el agente confronta mientras el
+  /// mostrador cobra), y la checklist + pie caben de sobra sin recortar el
+  /// header.
   bool _hasStepBody(CheckoutStep? step) =>
       step == CheckoutStep.confirming ||
       step == CheckoutStep.tcPending ||
@@ -573,6 +581,17 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           why: l10n.coStampsCtaPaidWhy,
           blockedWhy: session.paymentCompletedAt == null
               ? l10n.coStampsPaidBlockedWhy
+              : null,
+          // Un bloqueo local tiene que ofrecer además la salida (contrato de
+          // [TransitionButton.blockedWhy], precedente 9B). La salida honesta
+          // aquí es volver a preguntarle al servidor: cierra la ventana del
+          // poll lento (una sesión estacionada esperando el cobro cae al
+          // carril de 15 s) sin prometer nada que el refresh no haga.
+          secondary: session.paymentCompletedAt == null
+              ? RideGhostButton(
+                  label: l10n.coStampsPaidRecheck,
+                  onPressed: _controller.refresh,
+                )
               : null,
         ),
       CheckoutStep.paid => TransitionButton(
