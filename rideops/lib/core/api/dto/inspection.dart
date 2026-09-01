@@ -17,6 +17,16 @@ abstract class HandoffToken with _$HandoffToken {
     @IsoDateTimeConverter() DateTime? expiresAt,
     required String kind,
     @Default(false) bool reused,
+
+    /// URL ABSOLUTA que el cliente abre al escanear el QR, ya resuelta por el
+    /// servidor (`publicUrlForToken`, checkout-session.service.js:62-64).
+    ///
+    /// Llega solo en `TERMS_SIGNING`: para `MOBILE_INSPECTION` el backend
+    /// manda **null** a propósito —ese token se canjea por API y no tiene
+    /// página pública— y adivinarle una ruta sería peor que omitirla. O sea
+    /// que null aquí NO es "backend viejo", puede ser "este kind no tiene
+    /// URL"; el fallback de la app cubre los dos casos igual.
+    String? signUrl,
   }) = _HandoffToken;
 
   factory HandoffToken.fromJson(Map<String, dynamic> json) =>

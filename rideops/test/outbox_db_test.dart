@@ -198,8 +198,9 @@ void main() {
     expect(r.status, 'dead');
     expect(r.attempts, 3);
     expect(ops.uploads, 3);
-    expect(ops.deletedFiles, ['fotos/a.bin'],
-        reason: 'al morir la fila, el binario también se va');
+    expect(ops.deletedFiles, isEmpty,
+        reason: 'la fila muere pero SIGUE en la bandeja esperando decisión: '
+            'sin binario, su "Reintentar" sería una puerta falsa');
 
     // Muerta, ya no se sirve: una corrida más no sube nada.
     await drainer.drain();

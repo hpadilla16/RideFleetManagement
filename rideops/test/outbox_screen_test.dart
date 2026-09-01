@@ -161,6 +161,71 @@ void main() {
     expect(row.attempts, 0, reason: 'el humano decidió: contador de nuevo');
   });
 
+  // ——— F3 de la segunda corrida e2e: "Reintentar" tiene que poder ganar ———
+
+  testWidgets(
+      'F3 — dead-letter de foto CON binario en disco: Reintentar sigue en pie',
+      (tester) async {
+    // Desde el arreglo del drenador, morir ya no borra el archivo.
+    final name = await vault.store(Uint8List.fromList(List.filled(64, 7)));
+    await seedRow(
+      id: 'pviva',
+      kind: OutboxKinds.inspectionPhoto,
+      status: 'dead',
+      code: 'TOKEN_EXPIRED',
+      photoPath: name,
+      attempts: 2,
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.textContaining('no longer on this phone'), findsNothing);
+  });
+
+  testWidgets(
+      'F3 — dead-letter de foto SIN binario (teléfono que viene de una versión '
+      'anterior): solo Descartar, y dice por qué', (tester) async {
+    // El archivo NUNCA existió en la bóveda: es el residuo de cuando el
+    // drenador borraba el binario al morir la fila. Ofrecer "Reintentar" aquí
+    // es una puerta falsa — muere otra vez con PHOTO_LOST.
+    await seedRow(
+      id: 'pfantasma',
+      kind: OutboxKinds.inspectionPhoto,
+      status: 'dead',
+      code: 'TOKEN_EXPIRED',
+      photoPath: 'ph_borrada_en_una_version_anterior.bin',
+      attempts: 2,
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Retry'), findsNothing,
+        reason: 'sin foto, reintentar solo puede volver a morir');
+    expect(find.text('Discard'), findsOneWidget);
+    expect(find.textContaining('no longer on this phone'), findsOneWidget,
+        reason: 'el motivo manda sobre el code que la mató');
+  });
+
+  testWidgets(
+      'F4 — fila en inflight SIN corrida viva: "En cola", no "Subiendo" con '
+      'barra animada', (tester) async {
+    await seedRow(
+      id: 'phuerfana',
+      kind: OutboxKinds.inspectionPhoto,
+      status: 'inflight',
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    // `inflight` sobrevive a la muerte del proceso: la fila puede llevar
+    // horas ahí sin un solo POST detrás (corrida e2e 2). Afirmar la subida
+    // con una barra en movimiento era la parte visible de ese defecto.
+    expect(find.text('QUEUED'), findsOneWidget);
+    expect(find.text('UPLOADING'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
   // ——— Defecto 2 de la prueba de humo en el emulador ———
   //
   // Un 404 del backend SIN `code` en el cuerpo (el backend no lo manda en

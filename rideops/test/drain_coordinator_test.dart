@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -37,6 +38,10 @@ class _CoordOps implements OutboxOps {
 
   DrainOutcome photoOutcome;
 
+  /// Subidas REALMENTE intentadas. Es el oráculo del rescate de inflight: la
+  /// fila puede cambiar de estado en la DB y no salir ni un POST.
+  int uploads = 0;
+
   @override
   Future<String?> mintInspectionToken(String checkoutSessionId) async => 'tok';
 
@@ -46,8 +51,10 @@ class _CoordOps implements OutboxOps {
     required String angleKey,
     required String photoDataUrl,
     String? notes,
-  }) async =>
-      photoOutcome;
+  }) async {
+    uploads++;
+    return photoOutcome;
+  }
 
   @override
   Future<bool> inspectionAlreadyCompleted(String reservationId) async => false;
@@ -144,6 +151,44 @@ void main() {
           reason: 'un dead también sale de la cola drenable (anillo 7A)');
     });
 
+    test('el rescate de filas inflight se CUENTA (outbox.inflight_rescued)',
+        () async {
+      final db = OutboxDb(NativeDatabase.memory());
+      addTearDown(db.close);
+      final logger = CapturingEventLogger();
+      final store = DbOutboxStore(
+        db: db,
+        ownerOf: () => const OutboxOwner(userId: 'u1', tenantId: 't1'),
+        logger: logger,
+      );
+      final now = DateTime.now();
+      await db.into(db.outboxEntries).insert(OutboxEntriesCompanion.insert(
+            id: 'huerfana',
+            userId: 'u1',
+            tenantId: 't1',
+            kind: OutboxKinds.inspectionPhoto,
+            payload: json.encode({'angleKey': 'front'}),
+            idempotencyKey: 'ik-huerfana',
+            status: const Value('inflight'),
+            createdAt: now,
+            updatedAt: now,
+          ));
+
+      await store.resetInflight();
+      expect(
+        logger.events
+            .firstWhere((e) => e.$1 == OutboxEvents.inflightRescued)
+            .$2['rows'],
+        1,
+      );
+
+      // Sin huérfanas NO se emite: el evento tiene que medir incidentes, no
+      // corridas.
+      logger.events.clear();
+      await store.resetInflight();
+      expect(logger.has(OutboxEvents.inflightRescued), isFalse);
+    });
+
     test('sin dueño de sesión el store no sirve filas ni resetea nada',
         () async {
       final db = OutboxDb(NativeDatabase.memory());
@@ -159,7 +204,11 @@ void main() {
   });
 
   group('relevo de background (H6)', () {
-    Future<void> insertPhotoRow(OutboxDb db, {String id = 'a'}) async {
+    Future<void> insertPhotoRow(
+      OutboxDb db, {
+      String id = 'a',
+      String status = 'pending',
+    }) async {
       final now = DateTime.now();
       await db.into(db.outboxEntries).insert(OutboxEntriesCompanion.insert(
             id: id,
@@ -173,6 +222,7 @@ void main() {
               'photoPath': 'p.bin',
             }),
             idempotencyKey: 'ik-$id',
+            status: Value(status),
             createdAt: now,
             updatedAt: now,
           ));
@@ -248,6 +298,32 @@ void main() {
       expect(h.scheduler.ensured, greaterThanOrEqualTo(1),
           reason: 'el timer de backoff muere con el proceso; la one-off no');
       expect((await h.store.pending()).length, 1);
+    });
+
+    test(
+        'F4 — fila ÚNICA en inflight: el kick la rescata y el POST sale de '
+        'verdad', () async {
+      final db = OutboxDb(NativeDatabase.memory());
+      addTearDown(db.close);
+      // Una corrida anterior murió entre markInflight y el outcome (un 401 a
+      // media subida, el proceso muerto). No hay NADA en pending.
+      await insertPhotoRow(db, status: 'inflight');
+      expect(await db.pendingFor(userId: 'u1', tenantId: 't1'), isEmpty,
+          reason: 'sanidad: la compuerta del kick mira justo esto');
+
+      final ops = _CoordOps();
+      final h = harness(db: db, online: true, ops: ops);
+      // El mismo "Enviar ahora" de la bandeja (outbox_screen.dart).
+      await h.container.read(drainCoordinatorProvider.notifier).kick('manual');
+      await pumpEventQueue();
+
+      // Sin el rescate ANTES de contar, pendingBefore daba 0, el kick se
+      // devolvía y `drain()` —donde vive resetInflight— jamás corría: la foto
+      // se quedaba en "Subiendo" para siempre, inmune a Enviar ahora y a un
+      // arranque en frío (corrida e2e 2).
+      expect(ops.uploads, 1, reason: 'el POST tiene que salir');
+      expect(await (db.select(db.outboxEntries)).get(), isEmpty,
+          reason: 'drenó y la fila se fue');
     });
 
     test('bandeja vaciada: cancela el relevo', () async {

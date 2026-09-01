@@ -52,13 +52,31 @@ class ApiError implements Exception {
     this.code,
     this.status,
     this.cause,
+    this.serverMessage,
   });
 
   final ApiErrorKind kind;
 
-  /// Mensaje del backend (`error`) cuando existe — el backend escribe mensajes
-  /// pensados para humanos; la UI los traduce/estiliza pero no los inventa.
+  /// Lo mejor que se puede decir del fallo, venga de donde venga: el `error`
+  /// del backend si lo hubo, y si no la prosa de Dio o un sintético.
+  ///
+  /// **Sirve para diagnosticar, NO para citar.** Una pantalla que le enseña
+  /// esto al agente como "el servidor respondió…" acaba pintando "The
+  /// connection errored: … it cannot be solved by the library" — inglés, de
+  /// una librería, sobre una petición que jamás llegó a un servidor. Para
+  /// citar está [serverMessage].
   final String message;
+
+  /// El texto que escribió el SERVIDOR (`error` del cuerpo), o null si no
+  /// hubo cuerpo citable — porque no hubo respuesta (red/timeout), porque la
+  /// respuesta no era el JSON del backend (un 502 de HTML de un proxy), o
+  /// porque el error lo sintetizó el propio cliente.
+  ///
+  /// Esa distinción es la razón de existir del campo: `message` NUNCA es
+  /// null, así que un `isEmpty` no puede separar "el servidor dijo esto" de
+  /// "la librería dijo esto". Toda UI que ponga el mensaje entre comillas
+  /// como palabra del servidor tiene que leer ESTE campo.
+  final String? serverMessage;
 
   /// `code` de máquina cuando el backend lo mandó (no todos lo traen).
   final String? code;
@@ -77,7 +95,15 @@ class ApiError implements Exception {
     final data = res.data;
     final map = data is Map<String, dynamic> ? data : const <String, dynamic>{};
     final code = map['code'] as String?;
-    final msg = (map['error'] as String?) ?? e.message ?? 'error ${res.statusCode}';
+    // Lo que escribió el servidor, separado de lo que se puede mostrar como
+    // último recurso. Un cuerpo vacío o que no es el JSON del backend deja
+    // esto en null: es un hueco honesto, no una cadena vacía que la UI
+    // tendría que adivinar.
+    final serverMessage = switch (map['error']) {
+      final String s when s.trim().isNotEmpty => s.trim(),
+      _ => null,
+    };
+    final msg = serverMessage ?? e.message ?? 'error ${res.statusCode}';
 
     final status = res.statusCode ?? 0;
     final kind = switch (status) {
@@ -97,6 +123,7 @@ class ApiError implements Exception {
       code: code,
       status: res.statusCode,
       cause: e,
+      serverMessage: serverMessage,
     );
   }
 

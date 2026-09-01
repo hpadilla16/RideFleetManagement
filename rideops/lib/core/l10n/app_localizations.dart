@@ -1202,6 +1202,18 @@ abstract class AppLocalizations {
   /// **'El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.'**
   String get camErrorPermissionHint;
 
+  /// Obturador colgado (corrida e2e 2, GPU por software): takePicture() nunca resuelve. NO se dice 'no se pudo abrir la cámara' —abrió y estaba mostrando imagen— para no mandar al agente a revisar un permiso que sí tiene.
+  ///
+  /// In es, this message translates to:
+  /// **'La cámara no devolvió la foto'**
+  String get camShutterStuckTitle;
+
+  /// Dice QUÉ pasó, qué hizo la app (soltó el controlador) y las dos salidas reales. La última frase existe porque la causa es del aparato: reintentar en el mismo teléfono puede no bastar.
+  ///
+  /// In es, this message translates to:
+  /// **'El disparo se quedó esperando y no volvió. La cámara se cerró; vuelve a abrirla e inténtalo otra vez. Si se repite, usa otro teléfono para este vehículo.'**
+  String get camShutterStuckHint;
+
   /// No description provided for @langSpanish.
   ///
   /// In es, this message translates to:
@@ -1681,6 +1693,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'{count, plural, one{1 envío esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.} other{{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.}}'**
   String outboxFullBody(int count);
+
+  /// Aparece bajo el cuerpo de bandeja llena SOLO si hay dead-letters ocupando cupo: desde 2026-09 el binario de un rechazado se conserva hasta que el humano decide, así que 'conéctate y se vaciará' sería media verdad.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{1 de ellos fue rechazado y espera tu decisión: reintenta o descártalo para liberar su espacio — la red sola no lo mueve.} other{{count} de ellos fueron rechazados y esperan tu decisión: reintenta o descártalos para liberar su espacio — la red sola no los mueve.}}'**
+  String outboxFullDeadHint(int count);
 
   /// No description provided for @outboxFullChip.
   ///
@@ -2719,6 +2737,24 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Estos datos son de hace {age} y la consulta de ahora no llegó. Vuelve a consultar antes de firmar: en ese tiempo el contrato pudo cambiar en el mostrador.'**
   String coConfirmStaleOldWhy(String age);
+
+  /// Vejez CON ORIGEN (corrida e2e 2): POST /vehicle devolvió 200 y la re-lectura de display-data se cayó. Gana a coConfirmStaleWhy/coConfirmStaleOldWhy porque esos dos hablan de la licencia y del contrato, y aquí lo que miente es la tarjeta del vehículo. No bloquea el CTA: el swap SÍ quedó en el servidor.
+  ///
+  /// In es, this message translates to:
+  /// **'El cambio de unidad se guardó, pero la reserva no se pudo volver a leer: el vehículo de abajo puede ser el que acabas de reemplazar. Actualiza los datos antes de entregar.'**
+  String get coConfirmSwapStaleWhy;
+
+  /// No description provided for @coConfirmSwapStaleLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambio de unidad'**
+  String get coConfirmSwapStaleLabel;
+
+  /// Fila dentro de la tarjeta del vehículo, ARRIBA de la unidad: avisa que el renglón siguiente puede ser la unidad reemplazada. El hecho es doble y las dos mitades importan: el cambio no se perdió, y lo que se ve no es lo que hay.
+  ///
+  /// In es, this message translates to:
+  /// **'Guardado en el servidor · sin releer aquí'**
+  String get coConfirmSwapStaleValue;
 
   /// No description provided for @coConfirmCheckingPill.
   ///

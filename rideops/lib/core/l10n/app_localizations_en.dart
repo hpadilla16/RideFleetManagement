@@ -729,6 +729,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Camera permission is denied. Enable it in the system Settings and try again.';
 
   @override
+  String get camShutterStuckTitle => 'The camera never returned the photo';
+
+  @override
+  String get camShutterStuckHint =>
+      'The shot hung and never came back. The camera was closed; open it again and retry. If it keeps happening, use another phone for this vehicle.';
+
+  @override
   String get langSpanish => 'Español';
 
   @override
@@ -1053,6 +1060,19 @@ class AppLocalizationsEn extends AppLocalizations {
           '$count items waiting (phone limit). Nothing more fits — connect to a network so it drains and you can keep capturing.',
       one:
           '1 item waiting (phone limit). Nothing more fits — connect to a network so it drains and you can keep capturing.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String outboxFullDeadHint(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count of them were rejected and are waiting on you: retry them or discard them to free their space — a network alone will not move them.',
+      one:
+          '1 of them was rejected and is waiting on you: retry it or discard it to free its space — a network alone will not move it.',
     );
     return '$_temp0';
   }
@@ -1707,6 +1727,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String coConfirmStaleOldWhy(String age) {
     return 'This data is $age old and the current lookup did not get through. Check again before signing: the contract could have changed at the counter in that time.';
   }
+
+  @override
+  String get coConfirmSwapStaleWhy =>
+      'The unit change was saved, but the reservation could not be read back: the vehicle below may be the one you just replaced. Refresh the data before handing over.';
+
+  @override
+  String get coConfirmSwapStaleLabel => 'Unit change';
+
+  @override
+  String get coConfirmSwapStaleValue =>
+      'Saved on the server · not re-read here';
 
   @override
   String get coConfirmCheckingPill => 'Checking';

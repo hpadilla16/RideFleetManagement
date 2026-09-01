@@ -15,7 +15,15 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$HandoffToken {
 
- String get token;@IsoDateTimeConverter() DateTime? get expiresAt; String get kind; bool get reused;
+ String get token;@IsoDateTimeConverter() DateTime? get expiresAt; String get kind; bool get reused;/// URL ABSOLUTA que el cliente abre al escanear el QR, ya resuelta por el
+/// servidor (`publicUrlForToken`, checkout-session.service.js:62-64).
+///
+/// Llega solo en `TERMS_SIGNING`: para `MOBILE_INSPECTION` el backend
+/// manda **null** a propósito —ese token se canjea por API y no tiene
+/// página pública— y adivinarle una ruta sería peor que omitirla. O sea
+/// que null aquí NO es "backend viejo", puede ser "este kind no tiene
+/// URL"; el fallback de la app cubre los dos casos igual.
+ String? get signUrl;
 /// Create a copy of HandoffToken
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +36,16 @@ $HandoffTokenCopyWith<HandoffToken> get copyWith => _$HandoffTokenCopyWithImpl<H
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is HandoffToken&&(identical(other.token, token) || other.token == token)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt)&&(identical(other.kind, kind) || other.kind == kind)&&(identical(other.reused, reused) || other.reused == reused));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is HandoffToken&&(identical(other.token, token) || other.token == token)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt)&&(identical(other.kind, kind) || other.kind == kind)&&(identical(other.reused, reused) || other.reused == reused)&&(identical(other.signUrl, signUrl) || other.signUrl == signUrl));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,token,expiresAt,kind,reused);
+int get hashCode => Object.hash(runtimeType,token,expiresAt,kind,reused,signUrl);
 
 @override
 String toString() {
-  return 'HandoffToken(token: $token, expiresAt: $expiresAt, kind: $kind, reused: $reused)';
+  return 'HandoffToken(token: $token, expiresAt: $expiresAt, kind: $kind, reused: $reused, signUrl: $signUrl)';
 }
 
 
@@ -48,7 +56,7 @@ abstract mixin class $HandoffTokenCopyWith<$Res>  {
   factory $HandoffTokenCopyWith(HandoffToken value, $Res Function(HandoffToken) _then) = _$HandoffTokenCopyWithImpl;
 @useResult
 $Res call({
- String token,@IsoDateTimeConverter() DateTime? expiresAt, String kind, bool reused
+ String token,@IsoDateTimeConverter() DateTime? expiresAt, String kind, bool reused, String? signUrl
 });
 
 
@@ -65,13 +73,14 @@ class _$HandoffTokenCopyWithImpl<$Res>
 
 /// Create a copy of HandoffToken
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? token = null,Object? expiresAt = freezed,Object? kind = null,Object? reused = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? token = null,Object? expiresAt = freezed,Object? kind = null,Object? reused = null,Object? signUrl = freezed,}) {
   return _then(_self.copyWith(
 token: null == token ? _self.token : token // ignore: cast_nullable_to_non_nullable
 as String,expiresAt: freezed == expiresAt ? _self.expiresAt : expiresAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,kind: null == kind ? _self.kind : kind // ignore: cast_nullable_to_non_nullable
 as String,reused: null == reused ? _self.reused : reused // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,signUrl: freezed == signUrl ? _self.signUrl : signUrl // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 
@@ -156,10 +165,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String token, @IsoDateTimeConverter()  DateTime? expiresAt,  String kind,  bool reused)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String token, @IsoDateTimeConverter()  DateTime? expiresAt,  String kind,  bool reused,  String? signUrl)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _HandoffToken() when $default != null:
-return $default(_that.token,_that.expiresAt,_that.kind,_that.reused);case _:
+return $default(_that.token,_that.expiresAt,_that.kind,_that.reused,_that.signUrl);case _:
   return orElse();
 
 }
@@ -177,10 +186,10 @@ return $default(_that.token,_that.expiresAt,_that.kind,_that.reused);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String token, @IsoDateTimeConverter()  DateTime? expiresAt,  String kind,  bool reused)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String token, @IsoDateTimeConverter()  DateTime? expiresAt,  String kind,  bool reused,  String? signUrl)  $default,) {final _that = this;
 switch (_that) {
 case _HandoffToken():
-return $default(_that.token,_that.expiresAt,_that.kind,_that.reused);case _:
+return $default(_that.token,_that.expiresAt,_that.kind,_that.reused,_that.signUrl);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -197,10 +206,10 @@ return $default(_that.token,_that.expiresAt,_that.kind,_that.reused);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String token, @IsoDateTimeConverter()  DateTime? expiresAt,  String kind,  bool reused)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String token, @IsoDateTimeConverter()  DateTime? expiresAt,  String kind,  bool reused,  String? signUrl)?  $default,) {final _that = this;
 switch (_that) {
 case _HandoffToken() when $default != null:
-return $default(_that.token,_that.expiresAt,_that.kind,_that.reused);case _:
+return $default(_that.token,_that.expiresAt,_that.kind,_that.reused,_that.signUrl);case _:
   return null;
 
 }
@@ -212,13 +221,22 @@ return $default(_that.token,_that.expiresAt,_that.kind,_that.reused);case _:
 @JsonSerializable()
 
 class _HandoffToken extends HandoffToken {
-  const _HandoffToken({required this.token, @IsoDateTimeConverter() this.expiresAt, required this.kind, this.reused = false}): super._();
+  const _HandoffToken({required this.token, @IsoDateTimeConverter() this.expiresAt, required this.kind, this.reused = false, this.signUrl}): super._();
   factory _HandoffToken.fromJson(Map<String, dynamic> json) => _$HandoffTokenFromJson(json);
 
 @override final  String token;
 @override@IsoDateTimeConverter() final  DateTime? expiresAt;
 @override final  String kind;
 @override@JsonKey() final  bool reused;
+/// URL ABSOLUTA que el cliente abre al escanear el QR, ya resuelta por el
+/// servidor (`publicUrlForToken`, checkout-session.service.js:62-64).
+///
+/// Llega solo en `TERMS_SIGNING`: para `MOBILE_INSPECTION` el backend
+/// manda **null** a propósito —ese token se canjea por API y no tiene
+/// página pública— y adivinarle una ruta sería peor que omitirla. O sea
+/// que null aquí NO es "backend viejo", puede ser "este kind no tiene
+/// URL"; el fallback de la app cubre los dos casos igual.
+@override final  String? signUrl;
 
 /// Create a copy of HandoffToken
 /// with the given fields replaced by the non-null parameter values.
@@ -233,16 +251,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HandoffToken&&(identical(other.token, token) || other.token == token)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt)&&(identical(other.kind, kind) || other.kind == kind)&&(identical(other.reused, reused) || other.reused == reused));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HandoffToken&&(identical(other.token, token) || other.token == token)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt)&&(identical(other.kind, kind) || other.kind == kind)&&(identical(other.reused, reused) || other.reused == reused)&&(identical(other.signUrl, signUrl) || other.signUrl == signUrl));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,token,expiresAt,kind,reused);
+int get hashCode => Object.hash(runtimeType,token,expiresAt,kind,reused,signUrl);
 
 @override
 String toString() {
-  return 'HandoffToken(token: $token, expiresAt: $expiresAt, kind: $kind, reused: $reused)';
+  return 'HandoffToken(token: $token, expiresAt: $expiresAt, kind: $kind, reused: $reused, signUrl: $signUrl)';
 }
 
 
@@ -253,7 +271,7 @@ abstract mixin class _$HandoffTokenCopyWith<$Res> implements $HandoffTokenCopyWi
   factory _$HandoffTokenCopyWith(_HandoffToken value, $Res Function(_HandoffToken) _then) = __$HandoffTokenCopyWithImpl;
 @override @useResult
 $Res call({
- String token,@IsoDateTimeConverter() DateTime? expiresAt, String kind, bool reused
+ String token,@IsoDateTimeConverter() DateTime? expiresAt, String kind, bool reused, String? signUrl
 });
 
 
@@ -270,13 +288,14 @@ class __$HandoffTokenCopyWithImpl<$Res>
 
 /// Create a copy of HandoffToken
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? token = null,Object? expiresAt = freezed,Object? kind = null,Object? reused = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? token = null,Object? expiresAt = freezed,Object? kind = null,Object? reused = null,Object? signUrl = freezed,}) {
   return _then(_HandoffToken(
 token: null == token ? _self.token : token // ignore: cast_nullable_to_non_nullable
 as String,expiresAt: freezed == expiresAt ? _self.expiresAt : expiresAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,kind: null == kind ? _self.kind : kind // ignore: cast_nullable_to_non_nullable
 as String,reused: null == reused ? _self.reused : reused // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,signUrl: freezed == signUrl ? _self.signUrl : signUrl // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 

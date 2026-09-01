@@ -416,6 +416,10 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         // caída con el poll sano dejaba la tarjeta en verde sobre un payload
         // de hace diez minutos y nadie podía decir cuánto.
         contextFetchedAt: clock.now(),
+        // Llegó respuesta: lo que se pinta ya es post-swap. La única forma de
+        // apagar esta bandera es esta — un reintento que TAMPOCO llega deja
+        // la unidad vieja en pantalla y la bandera encendida.
+        contextStaleAfterSwap: false,
         context: CheckoutReservationContext(
           reservationNumber: reservation.reservationNumber,
           customerName: reservation.customer?.fullName,
@@ -455,6 +459,14 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       state = state.copyWith(
         contextVerdict:
             stale ? ContextVerdict.stale : ContextVerdict.unreachable,
+        // El swap SÍ se aplicó en el servidor (esta lectura viene después de
+        // un POST /vehicle con 200) y la re-lectura no llegó: lo que queda en
+        // pantalla es la unidad REEMPLAZADA. Eso no es "un dato viejo", es un
+        // dato que contradice al servidor, y la tarjeta del vehículo tiene
+        // que decirlo. Se conserva encendida si ya lo estaba: un segundo
+        // intento fallido no devuelve la unidad nueva a la pantalla.
+        contextStaleAfterSwap:
+            stale && (via == 'swap' || state.contextStaleAfterSwap),
         // La negativa solo se guarda cuando es lo ÚNICO que hay que contar.
         // Con datos en pantalla, citar un 500 al lado del nombre del cliente
         // le da cuerpo de error a una tarjeta que sigue siendo utilizable.

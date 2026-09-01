@@ -733,6 +733,13 @@ class AppLocalizationsEs extends AppLocalizations {
       'El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.';
 
   @override
+  String get camShutterStuckTitle => 'La cámara no devolvió la foto';
+
+  @override
+  String get camShutterStuckHint =>
+      'El disparo se quedó esperando y no volvió. La cámara se cerró; vuelve a abrirla e inténtalo otra vez. Si se repite, usa otro teléfono para este vehículo.';
+
+  @override
   String get langSpanish => 'Español';
 
   @override
@@ -1062,6 +1069,19 @@ class AppLocalizationsEs extends AppLocalizations {
           '$count envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.',
       one:
           '1 envío esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String outboxFullDeadHint(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count de ellos fueron rechazados y esperan tu decisión: reintenta o descártalos para liberar su espacio — la red sola no los mueve.',
+      one:
+          '1 de ellos fue rechazado y espera tu decisión: reintenta o descártalo para liberar su espacio — la red sola no lo mueve.',
     );
     return '$_temp0';
   }
@@ -1716,6 +1736,17 @@ class AppLocalizationsEs extends AppLocalizations {
   String coConfirmStaleOldWhy(String age) {
     return 'Estos datos son de hace $age y la consulta de ahora no llegó. Vuelve a consultar antes de firmar: en ese tiempo el contrato pudo cambiar en el mostrador.';
   }
+
+  @override
+  String get coConfirmSwapStaleWhy =>
+      'El cambio de unidad se guardó, pero la reserva no se pudo volver a leer: el vehículo de abajo puede ser el que acabas de reemplazar. Actualiza los datos antes de entregar.';
+
+  @override
+  String get coConfirmSwapStaleLabel => 'Cambio de unidad';
+
+  @override
+  String get coConfirmSwapStaleValue =>
+      'Guardado en el servidor · sin releer aquí';
 
   @override
   String get coConfirmCheckingPill => 'Consultando';

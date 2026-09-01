@@ -160,6 +160,16 @@ Future<bool> runBackgroundDrainOnce() async {
       ),
     );
 
+    // Rescate ANTES de contar — la misma compuerta que congelaba fotos en el
+    // foreground (ver DrainCoordinator.kick). Una fila huérfana en `inflight`
+    // no está en `pending`, así que este `isEmpty` daba "bandeja limpia", el
+    // worker devolvía éxito y el relevo del OS se cancelaba: la foto se
+    // quedaba en el teléfono sin que NADA volviera a mirarla.
+    try {
+      await store.resetInflight();
+    } catch (_) {
+      // Sin DB legible el worker sigue con lo que haya en `pending`.
+    }
     if ((await store.pending()).isEmpty) return true;
     try {
       await drainer.drain();

@@ -126,21 +126,31 @@ PhotoVault tempVault(Directory dir) => PhotoVault(
 /// en aparato queda declarada para H6 junto con WorkManager). [capture]
 /// escribe un JPEG mínimo temporal y devuelve su path, como la real.
 class FakeCameraService implements InspectionCameraService {
-  FakeCameraService({this.failOpen = false});
+  FakeCameraService({this.failOpen = false, this.hangOnCapture = false});
 
   bool failOpen;
+
+  /// Las sesiones que abra dejarán `takePicture()` colgado PARA SIEMPRE — el
+  /// obturador que la corrida e2e 2 encontró con GPU por software: ni foto,
+  /// ni excepción, ni nada. Vive aquí y no en la sesión porque la pantalla
+  /// abre su propia sesión y el test no puede tocarla antes.
+  bool hangOnCapture;
+
   final sessions = <FakeCameraSession>[];
 
   @override
   Future<InspectionCameraSession> open() async {
     if (failOpen) throw StateError('no camera available');
-    final session = FakeCameraSession();
+    final session = FakeCameraSession(hangOnCapture: hangOnCapture);
     sessions.add(session);
     return session;
   }
 }
 
 class FakeCameraSession implements InspectionCameraSession {
+  FakeCameraSession({this.hangOnCapture = false});
+
+  final bool hangOnCapture;
   bool _disposed = false;
   bool flashOn = false;
   int captures = 0;
@@ -156,6 +166,9 @@ class FakeCameraSession implements InspectionCameraSession {
   @override
   Future<String> takePicture() async {
     captures++;
+    // Colgado de verdad: un Future que nadie completa. No es un delay largo —
+    // un delay acaba resolviendo y no reproduce el defecto.
+    if (hangOnCapture) return Completer<String>().future;
     final file = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
       'rideops_fake_shot_${DateTime.now().microsecondsSinceEpoch}.jpg',

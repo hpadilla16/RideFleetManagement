@@ -48,6 +48,9 @@ class OutboxScreen extends ConsumerWidget {
             l10n: l10n,
             count: rows.length,
             bytes: pendingPhotoBytes,
+            // Con dead-letters dentro, "conéctate y se vaciará" sería falso:
+            // una fila muerta no la mueve la red, la mueve una decisión.
+            deadCount: dead.length,
           ),
           const SizedBox(height: 10),
         ],
@@ -66,7 +69,12 @@ class OutboxScreen extends ConsumerWidget {
           const SizedBox(height: 10),
         ],
         for (final row in live) ...[
-          _LiveRow(row: row, l10n: l10n, pendingIds: pendingIds),
+          _LiveRow(
+            row: row,
+            l10n: l10n,
+            pendingIds: pendingIds,
+            drainRunning: drain.running,
+          ),
           const SizedBox(height: 10),
         ],
         if (!drain.running && live.isNotEmpty) ...[
@@ -161,11 +169,15 @@ class _LiveRow extends StatelessWidget {
     required this.row,
     required this.l10n,
     required this.pendingIds,
+    required this.drainRunning,
   });
 
   final OutboxEntry row;
   final AppLocalizations l10n;
   final Set<String> pendingIds;
+
+  /// ¿Hay una corrida de drenado VIVA en este proceso?
+  final bool drainRunning;
 
   @override
   Widget build(BuildContext context) {
@@ -174,7 +186,13 @@ class _LiveRow extends StatelessWidget {
         payload['reservationId'] as String? ??
         '—';
     final isPhoto = row.kind == OutboxKinds.inspectionPhoto;
-    final uploading = row.status == 'inflight';
+    // `inflight` en la fila NO basta para decir "Subiendo": ese estado
+    // sobrevive a la muerte del proceso, y una fila huérfana pintaba el chip
+    // y la barra animada durante horas sin un solo POST detrás (corrida e2e
+    // 2). Se afirma la subida solo con una corrida viva; si no, la verdad es
+    // "En cola" — que además es lo que el rescate de arranque va a hacer con
+    // ella (DrainCoordinator.kick).
+    final uploading = row.status == 'inflight' && drainRunning;
     // "Espera sus fotos" (nota 2 del mockup): un complete cuya dependencia
     // sigue viva en la bandeja jamás se manda antes que ella.
     final waitsPhotos = !isPhoto &&
@@ -273,6 +291,20 @@ class _DeadRow extends ConsumerWidget {
     final code = row.lastErrorCode;
     final status = row.lastErrorStatus;
 
+    // ¿Esta foto todavía tiene binario? Desde este cambio el drenador YA NO
+    // borra el archivo al morir la fila, así que lo normal es que sí. Pero
+    // un teléfono que venía de una versión anterior tiene dead-letters sin
+    // archivo, y ofrecerles "Reintentar" es una puerta falsa: la fila revive,
+    // el drenador no encuentra la foto y muere otra vez con PHOTO_LOST.
+    //
+    // Mientras la comprobación viaja (`.value == null`) NO se retira nada:
+    // no se afirma una ausencia que no se ha comprobado (ver
+    // outboxPhotoPresentProvider).
+    final photoPath = payload['photoPath'] as String?;
+    final photoGone = isPhoto &&
+        photoPath != null &&
+        ref.watch(outboxPhotoPresentProvider(photoPath)).value == false;
+
     // Motivo en humano + acción a la medida (nota 4 del mockup 7B). Codes
     // del drenador: REQUIRED_ANGLES_MISSING → abrir inspección; TOKEN_* →
     // reintentar como acción PRIMARIA (mockup 7B — es 100 % recuperable: el
@@ -291,44 +323,66 @@ class _DeadRow extends ConsumerWidget {
     //   resto (4xx)            → hubo respuesta y fue un rechazo.
     //
     // Review GD-M1: estos dos brazos NO pueden colgar de `code == null`. Un
-    // 5xx/429 que SÍ traiga code (los 429 lo traen de rutina) caería al
-    // genérico "El servidor rechazó este envío" — exactamente la culpa mal
-    // repartida que este arreglo existe para matar, solo que por la otra
-    // puerta. `markFailed` acepta code y status por separado, así que la
-    // combinación es escribible aunque hoy el drenador no la produzca.
+    // 5xx/429 que SÍ traiga code caería al genérico "El servidor rechazó este
+    // envío" — exactamente la culpa mal repartida que este arreglo existe
+    // para matar, solo que por la otra puerta. `markFailed` acepta code y
+    // status por separado, así que la combinación es escribible.
+    //
+    // Corrección del EJEMPLO (verificado en el backend, no en el OpenAPI):
+    // ningún 429 de esta casa trae `code`. El limitador por inquilino
+    // responde `{error, tier, limit, resetAt}` (tenant-rate-limit.js:186-191)
+    // y el guard de rutas públicas —el que cubre `/api/mobile-inspection/*`,
+    // que es por donde drena la bandeja— responde `{error}` a secas
+    // (public-endpoint-guards.js:69-72). O sea que el 429 real cae hoy por el
+    // brazo del STATUS, que es justo como debe ser: la decisión ya se toma
+    // por status y NO por code. Lo que estaba mal era la frase "los 429 lo
+    // traen de rutina", no el arreglo.
     //
     // En ningún caso se traduce ni se clasifica el cuerpo del error: el
     // detalle crudo del servidor sigue intacto tras el chevron.
-    final (reason, canRetry, retryIsPrimary, canOpenInspection) =
-        switch (code) {
-      'REQUIRED_ANGLES_MISSING' => (
-          l10n.outboxReasonAnglesMissing,
-          false,
-          false,
-          true
-        ),
-      _ when code?.startsWith('TOKEN_') ?? false => (
-          l10n.outboxReasonToken,
-          true,
-          true,
-          false
-        ),
-      'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false, false),
-      'SESSION_GONE' => (l10n.outboxReasonSessionGone, false, false, false),
-      _ when code == null && status == null => (
-          l10n.outboxReasonNetwork,
-          true,
-          false,
-          false
-        ),
-      _ when status != null && _servidorNoPudo(status) => (
-          l10n.outboxReasonServerUnavailable,
-          true,
-          false,
-          false
-        ),
-      _ => (l10n.outboxReasonGeneric, true, false, false),
-    };
+    //
+    // Sin binario manda la FALTA DE LA FOTO, sea cual sea el code que la
+    // mató: un TOKEN_EXPIRED sobre una foto que ya no está sigue sin poder
+    // subirse, y su "Reintentar" primario sería la puerta más falsa de todas.
+    // El copy de PHOTO_LOST ya dice exactamente esto ("La foto ya no está en
+    // este teléfono. Solo puedes descartar este envío"), así que se reusa: es
+    // el mismo hecho, llegue por el drenador o por el disco.
+    final (reason, canRetry, retryIsPrimary, canOpenInspection) = photoGone
+        ? (l10n.outboxReasonPhotoLost, false, false, false)
+        : switch (code) {
+            'REQUIRED_ANGLES_MISSING' => (
+                l10n.outboxReasonAnglesMissing,
+                false,
+                false,
+                true
+              ),
+            _ when code?.startsWith('TOKEN_') ?? false => (
+                l10n.outboxReasonToken,
+                true,
+                true,
+                false
+              ),
+            'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false, false),
+            'SESSION_GONE' => (
+                l10n.outboxReasonSessionGone,
+                false,
+                false,
+                false
+              ),
+            _ when code == null && status == null => (
+                l10n.outboxReasonNetwork,
+                true,
+                false,
+                false
+              ),
+            _ when status != null && _servidorNoPudo(status) => (
+                l10n.outboxReasonServerUnavailable,
+                true,
+                false,
+                false
+              ),
+            _ => (l10n.outboxReasonGeneric, true, false, false),
+          };
 
     final title = isPhoto ? l10n.outboxItemPhoto(angle) : l10n.outboxItemComplete;
     final lastTime = TimeOfDay.fromDateTime(row.updatedAt.toLocal());
@@ -757,11 +811,21 @@ class _FullHeader extends StatelessWidget {
     required this.l10n,
     required this.count,
     required this.bytes,
+    required this.deadCount,
   });
 
   final AppLocalizations l10n;
   final int count;
   final int bytes;
+
+  /// Cuántas de las filas que llenan la bandeja son dead-letters.
+  ///
+  /// Desde que el binario de un dead-letter SE CONSERVA (esperando decisión
+  /// del humano), esas filas ocupan cupo y bytes. Sin este dato el cuerpo
+  /// diría solo "conéctate a una red para que se vacíe" — y la red no mueve
+  /// una fila muerta: la mueve una decisión. Decir la mitad de la salida es
+  /// mandar al empleado a caminar hacia la ventana otra vez.
+  final int deadCount;
 
   @override
   Widget build(BuildContext context) {
@@ -795,6 +859,19 @@ class _FullHeader extends StatelessWidget {
               height: 1.45,
             ),
           ),
+          if (deadCount > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              l10n.outboxFullDeadHint(deadCount),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: RideTokens.warnTx,
+                height: 1.45,
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           _Chip(
             label: l10n.outboxFullChip(

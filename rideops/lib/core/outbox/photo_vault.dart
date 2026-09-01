@@ -97,6 +97,19 @@ class PhotoVault {
     }
   }
 
+  /// ¿El binario sigue en disco? Lo pregunta la BANDEJA antes de ofrecer
+  /// "Reintentar" sobre un dead-letter de foto: sin archivo, ese botón solo
+  /// puede volver a morir con PHOTO_LOST, y la regla de la casa es que una
+  /// acción ofrecida tiene que poder tener éxito. NO descifra (eso es
+  /// [read]): la pregunta es de presencia, y descifrar 600 KB por fila para
+  /// pintar una lista sería caro y además leería PII sin necesidad.
+  ///
+  /// Un nombre sucio cuenta como ausente, igual que en [read]/[delete].
+  Future<bool> exists(String name) async {
+    if (_unsafeName(name)) return false;
+    return (await _fileFor(name)).existsSync();
+  }
+
   /// Borra el archivo. Best-effort e idempotente: si ya no existe NO es
   /// error (contrato de OutboxOps.deletePhotoFile).
   Future<void> delete(String name) async {

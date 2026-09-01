@@ -190,6 +190,32 @@ void main() {
     );
   });
 
+  testWidgets(
+      '10A — el QR usa la URL que manda el SERVIDOR: el inquilino con dominio '
+      'propio no necesita otro build', (tester) async {
+    final f = fakes();
+    // Lo que de verdad responde el mint desde 2026-08-17 (`publicUrlForToken`,
+    // checkout-session.service.js:62-64): la URL absoluta ya resuelta con el
+    // origen del inquilino. Antes la app la armaba con la constante de
+    // compilación RIDEOPS_WEB_BASE y este QR habría mandado al cliente al
+    // dominio horneado en el APK.
+    const tenantUrl =
+        'https://autosdelvalle.example.com/sign/tok_terms_fixture_0001';
+    f.api.onMintTermsToken = () async => termsToken(signUrl: tenantUrl);
+    await pumpTerms(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    final qr = tester.widget<QrView>(find.byType(QrView));
+    expect(qr.data, tenantUrl);
+    expect(qr.data, isNot(contains('10.0.2.2')),
+        reason: 'el dart-define es respaldo, no la fuente');
+  });
+
   testWidgets('10A — el countdown corre en mm:ss y pasa a ámbar EXACTAMENTE '
       'en la ventana de re-minteo del backend (2 min)', (tester) async {
     final f = fakes();

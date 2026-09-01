@@ -209,9 +209,25 @@ class OutboxService {
   }
 
   /// Purga selectiva de 6F: otra superficie completó la inspección — los
-  /// envíos de ESA sesión se retiran (con rastro) para no mandar duplicados.
+  /// envíos PENDIENTES de ESA sesión se retiran (con rastro) para no mandar
+  /// duplicados.
+  ///
+  /// **Las filas `dead` se quedan, y esa excepción es el punto entero.** El
+  /// motivo del purgado —no re-estampar sellos sobre una sesión que otra
+  /// superficie ya cerró— aplica a lo que TODAVÍA se iba a mandar. Una fila
+  /// muerta no se va a mandar: está esperando una decisión humana sobre
+  /// EVIDENCIA DE DAÑOS, y borrarla porque el servidor selló la inspección
+  /// hace desaparecer esa decisión sin que nadie la tome. Medido en la
+  /// corrida e2e 2: "1 envío necesita tu decisión" → el servidor sella → la
+  /// fila se esfuma sin aviso. Contra el DoD: el dead-letter es visible y
+  /// solo el usuario lo descarta ([discardDead], con su sheet de
+  /// consecuencias y su rastro).
+  ///
+  /// Devuelve cuántas filas se llevó (las vivas).
   Future<int> discardSession(String checkoutSessionId) async {
-    final rows = await db.byGroupKey(checkoutSessionId);
+    final rows = (await db.byGroupKey(checkoutSessionId))
+        .where((r) => r.status != 'dead')
+        .toList();
     for (final row in rows) {
       await _auditAndDelete(row, reasonCode: 'SESSION_COMPLETED');
     }

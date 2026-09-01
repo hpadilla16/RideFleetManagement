@@ -119,6 +119,28 @@ final StreamProvider<List<OutboxEntry>> outboxRowsProvider =
       .watchAllFor(userId: userId, tenantId: tenantId ?? '');
 });
 
+/// ¿El binario de esta foto sigue en la bóveda? Family por NOMBRE de archivo
+/// (lo que guarda el payload), no por fila: dos filas jamás comparten
+/// archivo, y así el cache se reusa si la lista se repinta.
+///
+/// Lo consume la bandeja para no ofrecer "Reintentar" sobre un dead-letter de
+/// foto cuyo binario ya no está — ese botón solo puede volver a morir con
+/// PHOTO_LOST. `autoDispose`: la respuesta caduca al salir de la pantalla, y
+/// al volver se vuelve a preguntar (el archivo pudo borrarse mientras tanto).
+///
+/// **En error se responde `true` a propósito.** Sin bóveda legible (Keystore
+/// caído, plugin ausente en tests) no se puede AFIRMAR que el archivo no
+/// está, y retirar la única acción recuperable por una duda sería el error
+/// contrario. La ausencia solo se declara cuando se comprobó.
+final outboxPhotoPresentProvider =
+    FutureProvider.autoDispose.family<bool, String>((ref, name) async {
+  try {
+    return await ref.watch(photoVaultProvider).exists(name);
+  } catch (_) {
+    return true;
+  }
+});
+
 /// Badge de la tab Bandeja (mockup 7, decisión del PM): cuenta pendientes +
 /// muertos; el COLOR distingue — ámbar oscuro (--badge-warn #8a5606) =
 /// esperando red, rojo = dead-letter que necesita decisión.

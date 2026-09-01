@@ -150,6 +150,15 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
     final vehicleConflict =
         state.conflict?.kind == CheckoutConflictKind.vehicleConflict;
 
+    // La EDAD del display-data, una sola vez: las DOS tarjetas salen de esa
+    // misma consulta y las dos envejecen juntas. Pintar la vejez solo en la
+    // del cliente decía, en la práctica, que la del vehículo estaba fresca
+    // (corrida e2e 2: cliente en ámbar "vista de hace 3 min" y, un renglón
+    // más abajo, la unidad REEMPLAZADA en blanco, con su odómetro viejo).
+    final staleAge = check.stale && state.contextFetchedAt != null
+        ? clock.now().difference(state.contextFetchedAt!)
+        : null;
+
     final customerCard = _CustomerCard(
       check: check,
       // Sin consulta tampoco se sabe si hubo pre-checkin: `precheckinDone`
@@ -163,14 +172,17 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
       // Regla 8D: con datos viejos en pantalla, la EDAD es parte del dato. Se
       // calcula aquí y no en el shell porque la vejez del shell cuelga de
       // `offline` —el error de la SESIÓN— y display-data se cae por su cuenta.
-      staleAge: check.stale && state.contextFetchedAt != null
-          ? clock.now().difference(state.contextFetchedAt!)
-          : null,
+      staleAge: staleAge,
     );
 
     final cards = <Widget>[
       if (vehicleConflict) ...[
-        _VehicleCard(state: state, conflict: true, onSwap: null),
+        _VehicleCard(
+          state: state,
+          conflict: true,
+          onSwap: null,
+          staleAge: staleAge,
+        ),
         const SizedBox(height: 12),
         customerCard,
       ] else ...[
@@ -179,6 +191,7 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
         _VehicleCard(
           state: state,
           conflict: false,
+          staleAge: staleAge,
           // Nota 2: el enlace desaparece donde el servidor ya no acepta el
           // swap. Y sin red no se ofrece: el sheet solo sabe mentir sin
           // servidor (su lista y su escritura son del servidor).
@@ -268,6 +281,13 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
     CheckoutWizardState state,
   ) {
     if (!check.stale) return null;
+    // El origen del stale MANDA sobre su edad. Los dos textos de abajo hablan
+    // de la licencia y del contrato —o sea, del CLIENTE— y salidos de un swap
+    // dejaban sin nombrar lo único que de verdad cambió y no se ve: la unidad
+    // en pantalla puede ser la que el agente acaba de reemplazar. Mandar a
+    // confrontar la licencia mientras el coche de la tarjeta es el otro es
+    // apuntar la linterna al lado equivocado.
+    if (state.contextStaleAfterSwap) return l10n.coConfirmSwapStaleWhy;
     final age = state.contextFetchedAt == null
         ? null
         : clock.now().difference(state.contextFetchedAt!);
@@ -280,10 +300,16 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
   /// El cuerpo crudo de la negativa de display-data, o null si no hay ninguno
   /// que citar (la petición murió sin respuesta, o el servidor mandó un cuerpo
   /// vacío). Null ⇒ la tarjeta no escribe un renglón hueco.
-  String? _serverMessage(CheckoutWizardState state) {
-    final message = state.contextError?.message.trim() ?? '';
-    return message.isEmpty ? null : message;
-  }
+  ///
+  /// Lee `serverMessage` y NO `message`, y ahí estaba el defecto: `message`
+  /// nunca es null —sin respuesta trae la prosa de Dio— así que el `isEmpty`
+  /// jamás se cumplía y bajo "Respuesta del servidor:" salía "The connection
+  /// errored: … cannot be solved by the library". Inglés, de una librería,
+  /// atribuido a un servidor con el que no se llegó a hablar (corrida e2e 2).
+  /// El renglón vuelve a aparecer solo cuando HUBO cuerpo de respuesta — que
+  /// es exactamente lo que este comentario prometía desde el principio.
+  String? _serverMessage(CheckoutWizardState state) =>
+      state.contextError?.serverMessage;
 
   /// La acción de apoyo del pie, o null cuando no hay nada que ofrecer.
   ///
@@ -516,11 +542,23 @@ class _VehicleCard extends StatelessWidget {
     required this.state,
     required this.conflict,
     required this.onSwap,
+    required this.staleAge,
   });
 
   final CheckoutWizardState state;
   final bool conflict;
   final VoidCallback? onSwap;
+
+  /// Cuánto hace de la última consulta a display-data que SÍ respondió, o
+  /// null si lo que hay en pantalla está fresco.
+  ///
+  /// Es la MISMA edad de la tarjeta del cliente porque es la MISMA consulta.
+  /// Que solo la de arriba la mostrara era el defecto: la unidad, la placa y
+  /// el odómetro salen de este payload, y en el peor caso —swap aceptado por
+  /// el servidor con la re-lectura caída— lo que se pintaba en blanco, con
+  /// pinta de recién comprobado, era el coche que el agente acababa de
+  /// reemplazar.
+  final Duration? staleAge;
 
   @override
   Widget build(BuildContext context) {
@@ -539,17 +577,42 @@ class _VehicleCard extends StatelessWidget {
         state.contextVerdict == ContextVerdict.unreachable && unit.isEmpty;
     final checking =
         state.contextVerdict == ContextVerdict.checking && unit.isEmpty;
+    // Vieja Y con algo que enseñar. Sin unidad en pantalla no hay nada que
+    // envejecer: manda el copy de "no se pudo consultar".
+    final stale = staleAge != null && unit.isNotEmpty;
     return VerifyCard(
       title: l10n.coConfirmVehicle,
-      tone: conflict ? VerifyTone.bad : VerifyTone.neutral,
+      // El conflicto GANA: es un veredicto vivo del servidor sobre esta
+      // unidad, no una duda sobre la frescura. Después manda la vejez.
+      tone: conflict
+          ? VerifyTone.bad
+          : stale
+              ? VerifyTone.warn
+              : VerifyTone.neutral,
       // Solo se afirma "Disponible" cuando el servidor dice AVAILABLE; con
       // cualquier otro estado se muestra la palabra cruda del servidor.
+      //
+      // Con datos viejos la pastilla pasa a decir la EDAD, igual que en la
+      // tarjeta del cliente: ese "Disponible" es tan viejo como la unidad que
+      // lo acompaña, y afirmarlo en la pastilla mientras el cuerpo miente
+      // sería la peor combinación de las dos.
       pillLabel: conflict
           ? l10n.coConfirmConflictPill
-          : status == 'AVAILABLE'
-              ? l10n.coConfirmVehicleAvailable
-              : (status.isEmpty ? null : status),
+          : stale
+              ? l10n.coStaleView(checkoutAgeLabel(l10n, staleAge!))
+              : status == 'AVAILABLE'
+                  ? l10n.coConfirmVehicleAvailable
+                  : (status.isEmpty ? null : status),
       children: [
+        // La unidad que se ve puede ser la REEMPLAZADA (swap con 200 del
+        // servidor + re-lectura caída). Va DENTRO de la tarjeta y arriba de
+        // la unidad, porque es la advertencia sobre el renglón siguiente.
+        if (state.contextStaleAfterSwap && unit.isNotEmpty)
+          KvRow(
+            label: l10n.coConfirmSwapStaleLabel,
+            value: l10n.coConfirmSwapStaleValue,
+            warn: true,
+          ),
         KvRow(
           label: l10n.coConfirmUnit,
           value: unit.isNotEmpty

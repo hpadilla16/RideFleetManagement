@@ -14,6 +14,7 @@ _HandoffToken _$HandoffTokenFromJson(Map<String, dynamic> json) =>
       ),
       kind: json['kind'] as String,
       reused: json['reused'] as bool? ?? false,
+      signUrl: json['signUrl'] as String?,
     );
 
 Map<String, dynamic> _$HandoffTokenToJson(_HandoffToken instance) =>
@@ -22,6 +23,7 @@ Map<String, dynamic> _$HandoffTokenToJson(_HandoffToken instance) =>
       'expiresAt': const IsoDateTimeConverter().toJson(instance.expiresAt),
       'kind': instance.kind,
       'reused': instance.reused,
+      'signUrl': instance.signUrl,
     };
 
 _MobileInspectionState _$MobileInspectionStateFromJson(
