@@ -33,6 +33,7 @@ import { prisma as defaultPrisma } from '../../lib/prisma.js';
 import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { isQuoteNumber, normalizeQuoteNumber, quoteNumberCandidate } from './quote-number.js';
+import { normalizeCustomerEmail, messageFor, CUSTOMER_EMAIL_INVALID } from '../../lib/customer-email.js';
 
 const DEFAULT_TTL_HOURS = 72;
 
@@ -675,7 +676,13 @@ export function createQuotesService(deps = {}) {
       } else {
         const name = String(input.contactName || quote.contactName || '').trim();
         const phone = String(input.contactPhone || quote.contactPhone || '').trim();
-        const email = String(input.contactEmail || quote.contactEmail || '').trim() || null;
+        // Writer #7 of the customer-email inventory (lib/customer-email.js).
+        // STAFF capture -> refuse, expressed in this module's own error dialect
+        // so the routes keep classifying it the way they already do. The
+        // sentence and the machine code come from the shared gate, not here.
+        const emailVerdict = normalizeCustomerEmail(input.contactEmail || quote.contactEmail);
+        if (!emailVerdict.ok) throw err(messageFor('staff'), CUSTOMER_EMAIL_INVALID, 400);
+        const email = emailVerdict.email;
         if (!name || !phone) {
           throw err('customerId, or contact name + phone, is required to convert', 'CUSTOMER_REQUIRED', 422);
         }

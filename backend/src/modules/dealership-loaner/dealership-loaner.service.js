@@ -628,7 +628,11 @@ async function resolveCustomer(payload = {}, scope = {}) {
   const firstName = String(payload.firstName || '').trim();
   const lastName = String(payload.lastName || '').trim();
   const phone = String(payload.phone || '').trim();
-  const email = String(payload.email || '').trim().toLowerCase() || null;
+  // Writer #6 of the customer-email inventory (lib/customer-email.js). STAFF
+  // capture at the dealership counter -> 400. Note the dedupe below is an EXACT
+  // `where: { email }` match, which is why the shared normalizer lowercases the
+  // whole address rather than only the domain.
+  const email = assertCustomerEmail(payload.email, { audience: 'staff' });
   if (!firstName || !lastName || !phone) {
     throw new Error('Customer first name, last name, and phone are required');
   }

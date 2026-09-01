@@ -9,6 +9,7 @@ import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-imp
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { normalizeCustomerEmail, messageFor, CUSTOMER_EMAIL_INVALID } from '../../lib/customer-email.js';
 import { withTenantSchema } from '../../lib/tenant-routing.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
@@ -2381,6 +2382,16 @@ reservationsRouter.post('/:id/precheckin/staff-complete', idempotency({ kind: 'v
             return res.status(400).json({ error: 'Invalid insurance expiration date' });
           }
           customerUpdate[key] = exp;
+        } else if (key === 'email') {
+          // Writer #4 of the customer-email inventory (lib/customer-email.js).
+          // STAFF capture — same shape as the DOB / expiry guards right above:
+          // a clean 400 the agent can act on, instead of a string that only
+          // fails much later, inside MailerSend, after the contract is sealed.
+          const verdict = normalizeCustomerEmail(body[key]);
+          if (!verdict.ok) {
+            return res.status(400).json({ error: messageFor('staff'), code: CUSTOMER_EMAIL_INVALID });
+          }
+          customerUpdate[key] = verdict.email;
         } else {
           customerUpdate[key] = body[key] || null;
         }

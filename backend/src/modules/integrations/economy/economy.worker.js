@@ -26,6 +26,7 @@
 
 import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
+import { importCustomerEmailOrNull } from '../../../lib/customer-email.js';
 import { captureBackendException } from '../../../lib/sentry.js';
 import { registerWorker, enqueueJob } from '../../../lib/queue/index.js';
 import { SCRAPER_PRIORITY } from '../../../lib/queue/priorities.js';
@@ -73,7 +74,14 @@ const CUSTOMER_PHONE_PLACEHOLDER = '0000000000';
 export async function maybeCreateCustomerFromEconomy(prismaClient, extRes) {
   const firstName = (extRes.customerFirstName || '').trim();
   const lastName = (extRes.customerLastName || '').trim();
-  const email = (extRes.customerEmail || '').trim().toLowerCase();
+  // Writer #12 of the customer-email inventory (lib/customer-email.js). IMPORT
+  // policy — drop to null and warn; a bad cell never costs us the reservation.
+  const email = importCustomerEmailOrNull(extRes.customerEmail, {
+    log: logger,
+    source: 'economy',
+    tenantId: extRes.tenantId,
+    externalRef: extRes.externalRef,
+  }) || '';
   const phone = (extRes.customerPhone || '').trim();
 
   if (!firstName || !lastName) return null;

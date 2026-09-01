@@ -16,6 +16,7 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { parseDepositRules, evaluateDepositRule, parseDepositRuleDecision } from '../../lib/deposit-rules.js';
 import logger from '../../lib/logger.js';
 import { normalizeDob } from '../../lib/dob.js';
+import { normalizeCustomerEmail, messageFor, CUSTOMER_EMAIL_INVALID } from '../../lib/customer-email.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
@@ -1316,7 +1317,18 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
     const body = req.body || {};
     const firstName = String(body.firstName || '').trim();
     const lastName = String(body.lastName || '').trim();
-    const email = String(body.email || '').trim().toLowerCase();
+    // Writer #8 of the customer-email inventory (lib/customer-email.js). The
+    // CUSTOMER is typing their OWN address here, so refusing is both fair and
+    // cheap for them to fix — and this is the address the sealed contract gets
+    // mailed to. It runs here, before the required-field sweep and long before
+    // the first mutation, so a bad address costs nothing but a retype.
+    const emailVerdict = normalizeCustomerEmail(body.email);
+    if (!emailVerdict.ok) {
+      return res.status(400).json({ error: messageFor('customer'), code: CUSTOMER_EMAIL_INVALID });
+    }
+    // '' rather than null: the requiredChecks sweep just below treats falsy as
+    // "missing", which is exactly the verdict an empty email deserves here.
+    const email = emailVerdict.email || '';
     const phone = String(body.phone || '').trim();
     const insuranceSelection = body.insuranceSelection || null;
     const customerSelectedOurInsurance = insuranceSelection?.selectedPlanCode && !insuranceSelection?.declinedCoverage;

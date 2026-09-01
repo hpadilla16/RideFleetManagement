@@ -1,4 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
+import logger from '../../lib/logger.js';
+import { importCustomerEmailOrNull } from '../../lib/customer-email.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { maybeSendReviewRequestEmail } from './review-email.service.js';
@@ -778,7 +780,18 @@ async function createImportedCustomer(prepared, row) {
       tenantId: prepared.tenantId,
       firstName: prepared.customerFirstName,
       lastName: prepared.customerLastName,
-      email: prepared.customerEmail || null,
+      // Writer #15 of the customer-email inventory (lib/customer-email.js).
+      // Legacy reservation migration: IMPORT policy, not staff policy. This
+      // path already invents a placeholder phone rather than refuse a row, so
+      // refusing over an email would contradict the file's own bargain — the
+      // reservation is the thing worth keeping. Null + a warning naming the
+      // reservation, so the cleanup can find it.
+      email: importCustomerEmailOrNull(prepared.customerEmail, {
+        log: logger,
+        source: 'reservation-import',
+        tenantId: prepared.tenantId,
+        externalRef: prepared.reservationNumber || null,
+      }),
       phone: fallbackPhone,
       notes: prepared.customerPhone
         ? null

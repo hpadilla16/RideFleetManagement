@@ -1,5 +1,6 @@
 import { bookingEngineService } from '../booking-engine/booking-engine.service.js';
 import { ValidationError } from '../../lib/errors.js';
+import { assertCustomerEmail } from '../../lib/customer-email.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { authService } from '../auth/auth.service.js';
@@ -678,7 +679,11 @@ export const publicBookingService = {
   },
 
   async createGuestAccount(input = {}) {
-    const email = normalizeEmail(input?.email);
+    // Writer #9 of the customer-email inventory (lib/customer-email.js). The
+    // CUSTOMER is registering with their own address, and the very next thing
+    // this method does is MAIL them the guest-access link — an unusable address
+    // makes the whole account unreachable. Refuse with the customer wording.
+    const email = assertCustomerEmail(input?.email, { audience: 'customer' });
     const firstName = String(input?.firstName || '').trim();
     const lastName = String(input?.lastName || '').trim();
     const phone = String(input?.phone || '').trim();

@@ -4,6 +4,7 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { normalizeDob } from '../../lib/dob.js';
 import { normalizeDate } from '../../lib/date-utils.js';
+import { assertCustomerEmail, normalizeCustomerEmail, messageFor } from '../../lib/customer-email.js';
 import {
   materializeDocumentRef,
   maybeUploadCustomerDocument,
@@ -120,7 +121,14 @@ async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
 
   const firstName = norm(row.firstName);
   const lastName = norm(row.lastName);
-  const email = norm(row.email) || null;
+  // Writer #16 of the customer-email inventory (lib/customer-email.js).
+  // Staff-driven, but ROW-level rather than 400: this endpoint already reports
+  // per-row verdicts that the operator reads before committing, and refusing the
+  // request would discard every good row over one bad cell. Invalid → the row is
+  // marked invalid (importBulk only writes `valid` rows) and the address is
+  // dropped from the duplicate lookup so garbage never joins a WHERE.
+  const emailVerdict = normalizeCustomerEmail(row.email);
+  const email = emailVerdict.ok ? emailVerdict.email : null;
   const phone = norm(row.phone);
   const licenseNumber = norm(row.licenseNumber) || null;
   const licenseState = norm(row.licenseState) || null;
@@ -134,6 +142,7 @@ async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
   if (!firstName) errors.push('firstName required');
   if (!lastName) errors.push('lastName required');
   if (!phone) errors.push('phone required');
+  if (!emailVerdict.ok) errors.push(messageFor('staff'));
   if (row.dateOfBirth && !dateOfBirth) errors.push('dateOfBirth invalid');
   if (row.creditBalance && creditBalance == null) errors.push('creditBalance invalid');
 
@@ -452,7 +461,10 @@ export const customersService = {
         tenantId: scope?.tenantId || null,
         firstName: data.firstName,
         lastName: data.lastName,
-        email: data.email ?? null,
+        // Writer #1 of the customer-email inventory (lib/customer-email.js).
+        // STAFF capture: throws 400 / CUSTOMER_EMAIL_INVALID so the agent can
+        // retype it at the counter. Blank still stores an explicit null.
+        email: assertCustomerEmail(data.email, { audience: 'staff' }),
         phone: data.phone,
         licenseNumber: data.licenseNumber ?? null,
         licenseState: data.licenseState ?? null,
@@ -559,6 +571,17 @@ export const customersService = {
     if (!current) throw new Error('Customer not found');
     const data = { ...(patch || {}) };
     delete data.tenantId;
+    // Writer #2 of the customer-email inventory (lib/customer-email.js). STAFF
+    // capture. Guarded by presence, not truthiness: a patch that does not
+    // mention `email` must leave the column alone, exactly like dateOfBirth
+    // below, while an explicit `email: ''` still clears it to null. The
+    // `!== undefined` half matters for the same reason — `undefined` is Prisma's
+    // "leave this column alone", and a caller spreading a partial can hand us
+    // the key carrying it. Validating that would turn "don't touch the email"
+    // into "erase the email".
+    if (Object.prototype.hasOwnProperty.call(data, 'email') && data.email !== undefined) {
+      data.email = assertCustomerEmail(data.email, { audience: 'staff' });
+    }
     if (Object.prototype.hasOwnProperty.call(data, 'dateOfBirth')) {
       data.dateOfBirth = data.dateOfBirth ? normalizeDob(data.dateOfBirth) : null;
     }

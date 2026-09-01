@@ -15,6 +15,8 @@
  * through the same service account.
  */
 
+import { normalizeCustomerEmail, messageFor } from '../../lib/customer-email.js';
+
 export const VOZIA_CUSTOMER_FIELDS = [
   'email',
   'address1',
@@ -34,9 +36,10 @@ const FIELD_MAX = {
   state: 60,
   zip: 20
 };
-// Deliberately simple: one @, no spaces, a dot in the domain. The mailer is
-// the real validator; this just rejects garbage before it lands in the column.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// 2026-09-01 — the local EMAIL_RE that used to live here is gone. It was one of
+// three independent copies of "is this an address?" in the backend while eleven
+// other writers had none, which is how "GERENTE VOLVO" reached MailerSend from a
+// door this one did guard. Writer #3 of the inventory in lib/customer-email.js.
 
 export function validateVoziaCustomerPatch(body = {}) {
   const errors = [];
@@ -68,8 +71,13 @@ export function validateVoziaCustomerPatch(body = {}) {
     } else if (value.length > FIELD_MAX[field]) {
       errors.push(`${field} must be ${FIELD_MAX[field]} characters or fewer.`);
     }
-    if (field === 'email' && value && !EMAIL_RE.test(value)) {
-      errors.push('email must be a valid email address.');
+    if (field === 'email' && value) {
+      const verdict = normalizeCustomerEmail(value);
+      // Store the normalized form, not the raw one: this endpoint's dedupe and
+      // the OLD-address change notice below both compare addresses, and a
+      // casing difference must not read as a different person.
+      if (verdict.ok) value = verdict.email;
+      else errors.push(messageFor('staff'));
     }
   }
 

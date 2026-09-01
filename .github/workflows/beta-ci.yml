@@ -215,6 +215,26 @@ jobs:
         #     `npm test` chain is NOT enough — nothing in this workflow invokes
         #     `npm test`, which is the trap documented above.
         #
+        #   test:customer-email / test:customer-email-writers — added 2026-09-01
+        #     with the validate-the-address-at-capture fix. On 2026-08-31, 54
+        #     sealed contracts had never been mailed; 20 of them carried an
+        #     address that was PRESENT but not an address (MailerSend 422 /
+        #     MS42208), the clearest one addressed to `GERENTE VOLVO`. Nothing
+        #     between the keyboard and the mailer ever asked whether the string
+        #     was an address, and the field feeding it is on the contract.
+        #
+        #     The first suite is the rule itself: what is refused, which
+        #     odd-but-legal shapes must still pass, and the two audience
+        #     sentences. The second is the RATCHET, and it is the half that
+        #     matters in CI: it re-derives the set of files writing
+        #     Customer.email / RentalAgreement.customerEmail and fails when a new
+        #     writer ships unclassified OR when any existing one stops calling
+        #     the shared gate. The same rule already existed in three files and
+        #     was absent from eleven — that asymmetry is how the bad address got
+        #     in, and only a machine can keep the inventory honest.
+        #
+        #     Both are DB-free and pass under the dummy DATABASE_URL below.
+        #
         #   test:billing-suspension / test:billing-panel / test:billing-model —
         #     added 2026-08-28 with the restore-previous-status fix, and the
         #     FIRST billing suites in this workflow: `grep -n billing` on this
@@ -238,7 +258,7 @@ jobs:
         #     workflow.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:tenant-status && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:presence-boundary && npm run test:precheckin-tax-rate && npm run test:billing-suspension && npm run test:billing-panel && npm run test:billing-model && npm run test:finalize-email && npm run test:checkout-finalize-truth
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:tenant-status && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:presence-boundary && npm run test:precheckin-tax-rate && npm run test:billing-suspension && npm run test:billing-panel && npm run test:billing-model && npm run test:finalize-email && npm run test:checkout-finalize-truth && npm run test:customer-email && npm run test:customer-email-writers
 
   precheckin-charges-embedded:
     # THE PRE-CHECK-IN CHARGE SHEET, AGAINST A REAL TRANSACTION.

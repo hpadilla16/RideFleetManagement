@@ -121,6 +121,16 @@ const CI_GATED = {
     'the two 20260828 migrations against schema.prisma. There is no Postgres in this '
     + 'workflow, so this file-level comparison is the ONLY pre-production check that '
     + 'SQL gets before it runs on the live database at boot',
+  'test:customer-email':
+    'whether a captured string is an address at all. The column it guards is the one '
+    + 'the SEALED CONTRACT is mailed to: on 2026-08-31, 20 of 54 unsent contracts '
+    + 'carried a present-but-invalid address (MailerSend 422 / MS42208), the clearest '
+    + 'addressed to GERENTE VOLVO',
+  'test:customer-email-writers':
+    'the RATCHET over every writer of Customer.email / RentalAgreement.customerEmail. '
+    + 'The rule already existed in three files and was missing from eleven, which is '
+    + 'how the bad address got in — a shared validator only counts if every door calls '
+    + 'it, and only a machine can keep that inventory honest',
 };
 
 function ciWorkflowRunLines() {

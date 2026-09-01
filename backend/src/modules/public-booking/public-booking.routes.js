@@ -197,7 +197,13 @@ publicBookingRouter.post('/checkout', bookingWriteGuard, async (req, res, next) 
     // Honor an explicit status code first, then a message safety-net; otherwise let it 500 (logged to Sentry).
     const code = Number(error?.statusCode || error?.status);
     if (code >= 400 && code < 500) {
-      return res.status(code).json({ error: error.message });
+      // Additive: pass a MACHINE code through when the error carries one (e.g.
+      // CUSTOMER_EMAIL_INVALID) so the storefront can highlight the offending
+      // field instead of parsing English. Errors without one are unchanged.
+      return res.status(code).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
     }
     if (/required|available|sold out|not found|not enabled|after|closed|outside|operating hours|must be/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
