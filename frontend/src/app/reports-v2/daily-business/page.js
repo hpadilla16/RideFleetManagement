@@ -220,7 +220,7 @@ function DailyBusinessReport({ token, me, logout }) {
                   <table>
                     <thead>
                       <tr>
-                        <th>RA#</th><th>Customer</th><th>Unit</th><th>Days</th>
+                        <th>RA#</th><th>Res#</th><th>Customer</th><th>Unit</th><th>Days</th>
                         <th style={{ textAlign: 'right' }}>Time</th>
                         <th style={{ textAlign: 'right' }}>Total</th>
                       </tr>
@@ -229,6 +229,7 @@ function DailyBusinessReport({ token, me, logout }) {
                       {d.closed.map((c) => (
                         <tr key={c.number}>
                           <td>{c.number}</td>
+                          <td>{c.reservationNumber}</td>
                           <td>{c.customer}</td>
                           <td>{c.unit}</td>
                           <td>{c.days ?? ''}</td>
@@ -247,7 +248,7 @@ function DailyBusinessReport({ token, me, logout }) {
                   <table>
                     <thead>
                       <tr>
-                        <th>RA#</th><th>Customer</th><th>Method</th><th>Reference</th>
+                        <th>RA#</th><th>Res#</th><th>Customer</th><th>Method</th><th>Reference</th>
                         <th style={{ textAlign: 'right' }}>Amount</th>
                       </tr>
                     </thead>
@@ -255,6 +256,7 @@ function DailyBusinessReport({ token, me, logout }) {
                       {d.payments.map((p, i) => (
                         <tr key={`${p.number}-${i}`}>
                           <td>{p.number}</td>
+                          <td>{p.reservationNumber}</td>
                           <td>{p.customer}</td>
                           <td>{p.method}</td>
                           <td className="ui-muted">{p.reference}</td>
