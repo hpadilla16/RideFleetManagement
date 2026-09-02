@@ -284,6 +284,38 @@ export default function VehicleProfilePage() {
   return <AuthGate>{({ token, me, logout }) => <VehicleProfileInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
 
+// One seed-from-history proposal row (2026-09-06): the admin picks the real
+// view (seeded free-text candidates default FRONT) and approves to the
+// baseline, or discards (kept server-side as a tombstone so a re-run cannot
+// resurrect it).
+export function ProposedSeedRow({ report, busy, onReview, t }) {
+  const [view, setView] = useState(report.view || 'FRONT');
+  const kindLabel = String(report.seedSourceRef || '').startsWith('vdr:')
+    ? t('damageBaseline.seed.kindSoft', 'acknowledged report')
+    : String(report.seedSourceRef || '').startsWith('inc:')
+      ? t('damageBaseline.seed.kindIncident', 'incident')
+      : t('damageBaseline.seed.kindInspection', 'inspection note');
+  return (
+    <div data-testid="seed-proposed-row" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '7px 10px' }}>
+      <span style={{ flex: '1 1 240px', fontSize: 12.5 }}>
+        <strong>{report.description || 'Damage'}</strong>
+        <span className="ui-muted" style={{ display: 'block', fontSize: 11.5 }}>
+          {kindLabel}{report.reservationNumber ? ` · #${report.reservationNumber}` : ''}
+        </span>
+      </span>
+      <select value={view} onChange={(e) => setView(e.target.value)} disabled={busy} style={{ fontSize: 12 }} aria-label={t('damageBaseline.seed.viewLabel', 'View')}>
+        {['FRONT', 'REAR', 'LEFT', 'RIGHT', 'INTERIOR'].map((v) => <option key={v} value={v}>{VIEW_LABELS[v]}</option>)}
+      </select>
+      <button type="button" className="btn-sm" disabled={busy} data-testid="seed-approve" onClick={() => onReview(report, 'approve', view)}>
+        {t('damageBaseline.seed.approve', 'Approve')}
+      </button>
+      <button type="button" className="btn-sm" disabled={busy} data-testid="seed-discard" onClick={() => onReview(report, 'discard')} style={{ color: '#b91c1c' }}>
+        {t('damageBaseline.seed.discard', 'Discard')}
+      </button>
+    </div>
+  );
+}
+
 function VehicleProfileInner({ token, me, logout }) {
   const { t } = useTranslation();
   const { id } = useParams();
@@ -314,7 +346,11 @@ function VehicleProfileInner({ token, me, logout }) {
   const [editModal, setEditModal] = useState({ open: false, saving: false, form: null });
   const [editLists, setEditLists] = useState({ vehicleTypes: [], locations: [] });
   // Fase C (2026-06-11) — damage history (hard-approved customer reports).
-  const [damage, setDamage] = useState({ active: [], fixed: [], diagramType: 'sedan', loading: true });
+  const [damage, setDamage] = useState({ active: [], fixed: [], proposed: [], diagramType: 'sedan', loading: true });
+  // Seed-from-history (2026-09-06): { preview } after the dry run (confirm
+  // dialog lists what a real run creates), { running } while seeding.
+  const [seedModal, setSeedModal] = useState(null);
+  const [seedReviewBusy, setSeedReviewBusy] = useState('');
   const [damageView, setDamageView] = useState('LEFT');
   const [fixModal, setFixModal] = useState(null); // { report, photo, saving }
   const fixFileRef = useRef(null);
@@ -432,6 +468,7 @@ function VehicleProfileInner({ token, me, logout }) {
       setDamage({
         active: out?.active || [],
         fixed: out?.fixed || [],
+        proposed: out?.proposed || [],
         diagramType: out?.vehicle?.diagramType || 'sedan',
         loading: false,
       });
@@ -511,6 +548,59 @@ function VehicleProfileInner({ token, me, logout }) {
       setMsg(t('damageBaseline.cleared', 'Entry cleared — kept in history with the reason'));
       await loadDamage();
     } catch (e2) { setMsg(e2?.message || 'Failed to clear entry'); }
+  };
+
+  // Seed from history (2026-09-06, audit/baseline closers): dry-run first —
+  // the confirm dialog lists exactly what a real run creates (as PROPOSED
+  // entries the admin then reviews below). Idempotent + capped server-side.
+  const openSeedDialog = async () => {
+    setSeedModal({ loading: true });
+    try {
+      const out = await api(`/api/customer-inspections/vehicle/${id}/seed-baseline`, {
+        method: 'POST',
+        body: JSON.stringify({ dryRun: true }),
+      }, token);
+      setSeedModal({ preview: out });
+    } catch (e2) {
+      setSeedModal(null);
+      setMsg(e2?.message || 'Failed to scan history');
+    }
+  };
+  const runSeed = async () => {
+    setSeedModal((c) => ({ ...c, running: true }));
+    try {
+      const out = await api(`/api/customer-inspections/vehicle/${id}/seed-baseline`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }, token);
+      setSeedModal(null);
+      setMsg(out?.capped
+        ? t('damageBaseline.seed.doneCapped', { n: out.created, total: out.totalCandidates, defaultValue: `Seeded ${out.created} proposals — capped at ${out.created} of ${out.totalCandidates}; run again for the rest` })
+        : t('damageBaseline.seed.done', { n: out?.created ?? 0, defaultValue: `Seeded ${out?.created ?? 0} proposals from history — review them below` }));
+      await loadDamage();
+    } catch (e2) {
+      setSeedModal((c) => (c ? { ...c, running: false } : null));
+      setMsg(e2?.message || 'Failed to seed from history');
+    }
+  };
+  const reviewSeeded = async (report, action, view) => {
+    setSeedReviewBusy(report.id);
+    try {
+      const body = { action };
+      if (action === 'approve' && view) body.view = view;
+      await api(`/api/customer-inspections/reports/${report.id}/seed-review`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }, token);
+      setMsg(action === 'approve'
+        ? t('damageBaseline.seed.approved', 'Proposal approved to the baseline')
+        : t('damageBaseline.seed.discarded', 'Proposal discarded'));
+      await loadDamage();
+    } catch (e2) {
+      setMsg(e2?.message || 'Failed to review proposal');
+    } finally {
+      setSeedReviewBusy('');
+    }
   };
 
   const openEditModal = async () => {
@@ -987,6 +1077,57 @@ function VehicleProfileInner({ token, me, logout }) {
           </div>
         ) : null}
 
+        {seedModal ? (
+          <div className="modal-backdrop" onClick={() => { if (!seedModal.running) setSeedModal(null); }}>
+            <div className="rent-modal glass" data-testid="seed-dialog" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '85vh', overflowY: 'auto' }}>
+              <h3>{t('damageBaseline.seed.title', 'Seed from history')}</h3>
+              {seedModal.loading ? (
+                <p className="ui-muted" style={{ fontSize: 13 }}>{t('damageBaseline.seed.scanning', 'Scanning this vehicle’s history…')}</p>
+              ) : (
+                <>
+                  <p className="ui-muted" style={{ fontSize: 13, marginTop: 0 }}>
+                    {t('damageBaseline.seed.sub', 'Uses what the system already stores about this vehicle — acknowledged damage reports, inspection damage notes and damage incidents. Everything is created as a PROPOSAL you review; nothing lands on the baseline without your approval.')}
+                  </p>
+                  {seedModal.preview?.candidates?.length ? (
+                    <>
+                      <strong style={{ fontSize: 13 }}>
+                        {t('damageBaseline.seed.willCreate', { n: seedModal.preview.candidates.length, defaultValue: `Will create ${seedModal.preview.candidates.length} proposals:` })}
+                      </strong>
+                      <ul style={{ margin: '8px 0', paddingLeft: 18, fontSize: 12.5, display: 'grid', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+                        {seedModal.preview.candidates.map((c) => (
+                          <li key={c.seedSourceRef} data-testid="seed-candidate">{c.description}</li>
+                        ))}
+                      </ul>
+                      {seedModal.preview.capped ? (
+                        <div className="surface-note" data-testid="seed-capped-note">
+                          {t('damageBaseline.seed.capped', { cap: seedModal.preview.cap, total: seedModal.preview.totalCandidates, defaultValue: `Capped at ${seedModal.preview.cap} per run (${seedModal.preview.totalCandidates} found) — run again for the rest.` })}
+                        </div>
+                      ) : null}
+                      <div className="row-between" style={{ marginTop: 10 }}>
+                        <button type="button" disabled={seedModal.running} onClick={() => setSeedModal(null)}>{t('common.cancel', 'Cancel')}</button>
+                        <button type="button" className="button-primary" data-testid="seed-confirm" disabled={seedModal.running} onClick={runSeed}>
+                          {seedModal.running
+                            ? t('damageBaseline.seed.running', 'Seeding…')
+                            : t('damageBaseline.seed.confirm', { n: seedModal.preview.candidates.length, defaultValue: `Create ${seedModal.preview.candidates.length} proposals` })}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="surface-note" data-testid="seed-nothing">
+                        {t('damageBaseline.seed.nothing', 'Nothing new to seed — history is either empty or already reflected on the baseline.')}
+                      </div>
+                      <div className="row-between" style={{ marginTop: 10 }}>
+                        <button type="button" onClick={() => setSeedModal(null)}>{t('common.close', 'Close')}</button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         {editModal.open && editModal.form ? (
           <div className="modal-backdrop" onClick={() => { if (!editModal.saving) setEditModal({ open: false, saving: false, form: null }); }}>
             <div className="rent-modal glass" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '85vh', overflowY: 'auto' }}>
@@ -1339,6 +1480,11 @@ function VehicleProfileInner({ token, me, logout }) {
                     <span className="status-chip neutral">
                       {damage.active.length} {t('damageBaseline.open', 'on record')} · {damage.fixed.length} {t('damageBaseline.fixedCount', 'repaired')}
                     </span>
+                    {canAdminDamage ? (
+                      <button type="button" className="btn-sm" data-testid="seed-baseline-btn" onClick={openSeedDialog}>
+                        {t('damageBaseline.seed.action', 'Seed from history')}
+                      </button>
+                    ) : null}
                     <button type="button" className="btn-sm" onClick={() => setAddDmg({ view: damageView, xPct: null, yPct: null, photo: null, description: '', saving: false })}>
                       + Add damage
                     </button>
@@ -1347,6 +1493,21 @@ function VehicleProfileInner({ token, me, logout }) {
                 <p className="ui-muted" style={{ marginTop: 0 }}>
                   {t('damageBaseline.sub', 'Documented marks on this vehicle — the known-damage baseline. Entries leave the diagram by being repaired (photo required), by a completed repair order, or by clear-with-reason; everything stays in the history below.')}
                 </p>
+                {canAdminDamage && damage.proposed.length ? (
+                  <div data-testid="seed-proposed" style={{ border: '1px dashed #b9a7f7', background: 'rgba(91,61,245,.04)', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
+                    <strong style={{ fontSize: 13 }}>
+                      {t('damageBaseline.seed.proposedTitle', { n: damage.proposed.length, defaultValue: `Proposed from history (${damage.proposed.length}) — approve or discard` })}
+                    </strong>
+                    <p className="ui-muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+                      {t('damageBaseline.seed.proposedSub', 'Seeded entries are drafts: pick the correct view and approve to put them on the baseline, or discard. Approved dots land at the diagram center — move the customer conversation, not the dot.')}
+                    </p>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {damage.proposed.map((r) => (
+                        <ProposedSeedRow key={r.id} report={r} busy={seedReviewBusy === r.id} onReview={reviewSeeded} t={t} />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {damage.loading ? (
                   <div className="surface-note">Loading damage history…</div>
                 ) : damage.active.length === 0 && damage.fixed.length === 0 ? (

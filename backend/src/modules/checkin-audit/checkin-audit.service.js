@@ -769,6 +769,50 @@ export async function getCheckinAuditDetail(reservationId, scope = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// T2 evidence derivation — shared by the dismiss fork's PREEXISTING path and
+// the convert-to-damage-report prefill (both read the same finding evidence)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function parseFindingDetails(finding) {
+  try { return finding?.detailsJson ? JSON.parse(finding.detailsJson) : null; } catch { return null; }
+}
+
+/** View + diagram-dot + description defaults from a T2 finding's details.
+ *  Region center (photo-relative 0..1) → diagram dot (0..100). The dot is a
+ *  starting point the agent can move — the region was always "a pointer, not
+ *  a measurement". Pure — exported for tests. */
+export function t2LedgerDefaults(details = {}) {
+  const r = details.region;
+  const cx = r && Number.isFinite(Number(r.x)) ? Number(r.x) + (Number(r.w) || 0) / 2 : 0.5;
+  const cy = r && Number.isFinite(Number(r.y)) ? Number(r.y) + (Number(r.h) || 0) / 2 : 0.5;
+  return {
+    view: details.view || ANGLE_TO_VIEW[details.angle] || null,
+    xPct: Math.max(0, Math.min(100, Math.round(cx * 100))),
+    yPct: Math.max(0, Math.min(100, Math.round(cy * 100))),
+    description: details.description || null,
+  };
+}
+
+/** Download one stored inspection photo (slim ref { path, contentType }) as a
+ *  data URL. Best-effort: any failure logs and returns null — the caller's
+ *  own photo-required validation stays the gate. */
+async function downloadEvidencePhotoDataUrl(ref, deps = {}, { findingId = null, label = 'evidence' } = {}) {
+  if (!ref?.path) return null;
+  try {
+    const download = deps.download || downloadObject;
+    const bucket = deps.bucket || getPhotosBucket();
+    const obj = await download({ bucket, path: ref.path });
+    const ct = ref.contentType || obj.contentType || 'image/jpeg';
+    return `data:${ct};base64,${Buffer.from(obj.body).toString('base64')}`;
+  } catch (err) {
+    logger.warn(`[checkin-audit] could not attach the ${label} photo`, {
+      findingId, message: String(err?.message || err),
+    });
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The dismiss fork (damage-baseline Mock 2) — two verbs, two destinations
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -846,36 +890,20 @@ export async function dismissFinding(findingId, body = {}, scope = {}, deps = {}
   let description = body.description || null;
   let photoDataUrl = body.photoDataUrl;
   if (finding.tier === 'T2') {
-    let details = null;
-    try { details = finding.detailsJson ? JSON.parse(finding.detailsJson) : null; } catch { details = null; }
+    const details = parseFindingDetails(finding);
     if (details) {
-      if (!view) view = details.view || ANGLE_TO_VIEW[details.angle] || null;
-      if (xPct == null || yPct == null) {
-        // Region center (photo-relative 0..1) → diagram dot (0..100). The dot
-        // is a starting point the agent can move on the profile — the region
-        // was always "a pointer, not a measurement".
-        const r = details.region;
-        const cx = r && Number.isFinite(Number(r.x)) ? Number(r.x) + (Number(r.w) || 0) / 2 : 0.5;
-        const cy = r && Number.isFinite(Number(r.y)) ? Number(r.y) + (Number(r.h) || 0) / 2 : 0.5;
-        if (xPct == null) xPct = Math.max(0, Math.min(100, Math.round(cx * 100)));
-        if (yPct == null) yPct = Math.max(0, Math.min(100, Math.round(cy * 100)));
-      }
-      if (!description) description = details.description || null;
-      if (!photoDataUrl && details.checkinPhoto?.path) {
+      const derived = t2LedgerDefaults(details);
+      if (!view) view = derived.view;
+      if (xPct == null) xPct = derived.xPct;
+      if (yPct == null) yPct = derived.yPct;
+      if (!description) description = derived.description;
+      if (!photoDataUrl) {
         // The evidence photo IS the check-in photo the model flagged —
         // download the bytes so the ledger append keeps its photo-required
         // validation without the browser round-tripping a signed URL.
-        try {
-          const download = deps.download || downloadObject;
-          const bucket = deps.bucket || getPhotosBucket();
-          const obj = await download({ bucket, path: details.checkinPhoto.path });
-          const ct = details.checkinPhoto.contentType || obj.contentType || 'image/jpeg';
-          photoDataUrl = `data:${ct};base64,${Buffer.from(obj.body).toString('base64')}`;
-        } catch (err) {
-          logger.warn('[checkin-audit] could not attach the check-in photo to the baseline entry', {
-            findingId: finding.id, message: String(err?.message || err),
-          });
-        }
+        photoDataUrl = await downloadEvidencePhotoDataUrl(details.checkinPhoto, deps, {
+          findingId: finding.id, label: 'check-in',
+        });
       }
     }
   }
@@ -915,9 +943,167 @@ export async function dismissFinding(findingId, body = {}, scope = {}, deps = {}
   return { ok: true, status: 'RESOLVED', resolution: 'PREEXISTING_BASELINED', damageReportId: created.id };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Convert to damage report (checkin-audit Mock 2's handoff panel) — the OTHER
+// fork's destiny: this is NEW damage the customer may be charged for, so it
+// goes through the NORMAL Report Damage wizard, a human completing every
+// money-bearing field. The audit only carries the evidence in.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const CONVERTED_RESOLUTION = 'CONVERTED_TO_REPORT';
+
+/**
+ * Prefill payload for the Report Damage wizard, derived from a
+ * DAMAGE-category finding's own evidence: view from the flagged angle, dot
+ * from the region center, the model's description (suffixed per the NOTES'
+ * handoff.descPrefill copy), and the check-in + checkout photo BYTES as data
+ * URLs (the same download mechanics as the PREEXISTING dismiss — the wizard
+ * then submits them like any hand-attached photo). Photo download is
+ * best-effort: a storage hiccup returns fewer photos, never a 500 — the
+ * wizard's own ≥1-photo validation remains the gate.
+ *
+ * Deliberately NOT prefilled: repair estimate and who-pays. The agent enters
+ * those — the AI never touches a dollar figure.
+ */
+export async function buildConvertPrefill(findingId, scope = {}, deps = {}) {
+  const db = deps.db || prisma;
+  const where = tenantWhere(scope);
+  const finding = await db.checkinAuditFinding.findFirst({
+    where: { ...where, id: String(findingId) },
+  });
+  if (!finding) { const e = new Error('Finding not found'); e.status = 404; throw e; }
+  if (finding.category !== 'DAMAGE') {
+    const e = new Error('Only damage findings can be converted to a damage report'); e.status = 400; throw e;
+  }
+  if (finding.status !== 'OPEN') {
+    const e = new Error(`Only open findings can be converted (is ${finding.status})`); e.status = 409; throw e;
+  }
+  if (!finding.reservationId) { const e = new Error('Finding has no reservation'); e.status = 400; throw e; }
+
+  const details = parseFindingDetails(finding) || {};
+  const derived = t2LedgerDefaults(details);
+  // "Scuff ~15 cm, lower-left rear bumper — AI-flagged, agent-verified"
+  // (mockup Mock 2 prefill row; NOTES copy key handoff.descPrefill).
+  const description = derived.description
+    ? `${derived.description} — AI-flagged, agent-verified`
+    : 'AI-flagged, agent-verified';
+
+  // Check-in photo first — it shows the damage and becomes the diagram photo
+  // (damagePhotos[0] in the report-damage orchestrator); the checkout
+  // baseline rides along as comparison evidence on the incident.
+  const damagePhotos = [];
+  const checkinPhoto = await downloadEvidencePhotoDataUrl(details.checkinPhoto, deps, {
+    findingId: finding.id, label: 'check-in',
+  });
+  if (checkinPhoto) damagePhotos.push(checkinPhoto);
+  const checkoutPhoto = await downloadEvidencePhotoDataUrl(details.checkoutPhoto, deps, {
+    findingId: finding.id, label: 'checkout',
+  });
+  if (checkoutPhoto) damagePhotos.push(checkoutPhoto);
+
+  return {
+    findingId: finding.id,
+    sourceAuditFindingId: finding.id,
+    reservationId: finding.reservationId,
+    reservationNumber: finding.reservationNumber || null,
+    vehicleId: finding.vehicleId || null,
+    vehicleLabel: finding.vehicleLabel || null,
+    angle: details.angle || null,
+    confidence: details.confidence ?? null,
+    view: derived.view,
+    xPct: derived.xPct,
+    yPct: derived.yPct,
+    description,
+    damagePhotos,
+  };
+}
+
+/**
+ * Up-front validation for a report-damage submit that claims to convert an
+ * audit finding: the finding must exist in the same tenant, be a DAMAGE
+ * finding, and belong to the SAME reservation (evidence from another rental
+ * must never link). Status is deliberately NOT gated here — a retried submit
+ * whose first attempt already resolved the finding must replay, not 409; the
+ * resolve step below is a no-op then.
+ */
+export async function findConvertibleFinding({ findingId, tenantId, reservationId }, deps = {}) {
+  const db = deps.db || prisma;
+  const finding = await db.checkinAuditFinding.findFirst({
+    where: { id: String(findingId), ...(tenantId ? { tenantId } : {}) },
+    select: { id: true, category: true, status: true, reservationId: true, vehicleId: true },
+  });
+  if (!finding) { const e = new Error('Audit finding not found'); e.status = 400; throw e; }
+  if (finding.category !== 'DAMAGE') {
+    const e = new Error('sourceAuditFindingId must reference a damage finding'); e.status = 400; throw e;
+  }
+  if (String(finding.reservationId) !== String(reservationId)) {
+    const e = new Error('Audit finding belongs to a different reservation'); e.status = 400; throw e;
+  }
+  return finding;
+}
+
+/**
+ * Close the loop after the Report Damage flow committed: the finding leaves
+ * the queue as RESOLVED · CONVERTED_TO_REPORT, linked to the damage report,
+ * reviewer stamped. Guarded to OPEN (updateMany where-status) so a duplicate
+ * submit or a race with a dismiss never rewrites history. NEVER throws — the
+ * damage + charge are already committed; a resolve failure is a log line.
+ */
+export async function resolveFindingConvertedSafe({
+  findingId, tenantId = null, damageReportId, actorUserId = null,
+} = {}, deps = {}) {
+  const db = deps.db || prisma;
+  try {
+    if (!findingId || !damageReportId) return null;
+    const now = deps.now ? new Date(deps.now) : new Date();
+    let actorName = null;
+    if (actorUserId) {
+      const u = await db.user.findUnique({
+        where: { id: String(actorUserId) },
+        select: { fullName: true, email: true },
+      }).catch(() => null);
+      actorName = u?.fullName || u?.email || null;
+    }
+    const res = await db.checkinAuditFinding.updateMany({
+      where: {
+        id: String(findingId),
+        ...(tenantId ? { tenantId } : {}),
+        status: 'OPEN',
+        category: 'DAMAGE',
+      },
+      data: {
+        status: 'RESOLVED',
+        resolution: CONVERTED_RESOLUTION,
+        linkedDamageReportId: String(damageReportId),
+        dismissedAt: now,
+        dismissedByUserId: actorUserId,
+        dismissedByName: actorName,
+      },
+    });
+    if (!res.count) {
+      logger.info('[checkin-audit] convert resolve was a no-op (finding not OPEN — already resolved or dismissed)', {
+        findingId: String(findingId), damageReportId: String(damageReportId),
+      });
+      return { resolved: false };
+    }
+    logger.info('[checkin-audit] finding converted to damage report', {
+      findingId: String(findingId), damageReportId: String(damageReportId),
+    });
+    return { resolved: true };
+  } catch (err) {
+    logger.warn('[checkin-audit] convert resolve failed (damage report unaffected)', {
+      findingId: String(findingId || ''), message: String(err?.message || err),
+    });
+    return null;
+  }
+}
+
 export const checkinAuditService = {
   runCheckinAuditForCloseSafe,
   listCheckinAudits,
   getCheckinAuditDetail,
   dismissFinding,
+  buildConvertPrefill,
+  findConvertibleFinding,
+  resolveFindingConvertedSafe,
 };

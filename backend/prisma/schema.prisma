@@ -5741,6 +5741,12 @@ model VehicleDamageReport {
   lastVerifiedPhotoRef Json? // the photo that verification pointed at
   clearedReason        String? // clear-with-reason (no repair photo): why this left the baseline
 
+  // Seed-from-history (2026-09-06, audit/baseline closers): the stable ref of
+  // the record this entry was derived from ('insp:<id>' | 'inc:<id>' |
+  // 'vdr:<id>'). Set only by the per-vehicle seed job; its presence is what
+  // makes a re-run idempotent (a candidate whose ref already exists is skipped).
+  seedSourceRef String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -5749,6 +5755,7 @@ model VehicleDamageReport {
   @@index([tenantId, status])
   // Print-time acknowledgement lookup (incident PDF §9) queries by incidentId.
   @@index([incidentId])
+  @@index([vehicleId, seedSourceRef])
 }
 
 /// Post-check-in audit (Tier 1 rules, 2026-09-03) — one OBSERVATION row per

@@ -10,6 +10,7 @@ import { Router } from 'express';
 import express from 'express';
 import { customerInspectionService } from './customer-inspection.service.js';
 import { CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
+import { requireRole } from '../../middleware/auth.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 import { createPublicRateLimitGuard, attachPublicRequestMeta } from '../../middleware/public-endpoint-guards.js';
 import logger from '../../lib/logger.js';
@@ -125,6 +126,48 @@ customerInspectionRouter.get('/vehicle/:vehicleId', async (req, res) => {
 customerInspectionRouter.post('/vehicle/:vehicleId/manual-damage', express.json({ limit: '15mb' }), async (req, res) => {
   try {
     res.json(await customerInspectionService.addManualDamage(req.params.vehicleId, req.body || {}, scopeFor(req)));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /api/customer-inspections/vehicle/:vehicleId/seed-baseline — ADMIN only
+// (2026-09-06, audit/baseline closers). One-shot per-vehicle seed of the
+// damage baseline from history (soft-approved reports, inspection damage
+// notes, DAMAGE incidents) as PROPOSED (REPORTED · SEED_HISTORY) entries.
+// body: { dryRun?: true } — dry run returns the candidate list for the
+// confirm dialog and creates NOTHING. Idempotent (seedSourceRef), capped at
+// 50 per run with an explicit `capped` flag, audit-logged per entry.
+customerInspectionRouter.post('/vehicle/:vehicleId/seed-baseline', requireRole('ADMIN', 'SUPER_ADMIN'), async (req, res) => {
+  try {
+    res.json(await customerInspectionService.seedBaselineFromHistory({
+      vehicleId: req.params.vehicleId,
+      dryRun: req.body?.dryRun === true,
+      actorUserId: req.user?.id || req.user?.sub || null,
+      scope: scopeFor(req),
+    }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /api/customer-inspections/reports/:reportId/seed-review — ADMIN only.
+// body: { action: 'approve' | 'discard', view?, xPct?, yPct?, description? }
+// approve → HARD_APPROVED (with optional view/dot/description correction);
+// discard → SOFT_APPROVED tombstone (keeps seedSourceRef so a re-run cannot
+// resurrect it).
+customerInspectionRouter.post('/reports/:reportId/seed-review', requireRole('ADMIN', 'SUPER_ADMIN'), async (req, res) => {
+  try {
+    res.json(await customerInspectionService.reviewSeededEntry({
+      reportId: req.params.reportId,
+      action: req.body?.action,
+      view: req.body?.view,
+      xPct: req.body?.xPct,
+      yPct: req.body?.yPct,
+      description: req.body?.description,
+      actorUserId: req.user?.id || req.user?.sub || null,
+      scope: scopeFor(req),
+    }));
   } catch (err) {
     handleError(res, err);
   }

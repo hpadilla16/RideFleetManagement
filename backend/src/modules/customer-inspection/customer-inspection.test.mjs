@@ -7,6 +7,8 @@ import {
   customerInspectionService,
   signReservation,
   verifyReservationSig,
+  buildSeedCandidates,
+  SEED_SOURCE,
 } from './customer-inspection.service.js';
 import { checkoutSessionService } from '../checkout-session/checkout-session.service.js';
 
@@ -335,4 +337,261 @@ test('buildInspectionQrBlockHtml: enabled → QR <img> data-URL + resolver link;
 
   const none = await buildInspectionQrBlockHtml({ reservationId: null, tenantId: 't1' });
   assert.equal(none, '', 'no reservation → empty block');
+});
+
+// ---------------------------------------------------------------------------
+// Seed from history (2026-09-06, audit/baseline closers) — the per-vehicle
+// cold-start job (damage-baseline NOTES §D5 path B): PROPOSED entries only
+// (status REPORTED · source SEED_HISTORY), idempotent via seedSourceRef,
+// capped at 50 with an explicit notice, audit-logged per entry; the admin's
+// approve/discard review closes each proposal.
+// ---------------------------------------------------------------------------
+
+test('buildSeedCandidates: three sources map to stable refs; soft-approved rows keep their real view/dot/photo', () => {
+  const { candidates, totalCandidates, capped } = buildSeedCandidates({
+    softApproved: [{
+      id: 'vdr-1', phase: 'CHECKIN', view: 'REAR', xPct: 24, yPct: 66,
+      description: 'Scuff, rear bumper', photoJson: { storage: true }, reservationId: 'res-1', reservationNumber: 'R-1',
+    }],
+    inspections: [{
+      id: 'insp-1', phase: 'CHECKOUT', damages: 'Door edge chip, rear right',
+      capturedAt: '2026-05-12T10:00:00Z', rentalAgreement: { reservationId: 'res-2' },
+    }],
+    incidents: [{
+      id: 'inc-1', reportNumber: 'INC-20260601-ABC124', title: 'Wheel arch scratch', narrative: 'Found at return', reservationId: 'res-3',
+    }],
+  });
+  assert.equal(totalCandidates, 3);
+  assert.equal(capped, false);
+  assert.deepEqual(candidates.map((c) => c.seedSourceRef), ['vdr:vdr-1', 'insp:insp-1', 'inc:inc-1']);
+  const [soft, insp, inc] = candidates;
+  assert.equal(soft.view, 'REAR');
+  assert.equal(soft.xPct, 24);
+  assert.deepEqual(soft.photoJson, { storage: true }, 'existing evidence rides along');
+  assert.equal(insp.view, 'FRONT', 'free text has no view — desk-triage placeholder');
+  assert.equal(insp.xPct, 50);
+  assert.match(insp.description, /^\[CHECKOUT 2026-05-12\] Door edge chip/);
+  assert.equal(insp.reservationId, 'res-2', 'reservation resolved through the agreement');
+  assert.match(inc.description, /^\[Incident INC-20260601-ABC124\] Wheel arch scratch — Found at return/);
+});
+
+test('buildSeedCandidates: refs already on the vehicle are skipped (idempotence) and blank inspection text never seeds', () => {
+  const { candidates, totalCandidates } = buildSeedCandidates({
+    softApproved: [{ id: 'vdr-1', view: 'REAR', xPct: 1, yPct: 1, description: 'x' }],
+    inspections: [
+      { id: 'insp-1', phase: 'CHECKIN', damages: '   ', rentalAgreement: {} },
+      { id: 'insp-2', phase: 'CHECKIN', damages: 'Real note', rentalAgreement: {} },
+    ],
+    incidents: [{ id: 'inc-1', title: 'Old dent' }],
+    existingRefs: ['vdr:vdr-1', 'inc:inc-1'],
+  });
+  assert.equal(totalCandidates, 1, 'only the unseen inspection note remains');
+  assert.equal(candidates[0].seedSourceRef, 'insp:insp-2');
+});
+
+test('buildSeedCandidates: caps at 50 with capped:true and the real total', () => {
+  const incidents = Array.from({ length: 60 }, (_, i) => ({ id: `inc-${i}`, title: `Dent ${i}` }));
+  const { candidates, totalCandidates, capped, cap } = buildSeedCandidates({ incidents });
+  assert.equal(cap, 50);
+  assert.equal(candidates.length, 50);
+  assert.equal(totalCandidates, 60);
+  assert.equal(capped, true);
+});
+
+function patchSeedPrisma({ vehicle = { id: 'veh-1' }, existing = [], inspections = [], incidents = [] } = {}) {
+  const state = { created: [], audits: [], updates: [] };
+  const orig = {
+    vehicleFindFirst: prisma.vehicle.findFirst,
+    vdrFindMany: prisma.vehicleDamageReport.findMany,
+    vdrCreate: prisma.vehicleDamageReport.create,
+    vdrFindFirst: prisma.vehicleDamageReport.findFirst,
+    vdrUpdate: prisma.vehicleDamageReport.update,
+    inspFindMany: prisma.rentalAgreementInspection.findMany,
+    incFindMany: prisma.reservationIncident.findMany,
+    auditCreate: prisma.auditLog.create,
+  };
+  prisma.vehicle.findFirst = async () => vehicle;
+  prisma.vehicleDamageReport.findMany = async () => existing;
+  prisma.vehicleDamageReport.create = async ({ data }) => {
+    const row = { id: `seed-${state.created.length + 1}`, ...data };
+    state.created.push(row);
+    return row;
+  };
+  prisma.vehicleDamageReport.update = async ({ where, data }) => { state.updates.push({ where, data }); return { id: where.id, ...data }; };
+  prisma.rentalAgreementInspection.findMany = async () => inspections;
+  prisma.reservationIncident.findMany = async () => incidents;
+  prisma.auditLog.create = async ({ data }) => { state.audits.push(data); return { id: `a-${state.audits.length}`, ...data }; };
+  const restore = () => {
+    prisma.vehicle.findFirst = orig.vehicleFindFirst;
+    prisma.vehicleDamageReport.findMany = orig.vdrFindMany;
+    prisma.vehicleDamageReport.create = orig.vdrCreate;
+    prisma.vehicleDamageReport.findFirst = orig.vdrFindFirst;
+    prisma.vehicleDamageReport.update = orig.vdrUpdate;
+    prisma.rentalAgreementInspection.findMany = orig.inspFindMany;
+    prisma.reservationIncident.findMany = orig.incFindMany;
+    prisma.auditLog.create = orig.auditCreate;
+  };
+  return { state, restore };
+}
+
+const SEED_INSPECTIONS = [
+  { id: 'insp-1', phase: 'CHECKOUT', damages: 'Door edge chip', capturedAt: '2026-05-12T10:00:00Z', rentalAgreement: { reservationId: 'res-2' } },
+];
+const SEED_INCIDENTS = [
+  { id: 'inc-1', reportNumber: 'INC-1', title: 'Wheel scratch', narrative: null, reservationId: 'res-3' },
+];
+
+test('seedBaselineFromHistory dryRun: lists the exact candidates and creates NOTHING', async () => {
+  const { state, restore } = patchSeedPrisma({ inspections: SEED_INSPECTIONS, incidents: SEED_INCIDENTS });
+  try {
+    const out = await customerInspectionService.seedBaselineFromHistory({
+      vehicleId: 'veh-1', dryRun: true, actorUserId: 'u-admin', scope: { tenantId: 't1' },
+    });
+    assert.equal(out.dryRun, true);
+    assert.equal(out.created, 0);
+    assert.equal(state.created.length, 0, 'dry run writes nothing');
+    assert.equal(state.audits.length, 0);
+    assert.equal(out.totalCandidates, 2);
+    assert.deepEqual(out.candidates.map((c) => c.seedSourceRef), ['insp:insp-1', 'inc:inc-1']);
+    assert.equal(out.capped, false);
+  } finally { restore(); }
+});
+
+test('seedBaselineFromHistory: creates REPORTED · SEED_HISTORY rows (never HARD_APPROVED), audit-logged per reservation-anchored entry', async () => {
+  const { state, restore } = patchSeedPrisma({
+    existing: [{ id: 'vdr-open', status: 'HARD_APPROVED', seedSourceRef: null }],
+    inspections: SEED_INSPECTIONS,
+    incidents: SEED_INCIDENTS,
+  });
+  try {
+    const out = await customerInspectionService.seedBaselineFromHistory({
+      vehicleId: 'veh-1', actorUserId: 'u-admin', scope: { tenantId: 't1' },
+    });
+    assert.equal(out.created, 2);
+    assert.equal(out.alreadyActive, 1, 'open HARD_APPROVED rows are already baseline — reported, not reseeded');
+    for (const row of state.created) {
+      assert.equal(row.status, 'REPORTED', 'proposals only — an admin reviews');
+      assert.equal(row.source, SEED_SOURCE);
+      assert.ok(row.seedSourceRef);
+      assert.equal(row.tenantId, 't1');
+    }
+    assert.equal(state.audits.length, 2, 'both candidates carry reservations so both audit-log');
+    assert.equal(state.audits[0].action, 'ADMIN_OVERRIDE');
+    assert.equal(state.audits[0].actorUserId, 'u-admin');
+    assert.equal(JSON.parse(state.audits[0].metadata).kind, 'damage_baseline_seed');
+  } finally { restore(); }
+});
+
+test('seedBaselineFromHistory: a re-run creates nothing new (refs already present) — idempotence', async () => {
+  const { state, restore } = patchSeedPrisma({
+    existing: [
+      { id: 's1', status: 'REPORTED', seedSourceRef: 'insp:insp-1' },
+      { id: 's2', status: 'SOFT_APPROVED', seedSourceRef: 'inc:inc-1' }, // discarded tombstone still blocks
+    ],
+    inspections: SEED_INSPECTIONS,
+    incidents: SEED_INCIDENTS,
+  });
+  try {
+    const out = await customerInspectionService.seedBaselineFromHistory({
+      vehicleId: 'veh-1', actorUserId: 'u-admin', scope: { tenantId: 't1' },
+    });
+    assert.equal(out.created, 0);
+    assert.equal(out.totalCandidates, 0);
+    assert.equal(state.created.length, 0);
+  } finally { restore(); }
+});
+
+test('seedBaselineFromHistory: caps a 60-incident backlog at 50 created with capped:true', async () => {
+  const incidents = Array.from({ length: 60 }, (_, i) => ({ id: `inc-${i}`, title: `Dent ${i}`, reservationId: null }));
+  const { state, restore } = patchSeedPrisma({ incidents });
+  try {
+    const out = await customerInspectionService.seedBaselineFromHistory({
+      vehicleId: 'veh-1', actorUserId: 'u-admin', scope: { tenantId: 't1' },
+    });
+    assert.equal(out.created, 50);
+    assert.equal(out.capped, true);
+    assert.equal(out.cap, 50);
+    assert.equal(out.totalCandidates, 60);
+    assert.equal(state.created.length, 50);
+    assert.equal(state.audits.length, 0, 'no reservation on these — row-level provenance is the trail');
+  } finally { restore(); }
+});
+
+test('seedBaselineFromHistory guards: tenantId required; unknown vehicle 404', async () => {
+  await assert.rejects(
+    customerInspectionService.seedBaselineFromHistory({ vehicleId: 'veh-1', scope: {} }),
+    (e) => e.status === 400,
+  );
+  const { restore } = patchSeedPrisma({ vehicle: null });
+  try {
+    await assert.rejects(
+      customerInspectionService.seedBaselineFromHistory({ vehicleId: 'nope', scope: { tenantId: 't1' } }),
+      (e) => e.status === 404,
+    );
+  } finally { restore(); }
+});
+
+test('reviewSeededEntry: approve applies dot/view correction + reviewer stamp; discard leaves a SOFT_APPROVED tombstone', async () => {
+  const { state, restore } = patchSeedPrisma({});
+  prisma.vehicleDamageReport.findFirst = async () => ({
+    id: 'seed-1', status: 'REPORTED', source: 'SEED_HISTORY', tenantId: 't1', vehicleId: 'veh-1', reservationId: 'res-2',
+  });
+  try {
+    const out = await customerInspectionService.reviewSeededEntry({
+      reportId: 'seed-1', action: 'approve', view: 'REAR', xPct: 24, yPct: 66,
+      description: 'Chip — rear right door edge', actorUserId: 'u-admin', scope: { tenantId: 't1' },
+    });
+    assert.equal(out.status, 'HARD_APPROVED');
+    const d = state.updates[0].data;
+    assert.equal(d.status, 'HARD_APPROVED');
+    assert.equal(d.view, 'REAR');
+    assert.equal(d.xPct, 24);
+    assert.equal(d.yPct, 66);
+    assert.equal(d.reviewedByUserId, 'u-admin');
+    assert.equal(JSON.parse(state.audits[0].metadata).kind, 'damage_baseline_seed_review');
+
+    const out2 = await customerInspectionService.reviewSeededEntry({
+      reportId: 'seed-1', action: 'discard', actorUserId: 'u-admin', scope: { tenantId: 't1' },
+    });
+    assert.equal(out2.status, 'SOFT_APPROVED', 'discard keeps the row (and its seedSourceRef) as a tombstone');
+  } finally { restore(); }
+});
+
+test('reviewSeededEntry guards: SEED_HISTORY-only, REPORTED-only, valid view/dot', async () => {
+  const { restore } = patchSeedPrisma({});
+  try {
+    prisma.vehicleDamageReport.findFirst = async () => ({ id: 'd1', status: 'REPORTED', source: 'CUSTOMER', tenantId: 't1' });
+    await assert.rejects(
+      customerInspectionService.reviewSeededEntry({ reportId: 'd1', action: 'approve', scope: { tenantId: 't1' } }),
+      (e) => e.status === 400 && /seeded proposals/.test(e.message),
+      'customer REPORTED rows belong to the inspection queue, not here',
+    );
+    prisma.vehicleDamageReport.findFirst = async () => ({ id: 'd1', status: 'HARD_APPROVED', source: 'SEED_HISTORY', tenantId: 't1' });
+    await assert.rejects(
+      customerInspectionService.reviewSeededEntry({ reportId: 'd1', action: 'approve', scope: { tenantId: 't1' } }),
+      (e) => e.status === 409,
+    );
+    prisma.vehicleDamageReport.findFirst = async () => ({ id: 'd1', status: 'REPORTED', source: 'SEED_HISTORY', tenantId: 't1' });
+    await assert.rejects(
+      customerInspectionService.reviewSeededEntry({ reportId: 'd1', action: 'approve', view: 'TOP', scope: { tenantId: 't1' } }),
+      (e) => e.status === 400 && /Invalid view/.test(e.message),
+    );
+    await assert.rejects(
+      customerInspectionService.reviewSeededEntry({ reportId: 'd1', action: 'approve', xPct: 400, scope: { tenantId: 't1' } }),
+      (e) => e.status === 400 && /xPct/.test(e.message),
+    );
+    await assert.rejects(
+      customerInspectionService.reviewSeededEntry({ reportId: 'd1', action: 'whatever', scope: { tenantId: 't1' } }),
+      (e) => e.status === 400,
+    );
+  } finally { restore(); }
+});
+
+test('seed wiring: both routes exist and are ADMIN-gated', async () => {
+  const { readFileSync: rf } = await import('node:fs');
+  const src = rf(new URL('./customer-inspection.routes.js', import.meta.url), 'utf8');
+  assert.match(src, /'\/vehicle\/:vehicleId\/seed-baseline', requireRole\('ADMIN', 'SUPER_ADMIN'\)/);
+  assert.match(src, /'\/reports\/:reportId\/seed-review', requireRole\('ADMIN', 'SUPER_ADMIN'\)/);
+  assert.match(src, /seedBaselineFromHistory/);
+  assert.match(src, /reviewSeededEntry/);
 });

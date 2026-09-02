@@ -62,6 +62,11 @@ import {
   runCheckinAuditForCloseSafe,
   dismissFinding,
   DISMISS_CLASSIFICATIONS,
+  t2LedgerDefaults,
+  buildConvertPrefill,
+  findConvertibleFinding,
+  resolveFindingConvertedSafe,
+  CONVERTED_RESOLUTION,
 } from './checkin-audit.service.js';
 import { customerInspectionService } from '../customer-inspection/customer-inspection.service.js';
 import { NOTIFICATION_SOURCE_TYPES } from '../notifications/notifications-emit.js';
@@ -667,4 +672,226 @@ test('the clear-with-reason route exists beside /fix', () => {
   const src = readFileSync(join(ROOT, 'src', 'modules', 'customer-inspection', 'customer-inspection.routes.js'), 'utf8');
   assert.match(src, /'\/reports\/:reportId\/clear'/);
   assert.match(src, /clearDamageReport/);
+});
+
+// ───────────────────────── G. flywheel closers (2026-09-06) ─────────────────
+// The convert-to-damage-report handoff (checkin-audit Mock 2's panel) + the
+// seed migration discipline. The seed job itself is tested in
+// customer-inspection.test.mjs — its migration column rides here with the
+// rest of the model-discipline checks.
+
+const CLOSERS_MIGRATION_DIR = '20260906_audit_baseline_closers';
+const CLOSERS_MIGRATION_PREDECESSOR = '20260905_qr_self_return';
+const CLOSERS_SQL = readFileSync(join(ROOT, 'prisma', 'migrations', CLOSERS_MIGRATION_DIR, 'migration.sql'), 'utf8');
+const CLOSERS_STATEMENTS = CLOSERS_SQL.replace(/^\s*--.*$/gm, '');
+
+test('closers migration: additive + idempotent, only seedSourceRef + its index, nothing destructive, sorted after its predecessor', () => {
+  const alters = [...CLOSERS_STATEMENTS.matchAll(/ALTER TABLE "(\w+)"[^\n]*/g)];
+  assert.equal(alters.length, 1, 'exactly one column added');
+  assert.equal(alters[0][1], 'VehicleDamageReport');
+  assert.match(alters[0][0], /ADD COLUMN IF NOT EXISTS "seedSourceRef"/);
+  for (const m of [...CLOSERS_STATEMENTS.matchAll(/CREATE (?:TABLE|UNIQUE INDEX|INDEX)(?: IF NOT EXISTS)?/g)]) {
+    assert.match(m[0], / IF NOT EXISTS$/, `not idempotent: ${m[0]}`);
+  }
+  assert.match(CLOSERS_STATEMENTS, /CREATE INDEX IF NOT EXISTS "VehicleDamageReport_vehicleId_seedSourceRef_idx"/);
+  assert.ok(!/DROP|DELETE FROM|UPDATE /.test(CLOSERS_STATEMENTS), 'nothing destructive');
+  assert.ok(CLOSERS_MIGRATION_DIR > CLOSERS_MIGRATION_PREDECESSOR);
+  const dirs = readdirSync(join(ROOT, 'prisma', 'migrations')).filter((d) => /^\d{8}/.test(d));
+  assert.ok(dirs.includes(CLOSERS_MIGRATION_PREDECESSOR), 'predecessor exists');
+  assert.ok(dirs.includes(CLOSERS_MIGRATION_DIR), 'this migration exists');
+});
+
+test('seedSourceRef lands nullable on VehicleDamageReport in schema.prisma (with the vehicle+ref index)', () => {
+  const model = SCHEMA.match(/model VehicleDamageReport \{([\s\S]*?)\n\}/)[1];
+  assert.match(model, /\n  seedSourceRef\s+String\?/, 'schema has nullable seedSourceRef');
+  assert.match(model, /@@index\(\[vehicleId, seedSourceRef\]\)/);
+});
+
+test('t2LedgerDefaults: region center → diagram dot; view from angle; missing region defaults to 50/50', () => {
+  const d = t2LedgerDefaults({
+    angle: 'rear',
+    region: { x: 0.14, y: 0.59, w: 0.24, h: 0.19 },
+    description: 'Scuff ~15 cm, lower-left rear bumper',
+  });
+  assert.equal(d.view, 'REAR');
+  assert.equal(d.xPct, 26); // 0.14 + 0.12 = 0.26
+  assert.equal(d.yPct, 69); // 0.59 + 0.095 ≈ 0.685 → 69
+  assert.equal(d.description, 'Scuff ~15 cm, lower-left rear bumper');
+  const noRegion = t2LedgerDefaults({ angle: 'frontSeat' });
+  assert.equal(noRegion.view, 'INTERIOR');
+  assert.equal(noRegion.xPct, 50);
+  assert.equal(noRegion.yPct, 50);
+  assert.equal(noRegion.description, null);
+});
+
+const CONVERTIBLE_FINDING = {
+  id: 'f-t2-rear',
+  tenantId: 't1',
+  reservationId: 'res-2417',
+  reservationNumber: 'RSV-2417',
+  vehicleId: 'veh-1',
+  vehicleLabel: 'Toyota Corolla · ABC-124',
+  checkKey: 'DAMAGE_SUSPECTED:rear',
+  category: 'DAMAGE',
+  severity: 'ERROR',
+  tier: 'T2',
+  status: 'OPEN',
+  detailsJson: JSON.stringify({
+    angle: 'rear',
+    view: 'REAR',
+    confidence: 78,
+    description: 'Scuff ~15 cm, lower-left rear bumper',
+    region: { x: 0.14, y: 0.59, w: 0.24, h: 0.19 },
+    kind: 'scuff',
+    checkoutPhoto: { path: 'insp/out-rear.jpg', contentType: 'image/jpeg' },
+    checkinPhoto: { path: 'insp/in-rear.jpg', contentType: 'image/jpeg' },
+  }),
+};
+
+function makeConvertDeps(finding, { failPaths = [] } = {}) {
+  const downloads = [];
+  return {
+    downloads,
+    deps: {
+      db: { checkinAuditFinding: { findFirst: async () => finding } },
+      bucket: 'inspection-photos',
+      download: async ({ path }) => {
+        downloads.push(path);
+        if (failPaths.includes(path)) throw new Error('storage down');
+        return { body: Buffer.from(`bytes:${path}`), contentType: 'image/jpeg' };
+      },
+    },
+  };
+}
+
+test('convert prefill: the Mock-2 payload — view, region-center dot, suffixed description, check-in photo FIRST then checkout, both as data URLs', async () => {
+  const { deps, downloads } = makeConvertDeps({ ...CONVERTIBLE_FINDING });
+  const out = await buildConvertPrefill('f-t2-rear', { tenantId: 't1' }, deps);
+  assert.equal(out.findingId, 'f-t2-rear');
+  assert.equal(out.sourceAuditFindingId, 'f-t2-rear');
+  assert.equal(out.reservationId, 'res-2417');
+  assert.equal(out.reservationNumber, 'RSV-2417');
+  assert.equal(out.vehicleId, 'veh-1');
+  assert.equal(out.angle, 'rear');
+  assert.equal(out.confidence, 78);
+  assert.equal(out.view, 'REAR');
+  assert.equal(out.xPct, 26);
+  assert.equal(out.yPct, 69);
+  // NOTES handoff.descPrefill: "AI-flagged, agent-verified", suffixed to the verdict.
+  assert.equal(out.description, 'Scuff ~15 cm, lower-left rear bumper — AI-flagged, agent-verified');
+  assert.equal(out.damagePhotos.length, 2);
+  // damagePhotos[0] becomes the diagram photo downstream — it must be the CHECK-IN shot.
+  assert.deepEqual(downloads, ['insp/in-rear.jpg', 'insp/out-rear.jpg']);
+  assert.equal(out.damagePhotos[0], `data:image/jpeg;base64,${Buffer.from('bytes:insp/in-rear.jpg').toString('base64')}`);
+  assert.equal(out.damagePhotos[1], `data:image/jpeg;base64,${Buffer.from('bytes:insp/out-rear.jpg').toString('base64')}`);
+  // Money fields are the agent's alone — never prefilled.
+  assert.ok(!('damageCostCents' in out) && !('responsibleParty' in out));
+});
+
+test('convert prefill: a photo download failure degrades to fewer photos — never a throw', async () => {
+  const { deps } = makeConvertDeps({ ...CONVERTIBLE_FINDING }, { failPaths: ['insp/out-rear.jpg'] });
+  const out = await buildConvertPrefill('f-t2-rear', { tenantId: 't1' }, deps);
+  assert.equal(out.damagePhotos.length, 1, 'checkout photo dropped, check-in kept');
+  const both = makeConvertDeps({ ...CONVERTIBLE_FINDING }, { failPaths: ['insp/in-rear.jpg', 'insp/out-rear.jpg'] });
+  const empty = await buildConvertPrefill('f-t2-rear', { tenantId: 't1' }, both.deps);
+  assert.deepEqual(empty.damagePhotos, [], 'the wizard’s own ≥1-photo gate remains the validation');
+});
+
+test('convert prefill guards: 404 unknown, 400 non-damage, 409 non-open', async () => {
+  const missing = makeConvertDeps(null);
+  await assert.rejects(buildConvertPrefill('nope', { tenantId: 't1' }, missing.deps), (e) => e.status === 404);
+  const entry = makeConvertDeps({ ...CONVERTIBLE_FINDING, category: 'ENTRY' });
+  await assert.rejects(buildConvertPrefill('f-t2-rear', { tenantId: 't1' }, entry.deps), (e) => e.status === 400 && /damage findings/.test(e.message));
+  const done = makeConvertDeps({ ...CONVERTIBLE_FINDING, status: 'RESOLVED' });
+  await assert.rejects(buildConvertPrefill('f-t2-rear', { tenantId: 't1' }, done.deps), (e) => e.status === 409);
+});
+
+test('findConvertibleFinding: validates tenant + DAMAGE + same reservation; status deliberately NOT gated (replays must not 409)', async () => {
+  const wheres = [];
+  const db = (row) => ({ checkinAuditFinding: { findFirst: async ({ where }) => { wheres.push(where); return row; } } });
+  const ok = await findConvertibleFinding(
+    { findingId: 'f-1', tenantId: 't1', reservationId: 'res-1' },
+    { db: db({ id: 'f-1', category: 'DAMAGE', status: 'RESOLVED', reservationId: 'res-1', vehicleId: 'veh-1' }) },
+  );
+  assert.equal(ok.id, 'f-1', 'an already-RESOLVED finding still validates — the resolve step no-ops later');
+  assert.equal(wheres[0].tenantId, 't1', 'tenant-scoped lookup');
+  await assert.rejects(
+    findConvertibleFinding({ findingId: 'x', tenantId: 't1', reservationId: 'res-1' }, { db: db(null) }),
+    (e) => e.status === 400 && /not found/.test(e.message),
+  );
+  await assert.rejects(
+    findConvertibleFinding({ findingId: 'f-1', tenantId: 't1', reservationId: 'res-1' }, { db: db({ id: 'f-1', category: 'ENTRY', reservationId: 'res-1' }) }),
+    (e) => e.status === 400 && /damage finding/.test(e.message),
+  );
+  await assert.rejects(
+    findConvertibleFinding({ findingId: 'f-1', tenantId: 't1', reservationId: 'res-OTHER' }, { db: db({ id: 'f-1', category: 'DAMAGE', reservationId: 'res-1' }) }),
+    (e) => e.status === 400 && /different reservation/.test(e.message),
+  );
+});
+
+test('resolveFindingConvertedSafe: OPEN-guarded updateMany stamps RESOLVED · CONVERTED_TO_REPORT + link + reviewer', async () => {
+  const updates = [];
+  const db = {
+    user: { findUnique: async () => ({ fullName: 'M. Rivera', email: 'mrivera@x.test' }) },
+    checkinAuditFinding: { updateMany: async (args) => { updates.push(args); return { count: 1 }; } },
+  };
+  const out = await resolveFindingConvertedSafe(
+    { findingId: 'f-t2-rear', tenantId: 't1', damageReportId: 'dmg-9', actorUserId: 'u-rivera' },
+    { db, now: '2026-09-06T15:00:00Z' },
+  );
+  assert.deepEqual(out, { resolved: true });
+  const { where, data } = updates[0];
+  assert.equal(where.id, 'f-t2-rear');
+  assert.equal(where.tenantId, 't1');
+  assert.equal(where.status, 'OPEN', 'guarded to OPEN — a dismissed/converted finding is never rewritten');
+  assert.equal(where.category, 'DAMAGE');
+  assert.equal(data.status, 'RESOLVED');
+  assert.equal(data.resolution, CONVERTED_RESOLUTION);
+  assert.equal(CONVERTED_RESOLUTION, 'CONVERTED_TO_REPORT');
+  assert.equal(data.linkedDamageReportId, 'dmg-9');
+  assert.equal(data.dismissedByUserId, 'u-rivera');
+  assert.equal(data.dismissedByName, 'M. Rivera');
+  assert.equal(new Date(data.dismissedAt).toISOString(), '2026-09-06T15:00:00.000Z');
+});
+
+test('resolveFindingConvertedSafe: no-op when the finding is not OPEN; NEVER throws on a broken db', async () => {
+  const db = {
+    user: { findUnique: async () => null },
+    checkinAuditFinding: { updateMany: async () => ({ count: 0 }) },
+  };
+  assert.deepEqual(await resolveFindingConvertedSafe(
+    { findingId: 'f-1', damageReportId: 'dmg-1' }, { db },
+  ), { resolved: false });
+  const broken = {
+    user: { findUnique: async () => { throw new Error('db down'); } },
+    checkinAuditFinding: { updateMany: async () => { throw new Error('db down'); } },
+  };
+  assert.equal(await resolveFindingConvertedSafe(
+    { findingId: 'f-1', damageReportId: 'dmg-1', actorUserId: 'u-1' }, { db: broken },
+  ), null, 'a resolve failure is a log line — the damage report is already committed');
+  assert.equal(await resolveFindingConvertedSafe({}, { db }), null, 'missing ids are a quiet no-op');
+});
+
+test('wiring: report-damage validates the linkage up front, forwards provenance via opts, and closes the loop after the money', () => {
+  const src = readFileSync(join(ROOT, 'src', 'modules', 'report-damage', 'report-damage.service.js'), 'utf8');
+  assert.match(src, /import \{ findConvertibleFinding, resolveFindingConvertedSafe \} from '\.\.\/checkin-audit\/checkin-audit\.service\.js'/);
+  const validateIdx = src.indexOf('findConvertibleFinding({');
+  const createIdx = src.indexOf('customerInspectionService.addManualDamage(');
+  const optsIdx = src.indexOf("auditFinding ? { sourceAuditFindingId: auditFinding.id } : {}");
+  const resolveIdx = src.lastIndexOf('resolveFindingConvertedSafe({');
+  const returnIdx = src.indexOf('auditFindingResolved,');
+  assert.ok(validateIdx > 0 && validateIdx < createIdx, 'validation happens BEFORE any write');
+  assert.ok(optsIdx > 0, 'provenance rides in the internal opts arg (source stays MANUAL)');
+  assert.ok(resolveIdx > createIdx, 'resolve fires after the damage record exists');
+  assert.ok(returnIdx > 0, 'the wizard learns whether the finding closed');
+  // the duplicate-submit replay also closes the loop
+  const dupIdx = src.indexOf('duplicate submit suppressed');
+  const dupResolveIdx = src.indexOf('resolveFindingConvertedSafe({', dupIdx);
+  assert.ok(dupIdx > 0 && dupResolveIdx > dupIdx && dupResolveIdx < createIdx, 'replay path resolves too');
+});
+
+test('wiring: the convert-prefill route exists and is read-only (GET)', () => {
+  const src = readFileSync(join(ROOT, 'src', 'modules', 'checkin-audit', 'checkin-audit.routes.js'), 'utf8');
+  assert.match(src, /checkinAuditRouter\.get\('\/findings\/:id\/convert-prefill'/);
+  assert.match(src, /buildConvertPrefill/);
 });
