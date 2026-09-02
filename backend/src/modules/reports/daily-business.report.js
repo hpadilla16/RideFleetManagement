@@ -185,6 +185,7 @@ async function computeData({ tenantId, from, to, query = {} }) {
     const timeTotal = sumMoney(lines.filter((l) => l.group.section === 'TIME').map((l) => l.total));
     b.closed.push({
       number: a.agreementNumber || a.reservation?.reservationNumber || a.id.slice(-6),
+      reservationNumber: a.reservation?.reservationNumber || '',
       customer: [a.customerFirstName, a.customerLastName].filter(Boolean).join(' '),
       unit: a.vehicle?.internalNumber || a.vehicle?.plate || '',
       out: a.pickupAt, in: a.closedAt,
@@ -206,6 +207,7 @@ async function computeData({ tenantId, from, to, query = {} }) {
     const b = bucketOf(locId, iso);
     b.payments.push({
       number: p.rentalAgreement?.agreementNumber || p.rentalAgreement?.reservation?.reservationNumber || '',
+      reservationNumber: p.rentalAgreement?.reservation?.reservationNumber || '',
       customer: [p.rentalAgreement?.customerFirstName, p.rentalAgreement?.customerLastName].filter(Boolean).join(' '),
       // RentalAgreementPayment carries no actor column (unlike ReservationPayment),
       // so the old report's Emp column is blank here until one is added.
@@ -303,11 +305,11 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '
 function renderHtml(data) {
   const dayBlocks = (data.days || []).map((d) => `
     <h3>${esc(d.locationName)} — ${esc(d.day)}</h3>
-    ${d.closed.length ? `<table><thead><tr><th>RA#</th><th>Customer</th><th>Unit</th><th>Days</th><th class="n">Time</th><th class="n">Total</th></tr></thead><tbody>
-      ${d.closed.map((c) => `<tr><td>${esc(c.number)}</td><td>${esc(c.customer)}</td><td>${esc(c.unit)}</td><td>${c.days ?? ''}</td><td class="n">${fmt(c.time)}</td><td class="n">${fmt(c.total)}</td></tr>`).join('')}
+    ${d.closed.length ? `<table><thead><tr><th>RA#</th><th>Res#</th><th>Customer</th><th>Unit</th><th>Days</th><th class="n">Time</th><th class="n">Total</th></tr></thead><tbody>
+      ${d.closed.map((c) => `<tr><td>${esc(c.number)}</td><td>${esc(c.reservationNumber)}</td><td>${esc(c.customer)}</td><td>${esc(c.unit)}</td><td>${c.days ?? ''}</td><td class="n">${fmt(c.time)}</td><td class="n">${fmt(c.total)}</td></tr>`).join('')}
     </tbody></table>` : '<p class="muted">No contracts closed.</p>'}
-    ${d.payments.length ? `<table><thead><tr><th>RA#</th><th>Customer</th><th>Method</th><th>Reference</th><th class="n">Amount</th></tr></thead><tbody>
-      ${d.payments.map((p) => `<tr><td>${esc(p.number)}</td><td>${esc(p.customer)}</td><td>${esc(p.method)}</td><td>${esc(p.reference)}</td><td class="n">${fmt(p.amount)}</td></tr>`).join('')}
+    ${d.payments.length ? `<table><thead><tr><th>RA#</th><th>Res#</th><th>Customer</th><th>Method</th><th>Reference</th><th class="n">Amount</th></tr></thead><tbody>
+      ${d.payments.map((p) => `<tr><td>${esc(p.number)}</td><td>${esc(p.reservationNumber)}</td><td>${esc(p.customer)}</td><td>${esc(p.method)}</td><td>${esc(p.reference)}</td><td class="n">${fmt(p.amount)}</td></tr>`).join('')}
     </tbody></table>` : ''}
     <table><tbody>
       <tr><td>Net time &amp; mileage</td><td class="n">${fmt(d.summary.rentalRevenue.netTimeAndMileage)}</td></tr>
@@ -382,6 +384,7 @@ function buildExcelSpec(data) {
       { header: 'Location', key: 'location', width: 26 },
       { header: 'Day', key: 'day', width: 12 },
       { header: 'RA#', key: 'number', width: 16 },
+      { header: 'Res#', key: 'reservationNumber', width: 16 },
       { header: 'Customer', key: 'customer', width: 26 },
       { header: 'Method', key: 'method', width: 14 },
       { header: 'Reference', key: 'reference', width: 18 },
@@ -389,7 +392,7 @@ function buildExcelSpec(data) {
     ],
     rows: (data.days || []).flatMap((d) => d.payments.map((p) => ({
       location: d.locationName, day: d.day, number: p.number,
-      customer: p.customer, method: p.method, reference: p.reference, amount: p.amount,
+      reservationNumber: p.reservationNumber, customer: p.customer, method: p.method, reference: p.reference, amount: p.amount,
     }))),
   });
   return { filename: `daily-business-${data.range?.to || 'report'}.xlsx`, sheets };
