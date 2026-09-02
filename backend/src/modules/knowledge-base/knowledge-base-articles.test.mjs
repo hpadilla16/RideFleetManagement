@@ -78,6 +78,27 @@ test('citations are covered, which is why the corpus moved into code', () => {
   assert.ok(slugs.includes('citation-documents-and-export'));
 });
 
+test("the copilot's first recorded gap is closed: additional drivers", () => {
+  // The owner's own example question ran on curated playbook steps with no
+  // article behind them (intents.js `additional-drivers`, articleSlug null).
+  // The article now exists; the frontend intent map points at this slug and
+  // its integrity test validates against this catalog — renaming the slug
+  // would break the copilot's "Ver artículo" deep link.
+  const a = DEFAULT_ARTICLES.find((x) => x.slug === 'additional-drivers');
+  assert.ok(a, 'additional-drivers article missing from the corpus');
+  assert.equal(a.category, 'AGREEMENTS');
+  // The curriculum's gotcha, in both halves: confirm BEFORE the vehicle
+  // leaves. The article must carry the one mistake that costs money.
+  assert.match(a.body, /BEFORE releasing the vehicle/);
+  assert.match(a.body, /ANTES de entregar el veh/);
+  // The real flow the micro-module walks, by its real button names.
+  assert.match(a.body, /Additional Drivers/);
+  assert.match(a.body, /Add Driver/);
+  assert.match(a.body, /Save Drivers/);
+  // New article, never shipped before — no upgrade path to declare.
+  assert.ok(!a.supersedes, 'a brand-new article must not carry supersedes');
+});
+
 test('a fresh scope gets everything', () => {
   assert.equal(articlesMissingFrom([]).length, DEFAULT_ARTICLES.length);
 });

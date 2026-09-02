@@ -45,6 +45,17 @@ describe('intent map integrity', () => {
     }
   });
 
+  it("the owner's example is fully backed now: tour, article, playbook steps", () => {
+    // Phase 2 left the additional-drivers intent article-less (articleSlug
+    // null). The article shipped with the closers — the card gains the live
+    // body and the "Ver artículo" deep link, and losing the slug again would
+    // be a silent regression the generic loop above cannot see.
+    const intent = findIntent('additional-drivers');
+    expect(intent.articleSlug).toBe('additional-drivers');
+    expect(intent.tourModuleKey).toBe('additional-drivers');
+    expect(intent.steps?.en?.length).toBeTruthy();
+  });
+
   it('no source, no answer — every intent carries a source and a bilingual summary', () => {
     for (const intent of INTENTS) {
       expect(intent.source?.label, `${intent.key} source`).toBeTruthy();

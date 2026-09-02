@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { TeamTraining } from '../../components/training/TeamTraining';
+import { CopilotMisses } from '../../components/training/CopilotMisses';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
@@ -377,6 +378,10 @@ function Inner({ token, me, logout }) {
       {/* Ride University standing, per person. Renders nothing for a role
           without permission, or before anyone has staff who can sign in. */}
       <TeamTraining token={token} people={people} scopedQuery={scopedQuery} />
+
+      {/* The copilot's authoring backlog — what the team asks and cannot
+          find. Same idiom: the ADMIN-gated endpoint decides who sees it. */}
+      <CopilotMisses token={token} />
 
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="app-banner">

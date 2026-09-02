@@ -1375,6 +1375,15 @@
     "ai": {
       "chip": "AI",
       "disclaimer": "Generado por AI desde los artículos de Ride University — verifica en la pantalla antes de actuar."
+    },
+    "misses": {
+      "heading": "Qué preguntan los agentes",
+      "note": "Preguntas que el copilot no pudo contestar, últimos {{days}} días",
+      "empty": "Sin preguntas sin respuesta esta semana.",
+      "flagged": "Avisada",
+      "askedCount": "Preguntada {{times}}×",
+      "lastAsked": "última hace {{ago}}",
+      "searchKb": "Buscar en KB"
     }
   },
   "checkoutClosed": {

@@ -50,9 +50,11 @@ import { findModule, modulesFor } from './curriculum.js';
 export const INTENTS = [
   // ── the owner's example, verbatim: additional drivers ─────────────────────
   // Phase 2 shipped the micro-module (curriculum.js `additional-drivers`), so
-  // "Te enseño" now fully guides it — record-scoped, parking and all. The
-  // curated playbook steps stay as the ANSWER (still no article), so the card
-  // reads the same and the CTA row gained the tour.
+  // "Te enseño" fully guides it — record-scoped, parking and all. The last
+  // gap closed 2026-09-02: the Ride University article now exists
+  // (default-articles.js `additional-drivers`), so the card gained the live
+  // article body and the "Ver artículo" deep link. The curated playbook steps
+  // stay as the leading answer.
   {
     key: 'additional-drivers',
     aliases: {
@@ -61,7 +63,7 @@ export const INTENTS = [
     },
     tourModuleKey: 'additional-drivers',
     route: '/reservations',
-    articleSlug: null,
+    articleSlug: 'additional-drivers',
     summary: {
       en: 'Additional drivers live inside the reservation itself.',
       es: 'Los conductores adicionales viven dentro de la reserva misma.',
