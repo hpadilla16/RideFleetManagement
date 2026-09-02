@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react';
 
 /**
  * OneStepGpsConnectorTab (Settings → Telematics) — the OneStepGPS connector
@@ -200,6 +200,10 @@ describe('OneStepGpsConnectorTab — key configured, mapping table', () => {
     // one commit after the rows paint, and without it there is no dirty row to
     // persist and the click would assert against an empty payload.
     await screen.findByText('onestepgps.unsavedChanges[count=1]');
+    // React 19: findByText resolves off the DOM mutation, which can land while
+    // the seeding commit's follow-up work is still queued. A discrete click
+    // dispatched in that window is dropped, so drain React's queue first.
+    await act(async () => {});
     fireEvent.click(saveBtn);
 
     await waitFor(() => expect(posted.length).toBe(1));
