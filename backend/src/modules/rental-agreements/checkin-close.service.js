@@ -28,6 +28,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import { validateBackdatedReturn, backdatedReturnNote } from './backdated-return.js';
+import { parseOdometerInput } from '../../lib/odometer-input.js';
 import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import logger from '../../lib/logger.js';
@@ -164,7 +165,9 @@ export async function closeAgreementWithCheckinFees(
   // Step 1 — Persist checkin metrics on the agreement
   // ─────────────────────────────────────────────────────────────────────────
 
-  const odometerIn   = payload.odometerIn   != null ? Number(payload.odometerIn)   : null;
+  // Sentry 371e0617 (2026-09-02): same INT4 guard as saveInspection — a
+  // phone-number-sized odometer must 400 with words, not 500 at the DB.
+  const odometerIn   = parseOdometerInput(payload.odometerIn, { field: 'odometerIn' });
   const fuelIn       = payload.fuelIn       != null ? Number(payload.fuelIn)       : null;
   const cleanlinessIn = payload.cleanlinessIn != null ? Number(payload.cleanlinessIn) : null;
 

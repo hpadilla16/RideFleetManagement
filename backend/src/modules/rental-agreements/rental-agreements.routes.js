@@ -403,6 +403,7 @@ rentalAgreementsRouter.post('/:id/inspection', async (req, res, next) => {
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/phase/i.test(e.message)) return res.status(400).json({ error: e.message });
+    if (/odometer/i.test(e.message)) return res.status(400).json({ error: e.message });
     if (/only admin can reassign|admin role required/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
     next(e);
   }
@@ -436,6 +437,7 @@ rentalAgreementsRouter.post('/:id/checkin-close', async (req, res, next) => {
   } catch (e) {
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     if (/Cannot close agreement in status/i.test(String(e?.message || ''))) return res.status(409).json({ error: e.message });
+    if (/odometer/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
     next(e);
   }
 });
