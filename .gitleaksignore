@@ -29,3 +29,9 @@ c9b0561051a3e8f03f4be80830d289b03b284c55:backend/src/modules/settings/telematics
 2462f43acd692a0346d4d56f09303efc047ac593:.deploy-notes/2026-06-25-ship-vehicle-profile-public-api-beta228.sh:generic-api-key:38
 # dummy 'tok_saved_abc123'
 43f49d716fa2060ba88a1fe81db496c703d8c8a9:backend/src/modules/payment-gateway/card-on-file.test.mjs:generic-api-key:65
+
+# ── Triaged 2026-09-02: rideops terms-signing fixture. 32-hex token in a
+#    *.example.com fixture URL, expiresAt already in the past when committed.
+#    VERIFIED ABSENT from HandoffToken, ShuttleTrackerLink and AppSetting in
+#    production before ignoring (same check as the 2026-08-25 batch).
+21f9632ba904c651985fe60a9266f4b0dab0716a:rideops/test/fixtures/handoff_token_terms.json:generic-api-key:2
