@@ -94,6 +94,16 @@ export const AUDIT_ACTIONS = Object.freeze({
   SHUTTLE_ASSIGN: 'SHUTTLE_ASSIGN',
   SHUTTLE_UNASSIGN: 'SHUTTLE_UNASSIGN',
 
+  // ── QR self-return (2026-09-02) ──
+  // Enabling/disabling a location's return QR opens/closes a PUBLIC write
+  // surface, and voiding a customer return stamp changes which timestamp
+  // check-in close feeds the late-fee engine — money-adjacent, ADMIN-class
+  // only (SELF_RETURN_VOID_ROLES). Metadata carries ids, the stamp time and
+  // the stated reason — never customer PII.
+  SELF_RETURN_QR_ENABLE: 'SELF_RETURN_QR_ENABLE',
+  SELF_RETURN_QR_DISABLE: 'SELF_RETURN_QR_DISABLE',
+  SELF_RETURN_VOID: 'SELF_RETURN_VOID',
+
   // ── Shuttle driver shifts (Phase 3 driver surface, 2026-08-25) ──
   // Minting hands out a public token that reads waiting customers' shared
   // coordinates and closes their requests — a real credential, so issue and

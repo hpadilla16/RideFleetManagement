@@ -106,6 +106,7 @@ import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.rou
 import { trainingRouter } from './modules/training/training.routes.js';
 import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
 import { shuttleDriverPublicRouter } from './modules/shuttle/shuttle-driver.routes.js';
+import { selfReturnPublicRouter, selfReturnAdminRouter } from './modules/self-return/self-return.routes.js';
 import { billingPublicRouter } from './modules/billing/billing-public.routes.js';
 import { billingWebhookRouter } from './modules/billing/billing-webhook.routes.js';
 import { billingSelfRouter } from './modules/billing/billing-self.routes.js';
@@ -281,6 +282,10 @@ app.use('/api/public/shuttle', shuttleTrackerPublicRouter);
 // Driver mode (Phase 3): per-shift token-only surface — same bare-404 rule.
 // Staff mint/revoke lives on /api/shuttle-monitor behind requireAuth.
 app.use('/api/public/driver', shuttleDriverPublicRouter);
+// QR self-return (2026-09-02): per-location QR token-only public surface —
+// same bare-404 rule. Pair mismatches on the submit are that same 404 too
+// (no existence oracle). Admin mint/revoke/void lives on /api/self-return.
+app.use('/api/public/self-return', selfReturnPublicRouter);
 // Autopay enrollment (tenant subscriptions Phase 1): the tokenized surface a
 // TENANT's owner opens to put a card on file for their Ride Fleet Manager
 // subscription. Same bare-404 rule. Note this is RIDE's billing account
@@ -327,6 +332,10 @@ app.use('/api/planner', requireAuth, tenantRateLimit, requireModuleAccess('plann
 // Shuttle Requests (Valet arc 2026-08-05) — Chloe writes via service account
 // (allowlisted POST), floor staff read/close. Rides on the reservations module.
 app.use('/api/shuttle-requests', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleRequestsRouter);
+// QR self-return admin (2026-09-02): per-location QR mint/revoke (settings-
+// author tier inside the router) + the ADMIN stamp void. Rides the same
+// reservations module gate as the check-in flow it feeds.
+app.use('/api/self-return', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), selfReturnAdminRouter);
 // Shuttle tracker settings (2026-08-15) — per-location config for the public
 // tracker page; same module gate as the shuttle queue it feeds.
 app.use('/api/shuttle-tracker', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleTrackerAdminRouter);

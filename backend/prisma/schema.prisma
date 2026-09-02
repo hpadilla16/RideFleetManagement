@@ -1491,6 +1491,21 @@ model Reservation {
   // aggregator.
   isPrepaid Boolean?
 
+  // QR self-return (Hector, 2026-09-02): the customer scanned the location's
+  // return QR and marked the car handed back. Evidence only — it NEVER
+  // closes the agreement, touches vehicle status, or runs fees; check-in
+  // close uses it as the effective return time for late-fee math when it is
+  // EARLIER than the close's own. LocationId is a plain ref (the sede whose
+  // QR was scanned — evidence, not workflow); meta carries capped
+  // ip/userAgent for abuse triage. Voiding (ADMIN only) keeps the stamp and
+  // records who/why — never deleted.
+  customerReportedReturnAt             DateTime?
+  customerReportedReturnLocationId     String?
+  customerReportedReturnMetaJson       String?
+  customerReportedReturnVoidedAt       DateTime?
+  customerReportedReturnVoidedByUserId String?
+  customerReportedReturnVoidReason     String?
+
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
@@ -3592,6 +3607,30 @@ model ShuttleDriverMessage {
   createdAt       DateTime @default(now())
 
   @@index([tenantId, shiftId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QR self-return (Hector, 2026-09-02): one QR token per location, printed and
+// taped up in the return area. The row IS the enablement — no row (or a
+// revoked one) = the public page 404s exactly like a bad token; re-enabling
+// mints a NEW token so old posters die. Same public-token idiom as
+// ShuttleTrackerLink/ShuttleDriverShift (192-bit random, unique, revocable,
+// bare-404 on anything unusable); tracker-substrate style: plain String
+// refs, no relations, ownership re-verified on every read.
+// ─────────────────────────────────────────────────────────────────────────────
+model SelfReturnQr {
+  id         String @id @default(cuid())
+  tenantId   String
+  locationId String @unique
+  token      String @unique
+
+  revokedAt DateTime?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId])
 }
 
 model PlannerScenario {
