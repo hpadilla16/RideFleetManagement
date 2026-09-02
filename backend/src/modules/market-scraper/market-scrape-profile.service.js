@@ -1,3 +1,4 @@
+import { RateSource } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { loadCompetitorRows } from './rate-offer-source.js';
 
@@ -26,13 +27,17 @@ const VALID_STRATEGIES = new Set([
   'STATIC_FLOOR'
 ]);
 const VALID_FREQUENCIES = new Set(['DAILY', 'WEEKLY']);
-// Must track the RateSource enum in schema.prisma. 2026-07-29: this was still
-// {'EXPEDIA'} — a value that no longer exists in the enum — while every live
-// profile (LAX + SJU, both tenants) runs sources:["KAYAK"]. Creating or
-// editing a profile through the API therefore 400'd on the only source the
-// scraper actually uses; the live rows predate the Kayak migration and were
-// never re-validated. Aligned with the enum below.
-const VALID_SOURCES = new Set(['KAYAK', 'EXPEDIA_DIRECT', 'CARRENTALS']);
+// DERIVED from the generated Prisma client's RateSource enum (2026-09-02), so
+// a schema migration that adds/removes a source propagates here automatically.
+// History: this used to be a hand-typed set and drifted — 2026-07-29 it was
+// still {'EXPEDIA'}, a value that no longer existed in the enum, while every
+// live profile (LAX + SJU, both tenants) ran sources:["KAYAK"], so creating or
+// editing a profile through the API 400'd on the only source the scraper
+// actually used (fixed in 300a3809). Exported for the drift test.
+// NOTE: validity here ≠ pricing eligibility — a valid source still cannot move
+// a live price until it is on the all-in allowlist in rate-offer-source.js
+// (sourceAllInConfirmed).
+export const VALID_SOURCES = new Set(Object.values(RateSource));
 
 const PROFILE_INCLUDE = {
   targetRate: { select: { id: true, rateCode: true, name: true, locationId: true } }
@@ -92,7 +97,7 @@ function validateProfilePayload(data, { partial = false } = {}) {
     // sources has no DB default and is required by the schema. On CREATE we
     // must surface "missing sources" as a 400 instead of letting Prisma blow
     // up with an opaque 500. Codex P2 review on PR #64.
-    throw Object.assign(new Error('sources is required (e.g. ["EXPEDIA"])'), { httpStatus: 400 });
+    throw Object.assign(new Error('sources is required (e.g. ["KAYAK"])'), { httpStatus: 400 });
   }
 
   if (data.strategy !== undefined) {

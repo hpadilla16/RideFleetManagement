@@ -1742,6 +1742,32 @@ export const settingsService = {
     return { ok: true };
   },
 
+  // --- Market pricing minimum-sample guard (2026-09-02) ---------------------
+  // Per-TENANT AppSetting JSON (checkinAuditConfig pattern — NOT the per-
+  // location MarketPricingConfig prisma rows above). minSampleVendors is the
+  // floor on how many DISTINCT agencies (vendors) must be observed in a cell
+  // before the pricing-suggestion engine may act on it; below the floor the
+  // rule is skipped ('below_min_sample'). Default 1 = exactly the pre-guard
+  // behavior (a single offer can still move a price) — Hector picks the real
+  // floor later; this ships the mechanism only.
+  async getMarketPricingSampleConfig(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('marketPricingConfig', scope), null);
+    const n = Number(cfg?.minSampleVendors);
+    return { minSampleVendors: Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1 };
+  },
+
+  async updateMarketPricingSampleConfig(payload = {}, scope = {}) {
+    const key = scopedKey('marketPricingConfig', scope);
+    const current = await readJsonSetting(key, {});
+    const next = { ...current };
+    if (payload?.minSampleVendors !== undefined && payload.minSampleVendors !== null && `${payload.minSampleVendors}`.trim?.() !== '') {
+      const n = Number(payload.minSampleVendors);
+      if (Number.isFinite(n) && n >= 1) next.minSampleVendors = Math.floor(n);
+    }
+    await writeJsonSetting(key, next);
+    return this.getMarketPricingSampleConfig(scope);
+  },
+
   async updateTelematicsConfig(payload = {}, scope = {}) {
     if (!scope?.tenantId) throw new Error('tenantId is required');
     const existing = await this.getTelematicsConfig(scope, { includeSecret: true });

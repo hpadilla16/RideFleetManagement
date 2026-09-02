@@ -55,7 +55,11 @@ const EMPTY_PROFILE = {
   windowStartDay: 1,
   windowEndDay: 14,
   lorDays: 3,
-  sources: ['EXPEDIA'],
+  // Must be valid RateSource values (KAYAK | EXPEDIA_DIRECT | CARRENTALS).
+  // Was ['EXPEDIA'] — a value the enum dropped in the Jul-1 Kayak migration,
+  // so the API 400'd any profile created with the untouched default; every
+  // live profile runs KAYAK.
+  sources: ['KAYAK'],
   frequency: 'DAILY',
   scheduleHour: 4,
   scheduleMinute: 1,

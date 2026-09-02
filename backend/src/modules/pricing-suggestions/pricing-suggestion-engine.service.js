@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
+import { settingsService } from '../settings/settings.service.js';
 import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
 import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
@@ -22,6 +23,27 @@ import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js
  */
 
 const SUGGESTION_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+
+/**
+ * Minimum-sample guard (2026-09-02, mechanism only). How many DISTINCT
+ * agencies (vendors) must be present in the cell — after the adapter's
+ * purpose:'pricing' filters/gating — before a rule may act. Config lives in
+ * the per-tenant marketPricingConfig AppSetting
+ * (settingsService.getMarketPricingSampleConfig). DEFAULT 1 = exactly the
+ * pre-guard behavior: one offer can still move a live price until Hector
+ * raises the floor. Any config-read failure also falls back to 1, so the
+ * engine never goes dark because of a settings hiccup.
+ */
+async function resolveMinSampleVendors(tenantId, getMinSampleConfig = null) {
+  try {
+    const cfg = await (getMinSampleConfig
+      ? getMinSampleConfig({ tenantId })
+      : settingsService.getMarketPricingSampleConfig({ tenantId }));
+    const n = Number(cfg?.minSampleVendors);
+    if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+  } catch { /* default below */ }
+  return 1;
+}
 
 // ---------------------------------------------------------------------------
 // Utilization lift (Hector, 2026-08-06: "asegurate que los precios de MI esten
@@ -162,6 +184,16 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
   // Shared per-run utilization context (config + forecast math once per location).
   const utilizationContext = createUtilizationContext();
 
+  // Min-sample config memoized per tenant for the run (one AppSetting read per
+  // tenant, not one per rule).
+  const minSampleCache = new Map();
+  const getMinSampleConfig = ({ tenantId: tid }) => {
+    if (!minSampleCache.has(tid)) {
+      minSampleCache.set(tid, settingsService.getMarketPricingSampleConfig({ tenantId: tid }));
+    }
+    return minSampleCache.get(tid);
+  };
+
   for (const rule of rules) {
     out.rulesEvaluated += 1;
     if (engineAManaged.has(rule.rateId)) {
@@ -170,7 +202,7 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
       continue;
     }
     try {
-      const result = await evaluateRule(rule, { utilizationContext });
+      const result = await evaluateRule(rule, { utilizationContext, getMinSampleConfig });
       if (result.skipped) {
         out.suggestionsSkipped += 1;
         continue;
@@ -193,7 +225,7 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
  * Pure logic + a single PricingSuggestion write (+ optional Rate.daily
  * update for AUTO mode). Safe to retry.
  */
-export async function evaluateRule(rule, { utilizationContext = null } = {}) {
+export async function evaluateRule(rule, { utilizationContext = null, getMinSampleConfig = null } = {}) {
   if (rule.strategy === 'MANUAL') {
     return { skipped: true, reason: 'manual_rule_no_op' };
   }
@@ -227,10 +259,12 @@ export async function evaluateRule(rule, { utilizationContext = null } = {}) {
 
   // Fetch latest 24h competitor rows for that SIPP+location. Dual-read
   // (RateOffer + legacy MarketObservation) through the adapter with
-  // purpose:'pricing': KAYAK-source rows are EXCLUDED until
-  // KAYAK_EFFECTIVE_IS_ALL_IN=true, because Kayak's effectiveDailyPrice is a
-  // fee-less teaser and this engine writes REAL prices (15 AUTO rules live) —
-  // see rate-offer-source.js for the full rationale (2026-07-03).
+  // purpose:'pricing': only sources CONFIRMED all-in survive
+  // (sourceAllInConfirmed allowlist — KAYAK stays out until
+  // KAYAK_EFFECTIVE_IS_ALL_IN=true because its effectiveDailyPrice is a
+  // fee-less teaser, and any unvetted future source stays out by default) —
+  // this engine writes REAL prices (15 AUTO rules live); see
+  // rate-offer-source.js for the full rationale (2026-07-03 / 2026-09-02).
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const { rows: obs } = await loadCompetitorRows(
     prisma,
@@ -256,6 +290,17 @@ export async function evaluateRule(rule, { utilizationContext = null } = {}) {
     const prev = perVendor.get(v);
     if (prev == null || price < prev.price) perVendor.set(v, { vendor: v, price, observationId: o.id });
   }
+  // Minimum-sample guard: perVendor.size is the number of DISTINCT agencies in
+  // this cell after every existing filter (24h window, SIPP+location, adapter
+  // purpose:'pricing' all-in gate, anonymous-supplier exclusion). Below the
+  // tenant's floor the market signal is too thin to act on — skip, same idiom
+  // as 'no_recent_observations'. Default floor 1 keeps today's behavior bit-
+  // for-bit (obs.length > 0 implies at least one vendor).
+  const minSampleVendors = await resolveMinSampleVendors(rule.tenantId, getMinSampleConfig);
+  if (perVendor.size < minSampleVendors) {
+    return { skipped: true, reason: 'below_min_sample' };
+  }
+
   const ordered = Array.from(perVendor.values()).sort((a, b) => a.price - b.price);
   const prices = ordered.map((r) => r.price);
   const marketMin = prices[0];

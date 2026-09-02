@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   offerToObservationRow,
   loadCompetitorRows,
-  kayakAllInConfirmed
+  kayakAllInConfirmed,
+  sourceAllInConfirmed
 } from './rate-offer-source.js';
 
 // The adapter takes the prisma client as a parameter, so these tests pass a
@@ -113,6 +114,30 @@ describe('kayakAllInConfirmed', () => {
   it('returns true only for the literal "true"', () => {
     process.env[ENV_KEY] = 'true';
     assert.equal(kayakAllInConfirmed(), true);
+  });
+});
+
+// ----- sourceAllInConfirmed (all-in ALLOWLIST, 2026-09-02) ------------------
+
+describe('sourceAllInConfirmed', () => {
+  it('EXPEDIA_DIRECT and CARRENTALS are confirmed all-in regardless of env', () => {
+    delete process.env[ENV_KEY];
+    assert.equal(sourceAllInConfirmed('EXPEDIA_DIRECT'), true);
+    assert.equal(sourceAllInConfirmed('CARRENTALS'), true);
+  });
+
+  it('KAYAK follows KAYAK_EFFECTIVE_IS_ALL_IN (unchanged semantics)', () => {
+    delete process.env[ENV_KEY];
+    assert.equal(sourceAllInConfirmed('KAYAK'), false);
+    process.env[ENV_KEY] = 'true';
+    assert.equal(sourceAllInConfirmed('KAYAK'), true);
+  });
+
+  it('a source NOT in the allowlist defaults to NOT confirmed — even with the Kayak env flipped', () => {
+    process.env[ENV_KEY] = 'true';
+    for (const s of ['SOMETHING_NEW', 'SKYSCANNER', '', null, undefined]) {
+      assert.equal(sourceAllInConfirmed(s), false, `source ${String(s)} must not be pricing-eligible`);
+    }
   });
 });
 
@@ -264,6 +289,27 @@ describe('loadCompetitorRows — pricing gate (KAYAK_EFFECTIVE_IS_ALL_IN)', () =
     const { rows } = await loadCompetitorRows(mixed(), {}, { purpose: 'display' });
     assert.deepEqual(rows.map((r) => r.id).sort(),
       ['carrentals', 'direct', 'kayak-expedia', 'kayak-priceline', 'legacy']);
+  });
+
+  it('UNKNOWN source rows reach display but NEVER pricing (poison-source protection)', async () => {
+    const client = () => fakeClient({
+      offers: [
+        makeOffer({ id: 'mystery', source: 'SOMETHING_NEW', provider: 'NewOTA', supplier: 'Hertz' }),
+        makeOffer({ id: 'direct', source: 'EXPEDIA_DIRECT', provider: 'Expedia', supplier: 'Thrifty' })
+      ]
+    });
+    // Display: labelable, so the unknown source is shown.
+    delete process.env[ENV_KEY];
+    const { rows: display } = await loadCompetitorRows(client(), {}, { purpose: 'display' });
+    assert.deepEqual(display.map((r) => r.id).sort(), ['direct', 'mystery']);
+    // Pricing: excluded with the Kayak env unset...
+    const { rows: pricing } = await loadCompetitorRows(client(), {}, { purpose: 'pricing' });
+    assert.deepEqual(pricing.map((r) => r.id), ['direct']);
+    // ...and STILL excluded when Kayak is confirmed all-in — the allowlist is
+    // per-source; confirming one source never opens the door for another.
+    process.env[ENV_KEY] = 'true';
+    const { rows: pricingEnvOn } = await loadCompetitorRows(client(), {}, { purpose: 'pricing' });
+    assert.deepEqual(pricingEnvOn.map((r) => r.id), ['direct']);
   });
 
   it('FAIL-CLOSED: missing/unknown purpose defaults to pricing (Kayak excluded)', async () => {

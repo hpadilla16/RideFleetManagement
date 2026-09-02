@@ -24,17 +24,25 @@
  *     relay is dropped — same channel, second-hand copy.
  *
  * PRICING GATE (2026-07-03, Hector — CRITICAL, 15 PricingRule mode=AUTO rows
- * are live in prod):
- *   Kayak's effectiveDailyPrice is a TEASER: totalPrice/lorDays where
- *   totalPrice does NOT include taxes/fees. The tax-aware pricing path
- *   (beta.202 gross-up) assumes effectiveDailyPrice is ALL-IN; feeding it a
- *   teaser makes baseFromCustomerAllIn() back-solve a base rate ~18-25% too
- *   low, and the live AUTO rules would silently undercut ourselves every run.
- *   Until the scraper team confirms Kayak's effectiveDailyPrice is all-in,
- *   KAYAK-source rows are EXCLUDED from purpose:'pricing' reads. Flip
- *   KAYAK_EFFECTIVE_IS_ALL_IN=true (env) once confirmed. Display reads
- *   ('display') include Kayak — a chart/table can label a teaser; an AUTO
- *   price write cannot.
+ * are live in prod; hardened from a KAYAK denylist to a per-source ALL-IN
+ * ALLOWLIST 2026-09-02, same behavior for today's three sources):
+ *   The tax-aware pricing path (beta.202 gross-up) assumes effectiveDailyPrice
+ *   is ALL-IN; feeding it a teaser makes baseFromCustomerAllIn() back-solve a
+ *   base rate ~18-25% too low, and the live AUTO rules would silently undercut
+ *   ourselves every run. purpose:'pricing' reads therefore keep ONLY rows whose
+ *   source is confirmed all-in (sourceAllInConfirmed):
+ *     - EXPEDIA_DIRECT, CARRENTALS: effective prices are scraped all-in —
+ *       confirmed, always allowed.
+ *     - KAYAK: effectiveDailyPrice is a TEASER (totalPrice/lorDays where
+ *       totalPrice does NOT include taxes/fees). Excluded until the scraper
+ *       team confirms it is all-in; flip KAYAK_EFFECTIVE_IS_ALL_IN=true (env)
+ *       once confirmed.
+ *     - ANY source not in the allowlist (a future Skyscanner, an enum addition
+ *       nobody vetted): NOT confirmed → excluded from pricing BY DEFAULT. A
+ *       new source must be added to sourceAllInConfirmed deliberately before
+ *       it can move a live price.
+ *   Display reads ('display') include every source — a chart/table can label
+ *   a teaser; an AUTO price write cannot.
  */
 import { vendorKey } from './market-vendor.js';
 
@@ -45,6 +53,31 @@ import { vendorKey } from './market-vendor.js';
  */
 export function kayakAllInConfirmed() {
   return process.env.KAYAK_EFFECTIVE_IS_ALL_IN === 'true';
+}
+
+/**
+ * Per-source ALL-IN confirmation ALLOWLIST (2026-09-02). purpose:'pricing'
+ * keeps a row only when this returns true for its source. The default for a
+ * source that is not listed here is FALSE — a brand-new source (Skyscanner or
+ * anything else) is excluded from price COMPUTATION until someone confirms its
+ * effectiveDailyPrice is all-in and adds it here, deliberately. Display reads
+ * are never gated by this.
+ */
+export function sourceAllInConfirmed(source) {
+  switch (source) {
+    // Direct scrapers write all-in effective prices — confirmed (2026-07-03
+    // note above), always allowed.
+    case 'EXPEDIA_DIRECT':
+    case 'CARRENTALS':
+      return true;
+    // Teaser until the scraper team confirms; env read at call time so tests
+    // and a droplet restart pick it up without a rebuild (kayakAllInConfirmed).
+    case 'KAYAK':
+      return kayakAllInConfirmed();
+    // Unknown / future source: NOT confirmed → pricing-excluded by default.
+    default:
+      return false;
+  }
 }
 
 /**
@@ -112,9 +145,11 @@ function baseWhere(filters) {
  *                                 profile? (relation where, e.g. {locationCode, tenantId}) }
  * @param {object} opts          { purpose: 'display' | 'pricing' }
  *   - 'pricing': feeds price COMPUTATION (suggestions, AUTO rules, run
- *     comparison). KAYAK-source rows are excluded unless
- *     KAYAK_EFFECTIVE_IS_ALL_IN=true — see the gate note at the top.
- *   - 'display': feeds charts/tables/exports. Kayak included (labelable).
+ *     comparison). Only sources on the all-in allowlist survive
+ *     (sourceAllInConfirmed): EXPEDIA_DIRECT + CARRENTALS always, KAYAK only
+ *     when KAYAK_EFFECTIVE_IS_ALL_IN=true, anything else never — see the gate
+ *     note at the top.
+ *   - 'display': feeds charts/tables/exports. Every source included (labelable).
  *
  * @returns {Promise<{rows: Array<object>, totals: {anonymousOffers: number}}>}
  *   rows sorted by (pickupDate, sipp, dailyPrice) for stable output.
@@ -192,10 +227,12 @@ export async function loadCompetitorRows(prismaClient, filters = {}, opts = {}) 
     ));
   }
 
-  // PRICING GATE — see module header. Only KAYAK is gated; EXPEDIA_DIRECT and
-  // CARRENTALS effective prices are scraped all-in and always allowed.
-  if (purpose === 'pricing' && !kayakAllInConfirmed()) {
-    rows = rows.filter((r) => r.source !== 'KAYAK');
+  // PRICING GATE — see module header. ALL-IN ALLOWLIST: a row feeds price
+  // computation only when its source is confirmed all-in. A source missing
+  // from the allowlist (any future addition) is dropped here by default —
+  // display reads are never gated.
+  if (purpose === 'pricing') {
+    rows = rows.filter((r) => sourceAllInConfirmed(r.source));
   }
 
   rows.sort((a, b) => {
@@ -208,4 +245,4 @@ export async function loadCompetitorRows(prismaClient, filters = {}, opts = {}) 
   return { rows, totals: { anonymousOffers } };
 }
 
-export const rateOfferSource = { offerToObservationRow, loadCompetitorRows, kayakAllInConfirmed };
+export const rateOfferSource = { offerToObservationRow, loadCompetitorRows, kayakAllInConfirmed, sourceAllInConfirmed };
