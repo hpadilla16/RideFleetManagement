@@ -28,6 +28,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import { validateBackdatedReturn, backdatedReturnNote } from './backdated-return.js';
+import { selfReturnOverride, hasActiveSelfReturnStamp } from '../self-return/self-return.js';
 import { parseOdometerInput } from '../../lib/odometer-input.js';
 import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
@@ -141,20 +142,65 @@ export async function closeAgreementWithCheckinFees(
   // ISO strings with a Z pass through untouched, so the wizard's default
   // "now" behaves exactly as before.
   const returnedTz = await resolveTenantTimeZone(agreement.tenantId);
-  const returnedAt = payload.returnedAt
+  let returnedAt = payload.returnedAt
     ? parseDateTimeInTz(payload.returnedAt, returnedTz)
     : new Date();
+
+  // QR self-return stamp (Hector, 2026-09-02): if the customer scanned the
+  // location's return QR and marked the car handed back, that moment is
+  // machine-attested evidence of the actual return. It becomes the effective
+  // return time ONLY when it is EARLIER than what this close would otherwise
+  // use (invariant b — the stamp exists to stop billing the counter's delay,
+  // never to extend a fee), and it must pass the same sanity bounds as any
+  // backdate. Voided stamps never apply. The columns ride the reservation
+  // row this function already loaded, so a Prisma client predating them
+  // (rolling deploy) simply reads undefined and the close behaves exactly as
+  // before.
+  let selfReturn = null;       // the stamp found, applied or not
+  let selfReturnApplied = false; // did it become the effective return time?
+  const agentStatedReturnedAt = returnedAt; // what the close would have used
+  if (hasActiveSelfReturnStamp(agreement.reservation)) {
+    selfReturn = {
+      reportedAt: new Date(agreement.reservation.customerReportedReturnAt),
+      locationId: agreement.reservation.customerReportedReturnLocationId || null,
+    };
+  }
+
   // Who may state "the car actually came back earlier", and how far. The
   // plumbing for payload.returnedAt always existed — ungated. Exposing it in
   // the UI without this check would make erasing late fees invisible.
   // Validated BEFORE the first write: a backdate the actor is not allowed
   // to make must not leave the odometer/fuel readings behind on a close
   // that then 403s.
-  const backdateCheck = validateBackdatedReturn({
-    returnedAt,
-    role: actorRole,
-    rentalStartAt: agreement.finalizedAt || agreement.pickupAt || null,
-  });
+  const rentalStartAt = agreement.finalizedAt || agreement.pickupAt || null;
+  let backdateCheck = null;
+  const overrideAt = selfReturn
+    ? selfReturnOverride({ reportedAt: selfReturn.reportedAt, closeReturnedAt: returnedAt })
+    : null;
+  if (overrideAt) {
+    // Evidence-backed backdating: the customer's stamp skips the role rule
+    // (an AGENT's ordinary close still benefits from it) but NOT the sanity
+    // bounds. A stamp that fails them (stamped against the wrong rental) is
+    // ignored and the close falls through to the normal path below.
+    const evidenceCheck = validateBackdatedReturn({
+      returnedAt: overrideAt,
+      role: actorRole,
+      rentalStartAt,
+      evidence: 'CUSTOMER_SELF_RETURN',
+    });
+    if (evidenceCheck.ok) {
+      returnedAt = overrideAt;
+      selfReturnApplied = true;
+      backdateCheck = evidenceCheck;
+    }
+  }
+  if (!backdateCheck) {
+    backdateCheck = validateBackdatedReturn({
+      returnedAt,
+      role: actorRole,
+      rentalStartAt,
+    });
+  }
   if (!backdateCheck.ok) {
     const err = new Error(backdateCheck.error);
     err.status = 403;
@@ -571,6 +617,19 @@ export async function closeAgreementWithCheckinFees(
           recordedBy: String(actorRole || 'UNKNOWN').toUpperCase(),
           note: backdatedReturnNote({ returnedAt, actorRole }),
         } : {}),
+        // QR self-return stamp (2026-09-02): BOTH timestamps on the record —
+        // the customer's marked moment and what the close would have used —
+        // so "why is the late fee smaller than the check-in hour?" has one
+        // place to look. Recorded even when the stamp did NOT apply (it was
+        // later than the close, or failed the sanity bounds).
+        ...(selfReturn ? {
+          selfReturn: {
+            reportedAt: selfReturn.reportedAt.toISOString(),
+            locationId: selfReturn.locationId,
+            applied: selfReturnApplied,
+            agentReturnedAt: agentStatedReturnedAt.toISOString(),
+          },
+        } : {}),
         newBalance,
         autochargeJobId,
         waiveLateFee,
@@ -599,6 +658,15 @@ export async function closeAgreementWithCheckinFees(
     agreementStatus: newStatus,
     autochargeJobId,
     autochargeAt,
+    // QR self-return stamp (2026-09-02) for the wizard's success step: when
+    // applied, the effective return time the fee math used. Null = no stamp
+    // on this reservation. (Listed before `maintenance` deliberately — the
+    // maintenance-checkin suite pins `maintenance` as the return's last key.)
+    selfReturn: selfReturn ? {
+      reportedAt: selfReturn.reportedAt.toISOString(),
+      applied: selfReturnApplied,
+      effectiveReturnedAt: returnedAt.toISOString(),
+    } : null,
     // Feature A outcome for the wizard's success step: SENT (hand-off strip
     // naming the RO), SNOOZED, or FAILED (retry link). Null = no decision.
     maintenance

@@ -47,6 +47,7 @@
       "tollClosed": "Peaje facturable en contrato cerrado — {{amt}}",
       "tollNew": "Peaje facturable nuevo — {{amt}}",
       "noShow": "No-show de shuttle — {{stop}}",
+      "selfReturn": "Cliente marcó la devolución del carro — check-in pendiente ({{res}})",
       "regExpiring": "Marbete vence en {{days}} días — {{unit}}",
       "regExpired": "Marbete vencido — {{unit}}",
       "maintOverdue": "Mantenimiento vencido — {{service}}, {{unit}}",
@@ -2321,6 +2322,10 @@
     }
   },
   "checkinWizard": {
+    "selfReturnTitle": "Cliente marcó la devolución",
+    "selfReturnApplied": "Cliente marcó la devolución a las {{time}} — el late fee se calcula hasta esa hora, no hasta la hora del check-in.",
+    "selfReturnLater": "Cliente marcó la devolución a las {{time}} (después de la hora de retorno de este cierre — no cambia el cargo).",
+    "selfReturnVoided": "Existe una marca de devolución del cliente pero un admin la anuló — no se usa.",
     "mileagePrefilled": "Prellenado con el último millaje conocido del vehículo — edítalo si el odómetro marca otra cosa.",
     "mileageWarning": "El millaje ingresado ({{entered}} mi) es menor a la lectura del check-out ({{baseline}} mi). Verifica el odómetro — continúa solo si es una corrección o se cambió el odómetro.",
     "damageTitle": "¿Daño en el vehículo?",

@@ -29,6 +29,19 @@ export const BACKDATE_ROLES = Object.freeze(['ADMIN', 'OPS', 'SUPER_ADMIN']);
 export const BACKDATE_GRACE_MS = 15 * 60 * 1000;
 
 /**
+ * Machine-attested backdate sources (2026-09-02). The role gate below polices
+ * HUMAN-asserted backdates — "the car came back Tuesday, trust me". A QR
+ * self-return stamp is different in kind: the system recorded the moment as
+ * it happened (customer scan, tokenized per-location page, first-stamp-wins),
+ * it can only ever move the return time EARLIER at close, and it is
+ * admin-voidable. Evidence from this list skips ONLY the role rule; the
+ * sanity bounds (not in the future, not before the rental started) still
+ * apply — evidence can prove when the car came back, it cannot make time run
+ * backwards.
+ */
+export const BACKDATE_EVIDENCE_SOURCES = Object.freeze(['CUSTOMER_SELF_RETURN']);
+
+/**
  * @returns {{ok: true, backdated: boolean} | {ok: false, error: string}}
  */
 export function validateBackdatedReturn({
@@ -37,6 +50,7 @@ export function validateBackdatedReturn({
   role = 'AGENT',
   rentalStartAt = null,
   graceMs = BACKDATE_GRACE_MS,
+  evidence = null,
 } = {}) {
   const when = returnedAt instanceof Date ? returnedAt : new Date(returnedAt);
   if (Number.isNaN(when.getTime())) return { ok: false, error: 'returnedAt is not a valid date' };
@@ -53,7 +67,8 @@ export function validateBackdatedReturn({
   }
 
   const backdated = nowMs - when.getTime() > graceMs;
-  if (backdated && !BACKDATE_ROLES.includes(String(role || '').toUpperCase())) {
+  const evidenceBacked = BACKDATE_EVIDENCE_SOURCES.includes(String(evidence || '').toUpperCase());
+  if (backdated && !evidenceBacked && !BACKDATE_ROLES.includes(String(role || '').toUpperCase())) {
     return { ok: false, error: 'Only an admin can backdate a check-in. Ask an admin to close this rental with the actual return date.' };
   }
 

@@ -254,6 +254,30 @@ function CheckinWizard({ token, me, logout }) {
     Math.floor(Date.now() / 60000)
   ]);
 
+  // QR self-return stamp (2026-09-02): the customer scanned the location's
+  // return QR and marked the car handed back. The stamp rides the agreement
+  // payload (getById includes the reservation row); a voided stamp is shown
+  // as voided and never used. The backend re-reads and re-validates at close
+  // — this is display + preview only, it can never move money by itself.
+  const selfReturnStamp = useMemo(() => {
+    const r = agreement?.reservation;
+    if (!r?.customerReportedReturnAt) return null;
+    return {
+      reportedAt: r.customerReportedReturnAt,
+      voided: !!r.customerReportedReturnVoidedAt,
+    };
+  }, [agreement]);
+
+  // The preview mirrors the backend's earlier-only rule (invariant b): the
+  // stamp caps the effective return time downward, never extends it.
+  const previewCandidateAt = (canBackdate && actualReturnAt) ? actualReturnAt : returnedAtNow;
+  const selfReturnApplies = useMemo(() => {
+    if (!selfReturnStamp || selfReturnStamp.voided) return false;
+    const stamp = new Date(selfReturnStamp.reportedAt).getTime();
+    const cand = new Date(previewCandidateAt).getTime();
+    return Number.isFinite(stamp) && Number.isFinite(cand) && stamp < cand;
+  }, [selfReturnStamp, previewCandidateAt]);
+
   const feePreview = useFeePreview({
     rates: feeRates,
     odometerOut: agreement?.odometerOut,
@@ -267,7 +291,7 @@ function CheckinWizard({ token, me, logout }) {
     // computation (same trick as the backend uses). Other fees compute
     // normally.
     dueBackAt: waiveLateFee ? null : dueBackAt,
-    returnedAt: (canBackdate && actualReturnAt) ? actualReturnAt : returnedAtNow,
+    returnedAt: selfReturnApplies ? selfReturnStamp.reportedAt : previewCandidateAt,
     rentalDays,
     includedMilesPerDay: 200,
     tankCapacityGallons: 15
@@ -576,6 +600,8 @@ function CheckinWizard({ token, me, logout }) {
               waiveLateFee={waiveLateFee} onWaiveLateFee={setWaiveLateFee}
               canBackdate={canBackdate}
               actualReturnAt={actualReturnAt} onActualReturnAt={setActualReturnAt}
+              selfReturnStamp={selfReturnStamp}
+              selfReturnApplies={selfReturnApplies}
               feePreview={feePreview}
               maintItems={maintItems}
               maintDecision={maintDecision}
@@ -881,6 +907,7 @@ function Step3Metrics({
   smokingDetected, onSmokingDetected,
   waiveLateFee, onWaiveLateFee,
   canBackdate, actualReturnAt, onActualReturnAt,
+  selfReturnStamp, selfReturnApplies,
   feePreview,
   maintItems, maintDecision, maintPrevSnooze, maintUnit, maintStampPreview,
   onMaintArm, onMaintUndo, onMaintSnooze
@@ -958,6 +985,34 @@ function Step3Metrics({
           value={smokingDetected}
           onChange={onSmokingDetected}
         />
+        {/* QR self-return stamp (2026-09-02): the customer marked the return
+            themselves. Shown to EVERY role — the fee cap applies on the
+            backend regardless of who closes; this is the plain-sight line
+            Hector asked for ("Cliente marcó la devolución a las 2:14 PM"). */}
+        {selfReturnStamp ? (
+          <div
+            data-testid="self-return-note"
+            style={{
+              padding: 12,
+              background: selfReturnStamp.voided ? '#F9FAFB' : selfReturnApplies ? '#ECFDF5' : '#F9FAFB',
+              border: `0.5px solid ${selfReturnStamp.voided ? '#E5E7EB' : selfReturnApplies ? '#10B981' : '#E5E7EB'}`,
+              borderRadius: 6,
+            }}
+          >
+            <div style={{ fontWeight: 500, fontSize: 13, color: selfReturnStamp.voided ? '#6B7280' : '#065F46' }}>
+              {t('checkinWizard.selfReturnTitle')}
+            </div>
+            <div style={{ fontSize: 11.5, color: selfReturnStamp.voided ? '#6B7280' : '#047857', marginTop: 2, lineHeight: 1.45 }}>
+              {selfReturnStamp.voided
+                ? t('checkinWizard.selfReturnVoided')
+                : t(selfReturnApplies ? 'checkinWizard.selfReturnApplied' : 'checkinWizard.selfReturnLater', {
+                  time: new Date(selfReturnStamp.reportedAt).toLocaleString([], {
+                    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                  }),
+                })}
+            </div>
+          </div>
+        ) : null}
         {canBackdate && isPastGrace ? (
           <div style={{ padding: 12, background: actualReturnAt ? '#EFF6FF' : '#F9FAFB', border: `0.5px solid ${actualReturnAt ? '#3B82F6' : '#E5E7EB'}`, borderRadius: 6 }}>
             <div style={{ fontWeight: 500, fontSize: 13, color: '#374151' }}>Actual return date & time</div>

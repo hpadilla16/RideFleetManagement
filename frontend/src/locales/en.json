@@ -47,6 +47,7 @@
       "tollClosed": "New billable toll on a closed contract — {{amt}}",
       "tollNew": "New billable toll — {{amt}}",
       "noShow": "Shuttle request no-show — {{stop}}",
+      "selfReturn": "Customer marked the car returned — check-in pending ({{res}})",
       "regExpiring": "Registration expires in {{days}} days — {{unit}}",
       "regExpired": "Registration expired — {{unit}}",
       "maintOverdue": "Maintenance overdue — {{service}}, {{unit}}",
@@ -2321,6 +2322,10 @@
     }
   },
   "checkinWizard": {
+    "selfReturnTitle": "Customer marked the return",
+    "selfReturnApplied": "Customer marked the return at {{time}} — the late fee is computed up to that hour, not the check-in hour.",
+    "selfReturnLater": "Customer marked the return at {{time}} (after the return time of this close — it does not change the fee).",
+    "selfReturnVoided": "A customer return mark exists but was voided by an admin — it is not used.",
     "mileagePrefilled": "Pre-filled with the vehicle's last known mileage — edit it if the odometer reads different.",
     "mileageWarning": "Entered mileage ({{entered}} mi) is below the check-out reading ({{baseline}} mi). Double-check the odometer — continue only if this is a correction or the odometer was swapped.",
     "damageTitle": "Vehicle damage?",

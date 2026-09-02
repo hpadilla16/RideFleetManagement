@@ -36,6 +36,7 @@ import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIn
 import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
+import { SelfReturnQrSettings } from '../../components/settings/SelfReturnQrSettings';
 import { TwoFactorPolicySettings } from '../../components/settings/TwoFactorPolicySettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { OneStepGpsConnectorTab } from './OneStepGpsConnectorTab';
@@ -7064,6 +7065,8 @@ function SettingsInner({ token, me, logout }) {
                   {/* Per-language directions (2026-08-25): Spanish variant of the same text — the tracker page shows it when the customer's ES/EN toggle is on ES, falling back to the English one when empty. */}
                   <div className="stack"><label className="label">Shuttle Walking Directions (Español) — shown when the customer picks ES on the tracker page</label><textarea rows={3} value={locationEditor.config?.shuttleWalkingDirectionsEs || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttleWalkingDirectionsEs: e.target.value } })} placeholder="ej. 1. Toma el ascensor al Nivel 1 (Llegadas). 2. Cruza ambos cruces peatonales hasta la isleta exterior. 3. Espera bajo el letrero B-4 — unos 3 minutos a pie." /></div>
                   {locationEditor.id && <ShuttleTrackerSettings locationId={locationEditor.id} scopedSettingsPath={scopedSettingsPath} />}
+                  {/* QR self-return (2026-09-02): the customer marks the hand-back; check-in close caps the late fee at that hour. Ship-inert until enabled here. */}
+                  {locationEditor.id && <SelfReturnQrSettings locationId={locationEditor.id} scopedSettingsPath={scopedSettingsPath} />}
                   <div className="stack"><label className="label">Drop-off Instructions</label><textarea rows={3} value={locationEditor.config?.dropoffInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), dropoffInstructions: e.target.value } })} /></div>
 
                   <div className="label">Self-Service Handoff Overrides</div>
