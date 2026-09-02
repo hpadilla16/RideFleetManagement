@@ -25,9 +25,15 @@ export const NOTIFICATION_SEVERITIES = Object.freeze(['CRITICAL', 'NEEDS_ACTION'
 // findings emit NEEDS_ACTION, deduped per reservation+check.
 // FLEET (2026-09-01, backlog #5): idle-vehicle daily sweep — one envelope per
 // vehicle per idle episode, severity from the tenant's idleVehicleConfig.
+// COPILOT (2026-09-02, copilot Phase 2): "Avisar a un admin" on an unanswered
+// copilot question — NEEDS_ACTION, audienceRole ADMIN, deduped per normalized
+// query per day. Deliberately NOT a lane in frontend/src/lib/
+// notification-lanes.js: the notifications page's "everything/all" lane has
+// filter {} and shows every sourceType, so COPILOT rows surface there without
+// widening the rail.
 export const NOTIFICATION_SOURCE_TYPES = Object.freeze([
   'GEOFENCE', 'TOLL', 'SHUTTLE', 'KIOSK', 'BILLING', 'MAINTENANCE', 'DOCUMENTS',
-  'CHECKIN_AUDIT', 'FLEET',
+  'CHECKIN_AUDIT', 'FLEET', 'COPILOT',
 ]);
 
 /**

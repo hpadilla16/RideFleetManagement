@@ -286,7 +286,10 @@ describe('the onboarding track does not die at a module boundary', () => {
     const from = steps.findIndex((s) => s.anchor === 'reservation-checkout');
     const through = recordScopedRunEnd(steps, from);
     const covered = steps.slice(from, through + 1).map((s) => s.moduleKey);
-    expect([...new Set(covered)]).toEqual(['check-out', 'check-in', 'take-payment']);
+    // additional-drivers joined the run 2026-09-02 (copilot Phase 2 micro-
+    // module): record-scoped like its neighbors, deliberately adjacent so the
+    // run — and this skip mark — stays one contiguous block.
+    expect([...new Set(covered)]).toEqual(['check-out', 'check-in', 'take-payment', 'additional-drivers']);
     // The step after the run is not record-scoped, so the tour can walk on.
     expect(moduleForStep(steps[through + 1])?.needsRecord).toBeFalsy();
   });

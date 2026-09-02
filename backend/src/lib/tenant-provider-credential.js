@@ -112,6 +112,16 @@ export const PLATFORM_CREDENTIAL_FEATURES = {
     label: 'Commission review-proof validation (Anthropic)',
     settingsPath: 'Settings → Citations → OCR',
   },
+  // Agent Copilot AI fallback (2026-09-02, copilot Phase 2). Its OWN config
+  // block (copilotAiConfig), not a citationOcrConfig rider: what leaves the
+  // building here is staff questions + KB article text, a different
+  // data-protection story from citation scans, so the opt-in must be its own
+  // checkbox.
+  'copilot-ask': {
+    envVar: 'ANTHROPIC_API_KEY',
+    label: 'Agent Copilot AI fallback (Anthropic)',
+    settingsPath: 'Settings → Copilot AI',
+  },
   sms: {
     envVar: 'TELNYX_API_KEY / TWILIO_AUTH_TOKEN / PLIVO_AUTH_TOKEN',
     label: 'Outbound SMS',

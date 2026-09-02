@@ -130,7 +130,7 @@ function Inner({ token, me, logout }) {
         <div className="label" style={{ marginBottom: 8 }}>Reservation: {row?.reservationNumber || '-'}</div>
         {msg ? <div className="label" style={{ marginBottom: 8 }}>{msg}</div> : null}
 
-        <div className="grid2">
+        <div className="grid2" data-tour="additional-driver-form">
           <div className="stack"><label className="label">First Name</label><input value={draft.firstName} onChange={(e) => setDraft({ ...draft, firstName: e.target.value })} /></div>
           <div className="stack"><label className="label">Last Name</label><input value={draft.lastName} onChange={(e) => setDraft({ ...draft, lastName: e.target.value })} /></div>
           <div className="stack"><label className="label">Address</label><input value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></div>
@@ -141,7 +141,7 @@ function Inner({ token, me, logout }) {
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <button onClick={addDriver}>Add Driver</button>
-          <button onClick={save}>Save Drivers</button>
+          <button data-tour="additional-drivers-save" onClick={save}>Save Drivers</button>
         </div>
 
         <table>

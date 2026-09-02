@@ -49,16 +49,17 @@ import { findModule, modulesFor } from './curriculum.js';
 
 export const INTENTS = [
   // ── the owner's example, verbatim: additional drivers ─────────────────────
-  // No article and no tour module exist yet (Phase 3 ships the micro-module);
-  // the playbook bullets are the source, so the answer carries curated steps
-  // and offers Llévame instead of Te enseño.
+  // Phase 2 shipped the micro-module (curriculum.js `additional-drivers`), so
+  // "Te enseño" now fully guides it — record-scoped, parking and all. The
+  // curated playbook steps stay as the ANSWER (still no article), so the card
+  // reads the same and the CTA row gained the tour.
   {
     key: 'additional-drivers',
     aliases: {
       en: ['additional driver', 'add driver', 'extra driver', 'second driver', 'another driver'],
       es: ['conductor adicional', 'chofer adicional', 'otro conductor', 'otro chofer', 'anadir conductor', 'agregar conductor', 'segundo conductor'],
     },
-    tourModuleKey: null,
+    tourModuleKey: 'additional-drivers',
     route: '/reservations',
     articleSlug: null,
     summary: {
@@ -681,8 +682,10 @@ export function readMisses(storage) {
  * fall off — it is a ring buffer, not an archive). Also says so on the
  * console, so a dev tools window at the counter shows the misses live.
  */
-export function logMiss(question, { lang = 'en', flagged = false, storage } = {}) {
-  const entry = { q: String(question || '').slice(0, 300), lang, flagged, at: new Date().toISOString() };
+export function logMiss(question, { lang = 'en', flagged = false, pathname = null, storage } = {}) {
+  // `pathname` (Phase 2): where the person was when they asked — flushed to
+  // the server-side miss table so the authoring backlog carries context.
+  const entry = { q: String(question || '').slice(0, 300), lang, flagged, pathname: pathname || null, at: new Date().toISOString() };
   const store = storage || (typeof window !== 'undefined' ? window.localStorage : null);
   if (store) {
     try {

@@ -6758,6 +6758,42 @@ model NotificationEvent {
   @@index([tenantId, severity, createdAt])
 }
 
+// Agent Copilot — server-side miss telemetry (Phase 2, 2026-09-02).
+// One row per question the copilot could not answer (kind=MISS, flushed in
+// batches from the panel's localStorage ring buffer) and one per AI-fallback
+// attempt (kind=AI_CALL — the per-tenant daily spend cap counts these rows).
+// Observation table: loose ids, no FKs (CheckinAuditFinding precedent) — a
+// deleted user must never cascade into the authoring backlog.
+model CopilotMiss {
+  id       String @id @default(cuid())
+  tenantId String
+  // MISS | AI_CALL
+  kind String @default("MISS")
+  // The question as typed (capped at 300 chars) and its normalized form —
+  // lowercase, accent-stripped — the grouping key for "what to teach next".
+  query           String
+  normalizedQuery String
+  // Where the person was when they asked, and the panel language.
+  pathname String?
+  lang     String?
+  // Loose id of the staffer who asked (from the JWT, never the body).
+  userId String?
+  // "Avisar a un admin" was pressed on this miss (also emits a COPILOT
+  // notification-center event, deduped per normalized query per day).
+  flagged Boolean @default(false)
+  // kind=AI_CALL only: ANSWERED | NO_ANSWER | ERROR.
+  aiOutcome String?
+  // Client-side timestamp of the miss (the flush is opportunistic and late);
+  // createdAt is the ingest time.
+  askedAt   DateTime?
+  createdAt DateTime @default(now())
+
+  // The daily AI-call cap: count(tenantId, kind='AI_CALL', createdAt >= day).
+  @@index([tenantId, kind, createdAt])
+  // The admin "top misses" grouping.
+  @@index([tenantId, normalizedQuery])
+}
+
 // Per-USER read state — one row per (user, notification) actually read.
 // Absence = unread. Loose ids, no @relation (observation style).
 model NotificationRead {

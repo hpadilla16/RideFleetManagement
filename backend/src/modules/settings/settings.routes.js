@@ -365,6 +365,28 @@ settingsRouter.put('/citation-ocr', requireRole('ADMIN'), async (req, res, next)
   }
 });
 
+// Agent Copilot AI fallback (2026-09-02, copilot Phase 2) — per-tenant config.
+// GET returns the masked shape (enabled/model/cap/hasKey, never the key).
+// PUT (ADMIN) flips the gate, sets model/dailyCallCap, stores the key
+// encrypted (integration-crypto, citation-ocr precedent above);
+// { clearKey:true } removes it. OFF by default for every tenant — enabling is
+// a deliberate per-tenant act in this panel, never a deploy side effect.
+settingsRouter.get('/copilot-ai', async (_req, res, next) => {
+  try {
+    res.json(await settingsService.getCopilotAiConfig(scopeFor(_req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/copilot-ai', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateCopilotAiConfig(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Staff 2FA policy (2026-08-22). ADMIN sets the policy for their tenant;
 // SUPER_ADMIN (scopeFor → {}) sets the unscoped GLOBAL default that applies to
 // every tenant without an override. Mirrors the citation-ocr scoping.

@@ -3456,7 +3456,7 @@ token
                 <div className="ios-action-list">
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>View Payments</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}&mode=otc`)}>Record OTC Payment</button>
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/additional-drivers`)}>Additional Drivers</button>
+                  <button data-tour="reservation-additional-drivers" className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/additional-drivers`)}>Additional Drivers</button>
                   <button className="ios-action-btn" onClick={handlePrintAgreement}>Print Agreement</button>
                   <button className="ios-action-btn" onClick={() => setExtendDialogOpen(true)}>Extend Reservation</button>
                   <button className="ios-action-btn" onClick={() => setActivePanel('notes')}>Notes Page</button>

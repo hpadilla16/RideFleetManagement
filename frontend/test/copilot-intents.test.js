@@ -139,10 +139,24 @@ describe('ctasFor — role & gate awareness (guardrail 4)', () => {
   });
 
   it('an intent with no tour degrades honestly: navigation and article only', () => {
-    const ctas = ctasFor(findIntent('additional-drivers'), AGENT);
+    const ctas = ctasFor(findIntent('tolls'), AGENT);
     expect(ctas.teach).toBe(false);
     expect(ctas.adminOnly).toBe(false);
-    expect(ctas.go).toBe('/reservations');
+    expect(ctas.go).toBe('/tolls');
+    expect(ctas.article).toBe('processing-toll-charges');
+  });
+
+  it("the owner's example now teaches (Phase 2): the micro-module closed the map's flagship gap", () => {
+    const intent = findIntent('additional-drivers');
+    expect(intent.tourModuleKey).toBe('additional-drivers');
+    const mod = findModule('additional-drivers');
+    expect(mod.needsRecord).toBe('/reservations');
+    const ctas = ctasFor(intent, AGENT);
+    expect(ctas.teach).toBe(true);
+    expect(ctas.adminOnly).toBe(false);
+    // Record-scoped, so the pre-flight question fires exactly like check-out.
+    expect(preflightFor(mod, '/reservations/R-1').kind).toBe(PREFLIGHT.ASK_HERE);
+    expect(preflightFor(mod, '/dashboard')).toEqual({ kind: PREFLIGHT.NEEDS_RECORD, go: '/reservations' });
   });
 });
 
