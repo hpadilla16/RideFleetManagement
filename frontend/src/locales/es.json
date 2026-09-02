@@ -1172,6 +1172,25 @@
           }
         }
       },
+      "additional-drivers": {
+        "title": "Añade un conductor adicional",
+        "summary": "Pon un segundo conductor en el contrato, con licencia y todo.",
+        "gotcha": "Confirma los conductores adicionales ANTES de entregar el vehículo — un conductor que no está en el contrato no está cubierto, y el fee configurado no se cobra solo después del cierre.",
+        "steps": {
+          "reservation-additional-drivers": {
+            "title": "Abre Additional Drivers",
+            "body": "Cada conductor extra vive dentro de la reserva misma. Este botón abre la lista de conductores de la renta que tienes abierta."
+          },
+          "additional-driver-form": {
+            "title": "Añade el conductor, con licencia y todo",
+            "body": "Nombre, dirección, fecha de nacimiento, número de licencia — y una foto de la licencia. Cada campo importa: esto es quién está cubierto al volante. Add Driver lo pone en la lista de abajo."
+          },
+          "additional-drivers-save": {
+            "title": "Guarda antes de entregar las llaves",
+            "body": "Nadie en la lista cuenta hasta que guardes. Guardar pone la lista en la reserva y te devuelve a ella — hazlo antes de que salga el vehículo, nunca después."
+          }
+        }
+      },
       "overdue-returns": {
         "title": "Perseguir una devolución vencida",
         "summary": "Encontrarlas, y encontrar el carro.",
@@ -1349,6 +1368,11 @@
       "followThere": "Abre la reserva donde tienes el problema y sigo ahí.",
       "whichReservation": "¿En qué reserva tienes el problema? Ábrela y sigo ahí.",
       "takeMeList": "Llévame a Reservations"
+    },
+    "articleLabel": "Del artículo",
+    "ai": {
+      "chip": "AI",
+      "disclaimer": "Generado por AI desde los artículos de Ride University — verifica en la pantalla antes de actuar."
     }
   },
   "checkoutClosed": {

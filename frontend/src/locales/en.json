@@ -1172,6 +1172,25 @@
           }
         }
       },
+      "additional-drivers": {
+        "title": "Add an additional driver",
+        "summary": "Put a second driver on the agreement, license and all.",
+        "gotcha": "Confirm additional drivers BEFORE releasing the vehicle — a driver who is not on the agreement is not covered, and the configured fee does not charge itself after closeout.",
+        "steps": {
+          "reservation-additional-drivers": {
+            "title": "Open Additional Drivers",
+            "body": "Every extra driver lives inside the reservation itself. This button opens the driver roster for the rental you have open."
+          },
+          "additional-driver-form": {
+            "title": "Add the driver, license and all",
+            "body": "Name, address, date of birth, license number — and a photo of the license. Every field matters: this is who is covered behind the wheel. Add Driver puts them on the list below."
+          },
+          "additional-drivers-save": {
+            "title": "Save before you hand over the keys",
+            "body": "Nobody on the list counts until you save. Saving puts the roster on the reservation and returns you to it — do this before the vehicle leaves, never after."
+          }
+        }
+      },
       "overdue-returns": {
         "title": "Chase an overdue return",
         "summary": "Find them, and find the car.",
@@ -1349,6 +1368,11 @@
       "followThere": "Open the reservation where you're having the problem and I'll pick up there.",
       "whichReservation": "Which reservation is the problem on? Open it and I'll pick up there.",
       "takeMeList": "Take me to Reservations"
+    },
+    "articleLabel": "From the article",
+    "ai": {
+      "chip": "AI",
+      "disclaimer": "AI-generated from Ride University articles — verify on the screen before acting."
     }
   },
   "checkoutClosed": {

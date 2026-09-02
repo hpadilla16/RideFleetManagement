@@ -54,6 +54,10 @@ import {
   preflightFor, PREFLIGHT, screenNameFor,
   logMiss, flagLastMiss,
 } from '../../lib/training/intents.js';
+import {
+  flushMisses, flagMissServer, aiEnabled, askAi,
+  fetchArticle, articleHalf, articleBlocks,
+} from '../../lib/training/copilot-live.js';
 
 const Z = 99990;
 /** How long an announced pre-flight line stays readable before the dispatch. */
@@ -188,6 +192,10 @@ export function Copilot({ viewer }) {
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
+    // Opportunistic Phase 2 telemetry: opening the panel flushes whatever the
+    // ring buffer holds. Fire-and-forget by contract — flushMisses never
+    // rejects and never blocks the panel.
+    if (open) flushMisses();
   }, [open]);
 
   // New message → keep the newest visible.
@@ -236,10 +244,26 @@ export function Copilot({ viewer }) {
     if (hit) {
       pushMsg({ kind: 'answer', intentKey: hit.intent.key });
     } else {
-      logMiss(q, { lang });
+      logMiss(q, { lang, pathname });
       pushMsg({ kind: 'miss', q });
+      // Phase 2, both fire-and-forget: flush the buffer, and — ONLY when the
+      // tenant's copilotAiConfig is on (one cached probe per session; the
+      // default is OFF for every tenant) — try the retrieval-bound AI
+      // fallback. Every refusal is silence: the miss card above IS the
+      // Phase 1 behavior, and an AI answer only ever ADDS a bubble.
+      flushMisses();
+      const askedLang = lang;
+      aiEnabled().then((on) => {
+        if (!on) return null;
+        return askAi({ query: q, lang: askedLang }).then((out) => {
+          if (out && typeof out.answer === 'string' && out.answer.trim()) {
+            pushMsg({ kind: 'ai', q, answer: out.answer, sources: out.sources || [], model: out.model || null });
+          }
+          return null;
+        });
+      }).catch(() => { /* never surfaces — the miss card already answered honestly */ });
     }
-  }, [lang, pushMsg]);
+  }, [lang, pathname, pushMsg]);
 
   const submit = useCallback(() => {
     const q = draft;
@@ -303,10 +327,14 @@ export function Copilot({ viewer }) {
     router.push(`/knowledge-base?search=${encodeURIComponent(q)}`);
   }, [router]);
 
-  const onTellAdmin = useCallback((msgId) => {
+  const onTellAdmin = useCallback((msg) => {
     flagLastMiss();
-    setMsgs((list) => list.map((m) => (m.id === msgId ? { ...m, flagged: true } : m)));
-  }, []);
+    // Phase 2: the flag also reaches the server directly (its own endpoint,
+    // not a re-flush — the entry may already have flushed unflagged). Emits
+    // the COPILOT notification-center event for admins. Fire-and-forget.
+    flagMissServer({ query: msg?.q, lang, pathname });
+    setMsgs((list) => list.map((m) => (m.id === msg?.id ? { ...m, flagged: true } : m)));
+  }, [lang, pathname]);
 
   if (!mounted || locked || typeof document === 'undefined') return null;
 
@@ -490,6 +518,10 @@ function Message({ msg, lang, ft, viewer, onTeach, onGo, onArticle, onSearchKb, 
     return <AnswerCard intentKey={msg.intentKey} lang={lang} ft={ft} viewer={viewer} onTeach={onTeach} onGo={onGo} onArticle={onArticle} />;
   }
 
+  if (msg.kind === 'ai') {
+    return <AiAnswerBubble msg={msg} ft={ft} onArticle={onArticle} />;
+  }
+
   if (msg.kind === 'miss') {
     return (
       <BotBubble>
@@ -503,7 +535,7 @@ function Message({ msg, lang, ft, viewer, onTeach, onGo, onArticle, onSearchKb, 
               {ft('copilot.tellAdminDone', 'Noted — an admin will see it.')}
             </span>
           ) : (
-            <button type="button" onClick={() => onTellAdmin(msg.id)} style={ctaGhost}>
+            <button type="button" onClick={() => onTellAdmin(msg)} style={ctaGhost}>
               {ft('copilot.tellAdmin', 'Tell an admin')}
             </button>
           )}
@@ -569,9 +601,22 @@ function Message({ msg, lang, ft, viewer, onTeach, onGo, onArticle, onSearchKb, 
   return null;
 }
 
-/** The sourced answer: lead, steps, gotcha, source chip, CTA row. */
+/** The sourced answer: lead, steps, gotcha, live article body, source chip, CTA row. */
 function AnswerCard({ intentKey, lang, ft, viewer, onTeach, onGo, onArticle }) {
   const intent = findIntent(intentKey);
+  const slug = intent?.articleSlug || null;
+  // Phase 2: fetch the REAL Ride University article body (cached per session
+  // in copilot-live). null = nothing extra to show — the curated summary and
+  // steps above are the fallback on ANY error, so the fetch only ever adds.
+  const [article, setArticle] = useState(null);
+  useEffect(() => {
+    if (!slug) return undefined;
+    let alive = true;
+    fetchArticle(slug)
+      .then((data) => { if (alive && data?.body) setArticle(data); })
+      .catch(() => { /* curated summary stands — guardrail: degrade, never block */ });
+    return () => { alive = false; };
+  }, [slug]);
   if (!intent) return null;
   const mod = intent.tourModuleKey ? findModule(intent.tourModuleKey) : null;
   const ctas = ctasFor(intent, viewer);
@@ -603,6 +648,9 @@ function AnswerCard({ intentKey, lang, ft, viewer, onTeach, onGo, onArticle }) {
           {gotcha}
         </div>
       )}
+      {article && (
+        <ArticleBody article={article} lang={lang} ft={ft} />
+      )}
       <SourceChip label={`${ft('copilot.source', 'Source')} · ${intent.source.label}`} />
       {ctas.adminOnly && (
         <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-3, #736a8b)' }}>
@@ -627,6 +675,83 @@ function AnswerCard({ intentKey, lang, ft, viewer, onTeach, onGo, onArticle }) {
         )}
       </div>
     </BotBubble>
+  );
+}
+
+/**
+ * The live Ride University article body (Phase 2), rendered in the asker's
+ * language half of the corpus's bilingual body and scrollable inside the
+ * panel. Sits ABOVE the source chip: the panel is quoting, never authoring.
+ */
+function ArticleBody({ article, lang, ft }) {
+  const half = articleHalf(article?.body, lang);
+  const blocks = articleBlocks(half);
+  if (!blocks.length) return null;
+  let step = 0;
+  return (
+    <div data-copilot="article-body" style={{ marginTop: 10, border: '1px solid var(--border-2, #e9e4f4)', borderRadius: 10, background: 'var(--surface-2, #fbfaff)', overflow: 'hidden' }}>
+      <div style={{ padding: '7px 11px', borderBottom: '1px solid var(--border-2, #f2eff9)', fontFamily: 'ui-monospace, monospace', fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-3, #736a8b)' }}>
+        {ft('copilot.articleLabel', 'From the article')} · {article?.title || ''}
+      </div>
+      <div style={{ maxHeight: 200, overflow: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5, lineHeight: 1.55 }}>
+        {blocks.map((b, i) => {
+          if (b.type === 'heading') {
+            return <b key={i} style={{ color: 'var(--text-1, #17122b)', fontSize: 12.5, fontWeight: 680, marginTop: i === 0 ? 0 : 4 }}>{b.text}</b>;
+          }
+          if (b.type === 'item') {
+            step += 1;
+            return (
+              <div key={i} style={{ display: 'flex', gap: 8 }}>
+                <span style={{ flex: '0 0 auto', width: 17, height: 17, borderRadius: '50%', background: '#efe9fd', color: '#5a26c9', fontSize: 10, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{step}</span>
+                <span>{b.text}</span>
+              </div>
+            );
+          }
+          if (b.type === 'bullet') {
+            return (
+              <div key={i} style={{ display: 'flex', gap: 8 }}>
+                <span aria-hidden="true" style={{ flex: '0 0 auto', color: '#8752FE' }}>•</span>
+                <span>{b.text}</span>
+              </div>
+            );
+          }
+          return <span key={i}>{b.text}</span>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * An AI-fallback answer (Phase 2). Visually distinct on purpose: the AI chip
+ * and the disclaimer make it impossible to mistake for a curated, sourced
+ * card — even though the model was only allowed to speak from the retrieved
+ * articles, which are listed and clickable underneath.
+ */
+function AiAnswerBubble({ msg, ft, onArticle }) {
+  return (
+    <div data-copilot="ai-answer" style={{ alignSelf: 'flex-start', maxWidth: '92%', background: 'var(--surface-1, #fff)', color: 'var(--text-2, #4b4362)', border: `1px dashed ${TEAL}`, borderRadius: '14px 14px 14px 4px', padding: '11px 13px', lineHeight: 1.55 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'ui-monospace, monospace', fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, color: TEAL_TEXT, background: '#e7faf6', border: '1px solid #c9f2ea', borderRadius: 999, padding: '2px 9px', marginBottom: 7 }}>
+        <i style={{ width: 5, height: 5, borderRadius: '50%', background: TEAL }} />
+        {ft('copilot.ai.chip', 'AI')}
+      </span>
+      <div style={{ whiteSpace: 'pre-wrap' }}>{msg.answer}</div>
+      {Array.isArray(msg.sources) && msg.sources.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 9 }}>
+          {msg.sources.map((s) => (
+            <button
+              key={s.slug}
+              type="button"
+              onClick={() => onArticle(s.slug)}
+              style={{ fontSize: 10.5, fontWeight: 600, color: TEAL_TEXT, background: 'var(--surface-2, #f7f5fd)', border: '1px solid var(--border-2, #e9e4f4)', borderRadius: 999, padding: '3px 10px', cursor: 'pointer' }}
+            >{s.title}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 8, fontSize: 10.5, color: 'var(--text-3, #8a819f)' }}>
+        {ft('copilot.ai.disclaimer', 'AI-generated from Ride University articles — verify on the screen before acting.')}
+      </div>
+    </div>
   );
 }
 

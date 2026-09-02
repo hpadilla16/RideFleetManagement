@@ -306,6 +306,44 @@ export const COURSES = [
         ],
       },
       {
+        // The owner's flagship copilot case (design/mockups/copilot-NOTES.md
+        // §3: "neither" — no article, no module; the copilot degraded to
+        // Llévame). Copilot Phase 2 ships this micro-module so "te enseño"
+        // fully guides it. Record-scoped: the roster lives inside one
+        // reservation's own pages, so the tour parks until one is open —
+        // exactly like check-out. ON_DEMAND with no verify on purpose:
+        // adding a real driver to a real agreement is not something training
+        // should manufacture, and no domain record names this act alone.
+        key: 'additional-drivers',
+        title: 'Add an additional driver',
+        summary: 'Put a second driver on the agreement, license and all.',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'reservations',
+        kind: 'ON_DEMAND',
+        needsRecord: '/reservations',
+        verify: null,
+        points: 10,
+        showcase: null,
+        gotcha: 'Confirm additional drivers BEFORE releasing the vehicle — a driver who is not on the agreement is not covered, and the configured fee does not charge itself after closeout.',
+        steps: [
+          {
+            anchor: 'reservation-additional-drivers',
+            title: 'Open Additional Drivers',
+            body: 'Every extra driver lives inside the reservation itself. This button opens the driver roster for the rental you have open.',
+          },
+          {
+            anchor: 'additional-driver-form',
+            title: 'Add the driver, license and all',
+            body: 'Name, address, date of birth, license number — and a photo of the license. Every field matters: this is who is covered behind the wheel. Add Driver puts them on the list below.',
+          },
+          {
+            anchor: 'additional-drivers-save',
+            title: 'Save before you hand over the keys',
+            body: 'Nobody on the list counts until you save. Saving puts the roster on the reservation and returns you to it — do this before the vehicle leaves, never after.',
+          },
+        ],
+      },
+      {
         key: 'shuttle-tracker',
         title: 'The live shuttle tracker',
         summary: 'Customers watch the shuttle move on a live map and request it with one tap.',

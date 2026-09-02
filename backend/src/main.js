@@ -49,6 +49,7 @@ import { settingsRouter, paymentCapabilitiesRouter } from './modules/settings/se
 import { feeRatesRouter } from './modules/fees/fee-rates.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { checkinAuditRouter } from './modules/checkin-audit/checkin-audit.routes.js';
+import { copilotRouter } from './modules/copilot/copilot.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
 import { tenantRateLimit } from './middleware/tenant-rate-limit.js';
 import { resolvePublicTenantToken } from './middleware/public-tenant-token.js';
@@ -508,6 +509,11 @@ app.use('/api/notifications', requireAuth, tenantRateLimit, notificationsRouter)
 // no-module-gate posture as notifications — the agents who close check-ins
 // are exactly the audience; every read is tenant-scoped inside the service.
 app.use('/api/checkin-audit', requireAuth, tenantRateLimit, checkinAuditRouter);
+// Agent Copilot Phase 2 (2026-09-02): miss telemetry + the config-gated AI
+// fallback. Same no-module-gate posture as notifications — the copilot floats
+// over every staff screen for every role; the one admin-only read (top
+// misses) is gated inside the router.
+app.use('/api/copilot', requireAuth, tenantRateLimit, copilotRouter);
 app.use('/api/settings/loaner-rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), loanerRateRouter);
 app.use('/api/settings', requireAuth, tenantRateLimit, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, tenantRateLimit, requireModuleAccess('tenants'), tenantsRouter);

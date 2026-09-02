@@ -1223,6 +1223,91 @@ export const settingsService = {
     return { ...cfg, credential };
   },
 
+  // Agent Copilot AI fallback (2026-09-02, copilot Phase 2). Per-tenant,
+  // OFF by default for every tenant — an absent AppSetting row reads as
+  // disabled, so without config the copilot's miss path behaves exactly like
+  // Phase 1. Same encrypted-at-rest, panel-entered key contract as
+  // citationOcrConfig above; getCopilotAiConfig is the safe/masked read
+  // (NEVER returns the key), resolveCopilotAiCredential is the internal read
+  // the ask endpoint uses (decrypts + policy via lib/tenant-provider-credential).
+  async getCopilotAiConfig(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('copilotAiConfig', scope), null);
+    const cap = Number(cfg?.dailyCallCap);
+    return {
+      enabled: cfg?.enabled === true,
+      provider: String(cfg?.provider || 'anthropic').toLowerCase(),
+      model: cfg?.model || '',
+      // The spend guard: LLM calls per tenant per UTC day.
+      dailyCallCap: Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : 200,
+      hasKey: !!cfg?.apiKeyEncrypted,
+      allowPlatformKeyFallback: !!cfg?.allowPlatformKeyFallback,
+    };
+  },
+
+  async updateCopilotAiConfig(payload = {}, scope = {}) {
+    const key = scopedKey('copilotAiConfig', scope);
+    const current = await readJsonSetting(key, {});
+    const enabled = typeof payload?.enabled === 'boolean' ? payload.enabled : current.enabled === true;
+    const provider = String(payload?.provider || current.provider || 'anthropic').toLowerCase();
+    const model = payload?.model !== undefined ? String(payload.model || '') : (current.model || '');
+    let dailyCallCap = Number.isFinite(Number(current?.dailyCallCap)) && Number(current.dailyCallCap) > 0
+      ? Math.floor(Number(current.dailyCallCap))
+      : 200;
+    if (payload?.dailyCallCap !== undefined && payload.dailyCallCap !== null && `${payload.dailyCallCap}`.trim() !== '') {
+      const n = Number(payload.dailyCallCap);
+      if (Number.isFinite(n) && n > 0) dailyCallCap = Math.floor(n);
+    }
+    let apiKeyEncrypted = current.apiKeyEncrypted || null;
+    if (payload?.clearKey === true) {
+      apiKeyEncrypted = null;
+    } else if (typeof payload?.apiKey === 'string' && payload.apiKey.trim()) {
+      if (!isEncryptionConfigured()) throw new Error('Encryption key (INTEGRATION_ENC_KEY) is not configured');
+      apiKeyEncrypted = encrypt(payload.apiKey.trim());
+    }
+    // Only an explicit boolean moves the platform-key opt-in (citationOcr
+    // precedent): a partial PUT can never silently turn it on.
+    let allowPlatformKeyFallback = !!current.allowPlatformKeyFallback;
+    if (typeof payload?.allowPlatformKeyFallback === 'boolean') {
+      allowPlatformKeyFallback = payload.allowPlatformKeyFallback;
+    }
+    await writeJsonSetting(key, { enabled, provider, model, dailyCallCap, apiKeyEncrypted, allowPlatformKeyFallback });
+    return { enabled, provider, model, dailyCallCap, hasKey: !!apiKeyEncrypted, allowPlatformKeyFallback };
+  },
+
+  // Internal — the credential decision for the copilot ask endpoint. Returns
+  // the config plus `credential` from lib/tenant-provider-credential.js
+  // (feature 'copilot-ask'); a NONE result carries an empty credential and the
+  // caller fails closed BEFORE any provider call.
+  async resolveCopilotAiCredential(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('copilotAiConfig', scope), null);
+    let apiKey = null;
+    if (cfg?.apiKeyEncrypted) {
+      try { apiKey = decrypt(cfg.apiKeyEncrypted); } catch { apiKey = null; }
+    }
+    const tenantId = scope?.tenantId || null;
+    let tenantName = '';
+    if (tenantId) {
+      try {
+        const t = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+        tenantName = String(t?.name || '');
+      } catch { tenantName = ''; }
+    }
+    const credential = resolveTenantProviderCredential({
+      tenantId,
+      feature: 'copilot-ask',
+      tenantCredential: apiKey || '',
+      platformCredential: process.env.ANTHROPIC_API_KEY || '',
+      tenantOptIn: !!cfg?.allowPlatformKeyFallback,
+      tenantName,
+    });
+    return {
+      enabled: cfg?.enabled === true,
+      provider: String(cfg?.provider || 'anthropic').toLowerCase(),
+      model: cfg?.model || '',
+      credential,
+    };
+  },
+
   // Staff 2FA policy (2026-08-22). Stored as AppSetting JSON under
   // scopedKey('twoFactorPolicy', scope): unscoped = the global default a
   // SUPER_ADMIN sets, `tenant:<id>:twoFactorPolicy` = a tenant override. There

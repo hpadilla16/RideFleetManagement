@@ -197,6 +197,28 @@ function SettingsInner({ token, me, logout }) {
       setOcrSaving(false);
     }
   };
+  // Agent Copilot AI fallback (2026-09-02, copilot Phase 2): OFF by default —
+  // the copilot's miss path stays exactly Phase 1 until an admin flips this
+  // on AND a key resolves. Same encrypted-key contract as Citations OCR.
+  const [copilotAiCfg, setCopilotAiCfg] = useState({ enabled: false, provider: 'anthropic', model: '', dailyCallCap: 200, hasKey: false });
+  const [copilotAiKeyInput, setCopilotAiKeyInput] = useState('');
+  const [copilotAiSaving, setCopilotAiSaving] = useState(false);
+  const saveCopilotAiConfig = async (patch) => {
+    setCopilotAiSaving(true);
+    try {
+      const out = await api(scopedSettingsPath('/api/settings/copilot-ai'), {
+        method: 'PUT',
+        body: JSON.stringify(patch)
+      }, token);
+      if (out) setCopilotAiCfg(out);
+      setCopilotAiKeyInput('');
+      setMsg('Copilot AI settings saved');
+    } catch (err) {
+      setMsg(err?.message || 'Failed to save Copilot AI settings');
+    } finally {
+      setCopilotAiSaving(false);
+    }
+  };
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(DEFAULT_PLANNER_COPILOT_CONFIG);
@@ -285,6 +307,9 @@ function SettingsInner({ token, me, logout }) {
       .catch(() => {});
     api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
       .then((out) => out && setOcrCfg(out))
+      .catch(() => {});
+    api(scopedSettingsPath('/api/settings/copilot-ai'), {}, token)
+      .then((out) => out && setCopilotAiCfg(out))
       .catch(() => {});
     // Checkout payment policy. `!== false` (not `!!`) so anything the API does
     // not return as an explicit false leaves the switch ON — same fail-safe
@@ -3042,6 +3067,67 @@ function SettingsInner({ token, me, logout }) {
                 </div>
                 <div className="surface-note">
                   Your AI key powers the OCR that reads mailed citation notices uploaded in Citations. Stored encrypted; used only to extract fields from your own notices. Leave the key field blank to keep the existing one.
+                </div>
+              </div>
+            </div>
+
+            {/* Agent Copilot AI fallback (2026-09-02, copilot Phase 2). OFF by
+                default for every tenant: with the switch off (or no key) the
+                copilot answers only from the curated intent map, exactly as
+                Phase 1 shipped. */}
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Agent Copilot AI fallback</h3>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="switch-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={copilotAiCfg.enabled === true}
+                      onChange={(e) => saveCopilotAiConfig({ enabled: e.target.checked })}
+                      disabled={copilotAiSaving}
+                    />
+                    <span>Answer unmatched copilot questions with AI (from Ride University articles only)</span>
+                  </label>
+                  <label className="label">Model (optional)</label>
+                  <input
+                    placeholder="claude-haiku-4-5-20251001"
+                    value={copilotAiCfg.model || ''}
+                    onChange={(e) => setCopilotAiCfg((p) => ({ ...p, model: e.target.value }))}
+                  />
+                  <label className="label">Daily call cap (per tenant)</label>
+                  <input
+                    type="number" min="1"
+                    placeholder="200"
+                    value={copilotAiCfg.dailyCallCap ?? 200}
+                    onChange={(e) => setCopilotAiCfg((p) => ({ ...p, dailyCallCap: e.target.value }))}
+                  />
+                  <label className="label">API key {copilotAiCfg.hasKey ? '(saved — leave blank to keep)' : '(not set)'}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    placeholder={copilotAiCfg.hasKey ? '•••••••••• (key on file)' : 'sk-ant-...'}
+                    value={copilotAiKeyInput}
+                    onChange={(e) => setCopilotAiKeyInput(e.target.value)}
+                  />
+                  <div className="inline-actions" style={{ gap: 6 }}>
+                    <button
+                      type="button"
+                      disabled={copilotAiSaving}
+                      onClick={() => saveCopilotAiConfig({
+                        model: copilotAiCfg.model,
+                        dailyCallCap: copilotAiCfg.dailyCallCap,
+                        ...(copilotAiKeyInput.trim() ? { apiKey: copilotAiKeyInput.trim() } : {})
+                      })}
+                    >
+                      {copilotAiSaving ? 'Saving...' : 'Save'}
+                    </button>
+                    {copilotAiCfg.hasKey ? (
+                      <button type="button" className="button-subtle" disabled={copilotAiSaving} onClick={() => saveCopilotAiConfig({ clearKey: true })}>Remove key</button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="surface-note">
+                  When the copilot cannot answer from its curated map, it can ask AI — restricted to what the Ride University articles actually say, always cited, marked with an AI chip in the panel. Off by default; needs this switch AND a key. The daily cap bounds spend per tenant. The key is stored encrypted and never leaves the server.
                 </div>
               </div>
             </div>
