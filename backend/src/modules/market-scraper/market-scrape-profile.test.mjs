@@ -379,3 +379,55 @@ describe('marketScrapeProfileService.getRunCheapestPerSipp — aggregation', () 
     assert.equal(out[0].cheapest, 18);
   });
 });
+
+// ── VALID_SOURCES ↔ Prisma RateSource drift guard (2026-09-02) ──────────────
+// VALID_SOURCES is now DERIVED from the generated client's RateSource enum, so
+// a schema migration that adds/removes a source propagates automatically. This
+// test pins the invariant that bit us before (300a3809: the hand-typed set
+// still said 'EXPEDIA' after the enum dropped it, and every create/edit 400'd).
+describe('VALID_SOURCES tracks the Prisma RateSource enum', () => {
+  it('equals the enum exactly — no drift, no extras, no leftovers', async () => {
+    const { VALID_SOURCES } = await import('./market-scrape-profile.service.js');
+    const { RateSource } = await import('@prisma/client');
+    assert.deepEqual(
+      [...VALID_SOURCES].sort(),
+      Object.values(RateSource).sort()
+    );
+    // Today that means exactly these three; if this line fails after an enum
+    // migration, update it deliberately — and remember a NEW source is still
+    // pricing-excluded until sourceAllInConfirmed allowlists it.
+    assert.deepEqual([...VALID_SOURCES].sort(), ['CARRENTALS', 'EXPEDIA_DIRECT', 'KAYAK']);
+  });
+
+  it('validation accepts every enum value and rejects a non-enum value', async () => {
+    const origCreate = prisma.marketScrapeProfile?.create;
+    const origLoc = prisma.location.findFirst;
+    const origRate = prisma.rate.findFirst;
+    if (!prisma.marketScrapeProfile) prisma.marketScrapeProfile = {};
+    prisma.marketScrapeProfile.create = async (args) => ({ id: 'stub-id', ...(args?.data || {}) });
+    prisma.location.findFirst = async () => ({ id: 'loc-stub' });
+    prisma.rate.findFirst = async () => ({ id: 'rate-stub' });
+    try {
+      const { RateSource } = await import('@prisma/client');
+      const base = {
+        name: 'Drift guard', locationCode: 'SJU', windowStartDay: 1, windowEndDay: 14,
+        lorDays: 3, strategy: 'CHEAPEST_MINUS_AMOUNT', strategyAmount: 1
+      };
+      // Every real enum value validates.
+      await marketScrapeProfileService.create(
+        { ...base, sources: Object.values(RateSource) }, { tenantId: 'tenant-1' }
+      );
+      // A value outside the enum still 400s.
+      await assert.rejects(
+        marketScrapeProfileService.create(
+          { ...base, sources: ['SKYSCANNER'] }, { tenantId: 'tenant-1' }
+        ),
+        (err) => err.httpStatus === 400 && /unknown source/.test(err.message)
+      );
+    } finally {
+      if (origCreate) prisma.marketScrapeProfile.create = origCreate;
+      prisma.location.findFirst = origLoc;
+      prisma.rate.findFirst = origRate;
+    }
+  });
+});
