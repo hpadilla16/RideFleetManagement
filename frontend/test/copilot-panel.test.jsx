@@ -99,11 +99,12 @@ describe('launcher and answers', () => {
     expect(screen.getByText(/ANTES de entregar el vehículo/)).toBeInTheDocument();
     // The source chip — no source, no answer.
     expect(screen.getByText(/Playbook: Checkout, Inspection & Payment/)).toBeInTheDocument();
-    // Phase 2: the micro-module exists, so the owner's example now offers the
-    // tour alongside navigation (still no article — the answer stays curated).
+    // Phase 2: the micro-module exists, so the owner's example offers the
+    // tour alongside navigation. The closers (2026-09-02) shipped the Ride
+    // University article too, so the full CTA row is finally here.
     expect(screen.getByRole('button', { name: 'Show me' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Take me there' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'View article' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'View article' })).toBeInTheDocument();
     // The standing commitment is always visible.
     expect(screen.getByText('Explains and guides · never performs actions')).toBeInTheDocument();
   });

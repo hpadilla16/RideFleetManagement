@@ -980,6 +980,67 @@ configuras una vez y entras cuando te llama.
 - La pantalla de bienvenida ofrece rentas walk-up; ese camino todavía no está
   vivo y manda al huésped al counter.`,
   },
+  {
+    // The copilot's first recorded gap (2026-09-02): the owner's own example
+    // question had curated playbook steps and no article behind them. This
+    // closes it — the intent map (frontend intents.js `additional-drivers`)
+    // now points here.
+    title: 'Adding an Additional Driver',
+    slug: 'additional-drivers',
+    category: 'AGREEMENTS',
+    sortOrder: 17,
+    tags: ['drivers', 'reservation', 'checkout'],
+    body: `## Putting a second driver on the rental
+
+An additional driver lives inside the reservation itself — there is no
+separate screen to hunt for.
+
+1. Open the customer's reservation in the Reservations page.
+2. Click **Additional Drivers**.
+3. Fill the form: first name, last name, address, date of birth, license
+   number — and a photo of the license. Every field is required: this is who
+   is covered behind the wheel.
+4. Click **Add Driver**. They appear on the list below; repeat for each extra
+   driver.
+5. Click **Save Drivers**. Nobody on the list counts until you save — saving
+   puts the roster on the reservation and returns you to it.
+
+**Confirm additional drivers BEFORE releasing the vehicle.**
+- A driver who is not on the agreement is not covered. If they crash, the
+  argument starts with a name missing from a document you had time to fix.
+- If your tenant charges an additional-driver fee, it applies at check-out for
+  the drivers already on the reservation. It does not charge itself after
+  closeout — a driver added late is a fee collected never.
+- The license photo is not optional. No picture, no driver — the same
+  requirement the main driver already met at the counter.
+
+---
+
+## Añadir un conductor adicional (Español)
+
+El conductor adicional vive dentro de la reserva misma — no hay otra pantalla
+que buscar.
+
+1. Abre la reserva del cliente en la página de Reservations.
+2. Dale a **Additional Drivers**.
+3. Llena el formulario: nombre, apellido, dirección, fecha de nacimiento,
+   número de licencia — y una foto de la licencia. Todos los campos son
+   obligatorios: esto es quién está cubierto detrás del volante.
+4. Dale **Add Driver**. Aparece en la lista de abajo; repite por cada
+   conductor extra.
+5. Dale **Save Drivers**. Nadie en la lista cuenta hasta que guardes — el save
+   pone el roster en la reserva y te devuelve a ella.
+
+**Confirma los conductores adicionales ANTES de entregar el vehículo.**
+- Un conductor que no está en el contrato no está cubierto. Si choca, la
+  discusión empieza con un nombre que falta en un documento que tuviste
+  tiempo de arreglar.
+- Si tu tenant cobra fee de conductor adicional, se aplica en el check-out por
+  los conductores que ya están en la reserva. No se cobra solo después del
+  cierre — un conductor añadido tarde es un fee que nunca se cobra.
+- La foto de la licencia no es opcional. Sin foto no hay conductor — el mismo
+  requisito que el conductor principal ya cumplió en el counter.`,
+  },
 
 ];
 
