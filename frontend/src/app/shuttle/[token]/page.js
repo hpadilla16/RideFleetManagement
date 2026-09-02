@@ -25,6 +25,7 @@ export const viewport = {
   viewportFit: 'cover',
 };
 
-export default function ShuttleTrackerPage({ params }) {
+export default async function ShuttleTrackerPage(props) {
+  const params = await props.params;
   return <ShuttleTrackerClient token={params.token} />;
 }

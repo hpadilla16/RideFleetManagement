@@ -52,6 +52,7 @@ export const viewport = {
   viewportFit: 'cover',
 };
 
-export default function SignPage({ params }) {
+export default async function SignPage(props) {
+  const params = await props.params;
   return <SignClient token={params.token} />;
 }
