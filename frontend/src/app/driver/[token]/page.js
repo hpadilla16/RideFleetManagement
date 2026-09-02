@@ -25,6 +25,7 @@ export const viewport = {
   viewportFit: 'cover',
 };
 
-export default function DriverModePage({ params }) {
+export default async function DriverModePage(props) {
+  const params = await props.params;
   return <DriverClient token={params.token} />;
 }

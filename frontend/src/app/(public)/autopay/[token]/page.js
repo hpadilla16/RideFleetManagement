@@ -56,6 +56,7 @@ export const viewport = {
   viewportFit: 'cover',
 };
 
-export default function AutopayEnrollPage({ params }) {
+export default async function AutopayEnrollPage(props) {
+  const params = await props.params;
   return <AutopayClient token={params.token} />;
 }
