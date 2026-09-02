@@ -1047,13 +1047,15 @@ export const settingsService = {
     return next;
   },
 
-  // Check-in audit (2026-09-03): per-tenant T1 rule thresholds. Rules default
-  // ON (arithmetic, no external calls — checkin-audit-NOTES.md Tier 1); the
-  // numeric defaults are echoed in checkin-audit.service.js so an absent or
-  // partial AppSetting row reads as the shipped behavior. Photo AI (T2) is
-  // NOT configured here yet — when it ships it follows the citationOcrConfig
-  // credential pattern below (resolveCitationOcrCredential, feature
-  // 'checkin-audit').
+  // Check-in audit (2026-09-03 T1; photo AI added 2026-09-02): per-tenant T1
+  // rule thresholds + the T2 photo-AI opt-in. Rules default ON (arithmetic,
+  // no external calls — checkin-audit-NOTES.md Tier 1); photo AI defaults OFF
+  // (external provider call — DPA posture, same reason citations OCR is
+  // per-tenant). The numeric defaults are echoed in checkin-audit.service.js
+  // / checkin-audit-t2.service.js so an absent or partial AppSetting row
+  // reads as the shipped behavior. The T2 CREDENTIAL is NOT stored here — it
+  // is the shared Anthropic block below, read through
+  // resolveCitationOcrCredential(scope, { feature: 'checkin-audit' }).
   async getCheckinAuditConfig(scope = {}) {
     const cfg = await readJsonSetting(scopedKey('checkinAuditConfig', scope), null);
     const num = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : fallback);
@@ -1063,6 +1065,12 @@ export const settingsService = {
       fuelUpDelta: num(cfg?.fuelUpDelta, 0.25),
       fuelDropDelta: num(cfg?.fuelDropDelta, 0.25),
       backdateGapHours: num(cfg?.backdateGapHours, 6),
+      // T2 photo AI — opt-in per tenant, budget-capped per day.
+      photoAiEnabled: cfg?.photoAiEnabled === true,
+      dailyPhotoBudget: Number.isFinite(Number(cfg?.dailyPhotoBudget)) && Number(cfg.dailyPhotoBudget) >= 1
+        ? Math.floor(Number(cfg.dailyPhotoBudget))
+        : 100,
+      photoAiModel: (cfg?.photoAiModel && String(cfg.photoAiModel).trim()) || 'claude-haiku-4-5-20251001',
     };
   },
 
@@ -1071,11 +1079,24 @@ export const settingsService = {
     const current = await readJsonSetting(key, {});
     const next = { ...current };
     if (typeof payload?.rulesEnabled === 'boolean') next.rulesEnabled = payload.rulesEnabled;
+    // Photo AI: only an explicit boolean moves the opt-in — a partial PUT
+    // (thresholds only) can never silently enable an external provider call
+    // (the citationOcr allowPlatformKeyFallback convention).
+    if (typeof payload?.photoAiEnabled === 'boolean') next.photoAiEnabled = payload.photoAiEnabled;
     for (const k of ['milesPerDayBand', 'fuelUpDelta', 'fuelDropDelta', 'backdateGapHours']) {
       if (payload?.[k] !== undefined && payload[k] !== null && `${payload[k]}`.trim?.() !== '') {
         const n = Number(payload[k]);
         if (Number.isFinite(n) && n > 0) next[k] = n;
       }
+    }
+    if (payload?.dailyPhotoBudget !== undefined && payload.dailyPhotoBudget !== null && `${payload.dailyPhotoBudget}`.trim?.() !== '') {
+      const n = Number(payload.dailyPhotoBudget);
+      if (Number.isFinite(n) && n >= 1) next.dailyPhotoBudget = Math.floor(n);
+    }
+    if (payload?.photoAiModel !== undefined) {
+      const m = String(payload.photoAiModel || '').trim();
+      next.photoAiModel = m || undefined;
+      if (!m) delete next.photoAiModel;
     }
     await writeJsonSetting(key, next);
     return this.getCheckinAuditConfig(scope);

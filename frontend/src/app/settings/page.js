@@ -169,6 +169,30 @@ function SettingsInner({ token, me, logout }) {
   // daily sweep only emits for tenants that flip this on.
   const [idleVehicleCfg, setIdleVehicleCfg] = useState({ enabled: false, thresholdDays: 7 });
   const [idleVehicleSaving, setIdleVehicleSaving] = useState(false);
+  // Check-in audit (T1 rules 2026-09-03; T2 photo AI 2026-09-02). Rules
+  // default ON (arithmetic, no external calls); photo AI defaults OFF — it
+  // sends inspection photos to the tenant's AI provider, so it is opt-in per
+  // tenant. The AI credential is the shared Anthropic key (Citations OCR
+  // card below / ocrCfg.hasKey) — never stored or shown here.
+  const [checkinAuditCfg, setCheckinAuditCfg] = useState({ rulesEnabled: true, milesPerDayBand: 600, photoAiEnabled: false, dailyPhotoBudget: 100, photoAiModel: '' });
+  const [checkinAuditSaving, setCheckinAuditSaving] = useState(false);
+  const saveCheckinAuditCfg = async (patch) => {
+    setCheckinAuditSaving(true);
+    try {
+      const out = await api(scopedSettingsPath('/api/settings/checkin-audit'), {
+        method: 'PUT',
+        body: JSON.stringify(patch)
+      }, token);
+      if (out) setCheckinAuditCfg(out);
+      setMsg('Check-in audit settings saved · Configuración de auditoría guardada');
+      return out;
+    } catch (err) {
+      setMsg(err?.message || 'Failed to save check-in audit settings');
+      return null;
+    } finally {
+      setCheckinAuditSaving(false);
+    }
+  };
   // Customer-led inspection (2026-06-11).
   const [customerInspectionEnabled, setCustomerInspectionEnabled] = useState(false);
   // Check-in inspection model (Fase D, 2026-06-18): 'AGENT' (current) vs 'CUSTOMER' (agent-less).
@@ -285,6 +309,9 @@ function SettingsInner({ token, me, logout }) {
       .catch(() => {});
     api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
       .then((out) => out && setOcrCfg(out))
+      .catch(() => {});
+    api(scopedSettingsPath('/api/settings/checkin-audit'), {}, token)
+      .then((out) => out && setCheckinAuditCfg(out))
       .catch(() => {});
     // Checkout payment policy. `!== false` (not `!!`) so anything the API does
     // not return as an explicit false leaves the switch ON — same fail-safe
@@ -2988,6 +3015,115 @@ function SettingsInner({ token, me, logout }) {
                     <br />
                     Por defecto 7 días. Vehículos en mantenimiento, rentados, con reserva próxima,
                     shuttles y unidades de car sharing nunca cuentan como ociosos.
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/*
+              Check-in audit (T1 rules 2026-09-03; T2 photo AI 2026-09-02).
+              Rules audit: ON by default, arithmetic only. Photo AI: OFF by
+              default — checkout↔check-in photo pairs go to the tenant's AI
+              provider, so enabling it is an explicit per-tenant decision
+              (same governance as Citations OCR). The AI key is the SHARED
+              Anthropic credential: written here through the citation-ocr
+              endpoint, write-only, masked, encrypted at rest.
+            */}
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Check-in Audit · Auditoría de check-in</h3>
+              <div className="form-grid-2">
+                <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={checkinAuditCfg.rulesEnabled !== false}
+                    disabled={checkinAuditSaving}
+                    onChange={(e) => saveCheckinAuditCfg({ rulesEnabled: e.target.checked })}
+                  />
+                  Rules audit after every check-in · Auditoría de reglas tras cada check-in
+                </label>
+                <div className="surface-note">
+                  Six arithmetic checks (odometer, fuel, entries) run right after each close and feed the
+                  Check-in Audit queue. No AI, no external calls.
+                  <br />
+                  Seis verificaciones aritméticas corren tras cada cierre y alimentan la cola de Auditoría.
+                  Sin IA, sin llamadas externas.
+                </div>
+              </div>
+              {checkinAuditCfg.rulesEnabled !== false ? (
+                <div className="form-grid-2" style={{ marginTop: 10 }}>
+                  <div className="stack">
+                    <label className="label">Mileage band (mi/day) · Rango de millaje (mi/día)</label>
+                    <input
+                      type="number" min={1} step={1}
+                      value={checkinAuditCfg.milesPerDayBand}
+                      disabled={checkinAuditSaving}
+                      onChange={(e) => setCheckinAuditCfg({ ...checkinAuditCfg, milesPerDayBand: e.target.value })}
+                      onBlur={() => {
+                        const n = Math.floor(Number(checkinAuditCfg.milesPerDayBand));
+                        if (Number.isFinite(n) && n >= 1) saveCheckinAuditCfg({ milesPerDayBand: n });
+                        else setCheckinAuditCfg({ ...checkinAuditCfg, milesPerDayBand: 600 });
+                      }}
+                    />
+                  </div>
+                  <div className="surface-note">
+                    Default 600. A close whose miles/day exceeds this band is flagged as a probable typo.
+                    <br />
+                    Por defecto 600. Un cierre con millas/día sobre este rango se marca como posible error de captura.
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="form-grid-2" style={{ marginTop: 14 }}>
+                <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={checkinAuditCfg.photoAiEnabled === true}
+                    disabled={checkinAuditSaving}
+                    onChange={(e) => saveCheckinAuditCfg({ photoAiEnabled: e.target.checked })}
+                  />
+                  Photo AI (T2) — compare checkout vs check-in photos · Comparar fotos de salida vs regreso
+                </label>
+                <div className="surface-note">
+                  <strong>Sends inspection photos to your AI provider.</strong> A background sweep compares each
+                  angle pair a few minutes after the close and queues <em>possible</em> damage for human review —
+                  nothing is ever charged automatically. Needs the AI key below.
+                  <br />
+                  <strong>Envía fotos de inspección a su proveedor de IA.</strong> Un proceso compara cada ángulo
+                  minutos después del cierre y pone el <em>posible</em> daño en cola para revisión humana — nada se
+                  cobra en automático. Requiere la llave de IA abajo.
+                </div>
+              </div>
+              {checkinAuditCfg.photoAiEnabled ? (
+                <div className="form-grid-2" style={{ marginTop: 10 }}>
+                  <div className="stack">
+                    <label className="label">Daily budget (check-ins/day) · Presupuesto diario</label>
+                    <input
+                      type="number" min={1} step={1}
+                      value={checkinAuditCfg.dailyPhotoBudget}
+                      disabled={checkinAuditSaving}
+                      onChange={(e) => setCheckinAuditCfg({ ...checkinAuditCfg, dailyPhotoBudget: e.target.value })}
+                      onBlur={() => {
+                        const n = Math.floor(Number(checkinAuditCfg.dailyPhotoBudget));
+                        if (Number.isFinite(n) && n >= 1) saveCheckinAuditCfg({ dailyPhotoBudget: n });
+                        else setCheckinAuditCfg({ ...checkinAuditCfg, dailyPhotoBudget: 100 });
+                      }}
+                    />
+                    <label className="label">Model (optional) · Modelo (opcional)</label>
+                    <input
+                      placeholder="claude-haiku-4-5-20251001"
+                      value={checkinAuditCfg.photoAiModel === 'claude-haiku-4-5-20251001' ? '' : (checkinAuditCfg.photoAiModel || '')}
+                      disabled={checkinAuditSaving}
+                      onChange={(e) => setCheckinAuditCfg({ ...checkinAuditCfg, photoAiModel: e.target.value })}
+                      onBlur={() => saveCheckinAuditCfg({ photoAiModel: checkinAuditCfg.photoAiModel === 'claude-haiku-4-5-20251001' ? '' : (checkinAuditCfg.photoAiModel || '') })}
+                    />
+                  </div>
+                  <div className="surface-note">
+                    Once the daily cap is reached, further closes are marked <em>skipped</em> in the queue (never
+                    silently dropped) and spend shows as a KPI on the Check-in Audit page.
+                    <br />
+                    AI key: {ocrCfg.hasKey
+                      ? 'tenant key on file (shared with Citations OCR) ✓'
+                      : 'NOT set — add it below in Citations OCR (AI); without it no photo is ever sent.'}
                   </div>
                 </div>
               ) : null}

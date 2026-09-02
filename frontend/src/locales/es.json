@@ -53,6 +53,7 @@
       "maintSnoozed": "Mantenimiento pospuesto en el check-in — {{unit}}",
       "maintCheckinSent": "Enviado a mantenimiento en el check-in — {{unit}} · {{ro}}",
       "checkinAuditEntryError": "Error de captura — {{res}}. El odómetro quedó por debajo del de salida ({{out}} → {{in}}).",
+      "checkinAuditDamage": "Posible daño — {{res}}. Se sospecha una marca nueva en {{angle}} ({{conf}}%).",
       "idleVehicle": "Vehículo ocioso — {{unit}}, {{days}} días sin renta",
       "billingSuspended": "Suscripción suspendida — pago vencido"
     },
@@ -2308,6 +2309,13 @@
     "sub": "Revisión post-retorno — auditoría de reglas en cada cierre",
     "rulesOn": "Auditoría de reglas · activa",
     "photoAiOff": "IA de fotos no habilitada",
+    "photoAiOn": "IA de fotos · llave del tenant",
+    "damageLaneClear": "No hay alertas de posible daño ahora — el barrido de fotos corre minutos después de cada cierre.",
+    "t2Analyzed": "Analizado",
+    "t2SkippedBudget": "Omitido — se alcanzó el presupuesto diario de IA de fotos antes de este cierre.",
+    "t2SkippedNoPhotos": "Omitido — ningún ángulo tiene foto en salida y regreso.",
+    "t2Failed": "El análisis de fotos falló — el check-in no se afecta.",
+    "t2Pending": "En cola para el barrido de fotos — corre minutos después de cada cierre.",
     "photoAi": "IA de fotos",
     "rules": "Reglas",
     "pass": "OK",
@@ -2337,7 +2345,9 @@
       "auditedToday": "Auditados · hoy",
       "cleanPassToday": "Sin hallazgos · hoy",
       "openDamage": "Posible daño",
-      "openEntryErrors": "Errores de captura"
+      "openEntryErrors": "Errores de captura",
+      "aiSpendToday": "IA de fotos · hoy",
+      "aiSpendSub": "{{n}} analizados · {{s}} sobre presupuesto"
     },
     "cols": {
       "reservation": "Reservación",
@@ -2354,7 +2364,41 @@
       "FUEL_DROP_NO_FEE": "Bajó gasolina sin fee de recarga",
       "ENTRIES_INCOMPLETE": "Capturas incompletas",
       "BACKDATED_RETURN": "Regreso retrofechado · {{n}}h",
+      "DAMAGE_SUSPECTED": "Posible daño {{conf}}%",
+      "T2_CLEAN": "Sin marcas nuevas",
+      "T2_SKIPPED_BUDGET": "Omitido · presupuesto diario",
+      "T2_SKIPPED_NO_PHOTOS": "Omitido · faltan ángulos",
+      "T2_FAILED": "Falló el análisis",
+      "T2_PENDING": "En cola para IA de fotos",
       "UNKNOWN": "Hallazgo"
+    },
+    "angles": {
+      "front": "Frente",
+      "rear": "Atrás",
+      "left": "Izquierda",
+      "right": "Derecha",
+      "frontSeat": "Asiento del.",
+      "rearSeat": "Asiento tras.",
+      "dashboard": "Tablero",
+      "trunk": "Baúl"
+    },
+    "pair": {
+      "angles": "Ángulos de inspección",
+      "checkout": "Salida",
+      "checkin": "Regreso",
+      "baseline": "base",
+      "returned": "regresó",
+      "missing": "No hay foto de este ángulo",
+      "suspected": "Sospecha",
+      "clean": "Sin marcas nuevas sospechadas en este ángulo.",
+      "checkoutAlt": "Foto de salida · {{angle}}",
+      "checkinAlt": "Foto de regreso · {{angle}}"
+    },
+    "verdict": {
+      "source": "Visión IA · T2",
+      "title": "Posible daño nuevo",
+      "knownMatched": "El modelo también reconoció daño documentado del historial en esta vista — se muestra como contexto, nunca se oculta.",
+      "disclaimer": "Sugerencia de IA — el personal confirma. El recuadro es una pista, no una medida, y nada se cobra en automático."
     },
     "cards": {
       "mileageFuel": "Auditoría de millaje y gasolina",
