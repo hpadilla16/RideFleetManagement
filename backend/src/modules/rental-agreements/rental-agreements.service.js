@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { parseDateTimeInTz } from '../../lib/date-utils.js';
+import { parseOdometerInput } from '../../lib/odometer-input.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -5459,6 +5460,10 @@ export const rentalAgreementsService = {
 
     const phase = String(payload.phase || '').toUpperCase();
     if (!['CHECKOUT', 'CHECKIN'].includes(phase)) throw new Error('phase must be CHECKOUT or CHECKIN');
+    // Sentry 371e0617 (2026-09-02): refuse impossible odometer values HERE,
+    // with a message the agent can act on, instead of letting Number() carry
+    // them into an INT4 ConnectorError 500 at the upsert.
+    const odometerValue = parseOdometerInput(payload.odometer);
     const existingInspection = Array.isArray(agreement.inspections)
       ? agreement.inspections.find((row) => String(row?.phase || '').toUpperCase() === phase)
       : null;
@@ -5474,7 +5479,7 @@ export const rentalAgreementsService = {
       lights: payload.lights || null,
       windshield: payload.windshield || null,
       fuelLevel: payload.fuelLevel || null,
-      odometer: payload.odometer || null,
+      odometer: odometerValue,
       damages: payload.damages || null,
       notes: payload.notes || null,
       photos: payload.photos && typeof payload.photos === 'object' ? payload.photos : {}
@@ -5569,7 +5574,7 @@ export const rentalAgreementsService = {
         lights: inspectionBlock.lights,
         windshield: inspectionBlock.windshield,
         fuelLevel: inspectionBlock.fuelLevel ? String(inspectionBlock.fuelLevel) : null,
-        odometer: inspectionBlock.odometer === '' || inspectionBlock.odometer == null ? null : Number(inspectionBlock.odometer),
+        odometer: inspectionBlock.odometer,
         damages: inspectionBlock.damages,
         notes: inspectionBlock.notes,
         photosJson: photoStorageRefs ? null : JSON.stringify(inspectionBlock.photos || {}),
@@ -5585,7 +5590,7 @@ export const rentalAgreementsService = {
         lights: inspectionBlock.lights,
         windshield: inspectionBlock.windshield,
         fuelLevel: inspectionBlock.fuelLevel ? String(inspectionBlock.fuelLevel) : null,
-        odometer: inspectionBlock.odometer === '' || inspectionBlock.odometer == null ? null : Number(inspectionBlock.odometer),
+        odometer: inspectionBlock.odometer,
         damages: inspectionBlock.damages,
         notes: inspectionBlock.notes,
         photosJson: photoStorageRefs ? null : JSON.stringify(inspectionBlock.photos || {}),
