@@ -29,6 +29,7 @@ import { api } from '../../../../lib/client';
 import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../../lib/reservation-notes';
 import { filterAssignableVehicles } from '../../../../lib/vehicle-assignment';
 import { MaintenanceSnoozeReprompt } from '../../../../components/wizard/MaintenanceSnoozeReprompt';
+import { KnownDamageDisclosure } from '../../../../components/reservations/KnownDamageDisclosure';
 import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
@@ -788,7 +789,16 @@ function StepRenderer({ session, reservation, token, onAdvance, closedCheck, fin
     case 'PAID':
       return <StepBridge key="PAID" label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
     case 'INSPECTION_HANDOFF':
-      return <Step4Handoff session={session} token={token} reservationId={reservation?.id} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />;
+      // Known-damage disclosure (damage-baseline NOTES §D4): the compact
+      // read-only card above the inspection handoff — the agent points the
+      // documented marks out during the walkthrough. Renders ONLY when the
+      // vehicle has active baseline entries; zero behavior change otherwise.
+      return (
+        <>
+          <KnownDamageDisclosure vehicleId={reservation?.vehicleId || reservation?.vehicle?.id} token={token} />
+          <Step4Handoff session={session} token={token} reservationId={reservation?.id} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />
+        </>
+      );
     case 'INSPECTION_IN_PROGRESS':
       return <Step5Metrics
         session={session}

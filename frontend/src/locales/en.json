@@ -2460,6 +2460,13 @@
       "preexistingSub": "Adds it to this vehicle's damage baseline so it is never flagged again — and never charged to a customer.",
       "preexistingT2": "Applies to photo-AI damage findings — awaits the photo tier (T2). Rules findings are numbers, not marks.",
       "confirm": "Dismiss"
+    },
+    "handoff": {
+      "cta": "Create damage report",
+      "sub": "Opens the Report Damage wizard with the evidence already loaded — photos, view and description pre-filled; the agent enters the estimate and who pays.",
+      "converted": "Converted to a damage report · {{name}}",
+      "baselined": "Added to the vehicle's damage baseline · {{name}}",
+      "loading": "Loading the evidence…"
     }
   },
   "damageBaseline": {
@@ -2484,6 +2491,42 @@
     "clearedAt": "cleared",
     "clearedReason": "Cleared: {{reason}}",
     "repairedRo": "Repaired · RO {{ro}}",
-    "repaired": "Repaired"
+    "repaired": "Repaired",
+    "views": {
+      "FRONT": "Front",
+      "REAR": "Rear",
+      "LEFT": "Left",
+      "RIGHT": "Right",
+      "INTERIOR": "Interior"
+    },
+    "disclosure": {
+      "title": "Documented marks on this vehicle",
+      "count": "{{n}} on record",
+      "sub": "Point these out to the customer during the walkthrough — they are on record and are NOT the customer’s responsibility.",
+      "noDesc": "Documented mark"
+    },
+    "seed": {
+      "action": "Seed from history",
+      "title": "Seed from history",
+      "sub": "Uses what the system already stores about this vehicle — acknowledged damage reports, inspection damage notes and damage incidents. Everything is created as a PROPOSAL you review; nothing lands on the baseline without your approval.",
+      "scanning": "Scanning this vehicle’s history…",
+      "willCreate": "Will create {{n}} proposals:",
+      "capped": "Capped at {{cap}} per run ({{total}} found) — run again for the rest.",
+      "confirm": "Create {{n}} proposals",
+      "running": "Seeding…",
+      "nothing": "Nothing new to seed — history is either empty or already reflected on the baseline.",
+      "done": "Seeded {{n}} proposals from history — review them below",
+      "doneCapped": "Seeded {{n}} proposals — capped ({{total}} candidates found); run again for the rest",
+      "approved": "Proposal approved to the baseline",
+      "discarded": "Proposal discarded",
+      "proposedTitle": "Proposed from history ({{n}}) — approve or discard",
+      "proposedSub": "Seeded entries are drafts: pick the correct view and approve to put them on the baseline, or discard. Approved dots land at the diagram center — move the customer conversation, not the dot.",
+      "kindSoft": "acknowledged report",
+      "kindIncident": "incident",
+      "kindInspection": "inspection note",
+      "viewLabel": "View",
+      "approve": "Approve",
+      "discard": "Discard"
+    }
   }
 }

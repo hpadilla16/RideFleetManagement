@@ -23,6 +23,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import { ReportDamageWizard } from '../../components/reservations/ReportDamageWizard';
 import { api } from '../../lib/client';
 import {
   CHECKIN_AUDIT_LANE_GROUPS,
@@ -155,7 +156,7 @@ export function AuditQueueTable({ rows, lane, onOpen, t2 = {}, photoAiEnabled = 
 }
 
 /** Mock 2's right-column audit cards — exported for component tests. */
-export function AuditDetailCards({ detail }) {
+export function AuditDetailCards({ detail, onConvert }) {
   const { t } = useTranslation();
   const findings = detail?.findings || [];
   const mf = mileageFuelAuditRows(findings);
@@ -238,7 +239,7 @@ export function AuditDetailCards({ detail }) {
       </section>
 
       {(detail?.photoAiEnabled || detail?.t2Scan || (detail?.findings || []).some((f) => String(f.checkKey || '').startsWith(DAMAGE_SUSPECTED_PREFIX)))
-        ? <PhotoPairPane detail={detail} />
+        ? <PhotoPairPane detail={detail} onConvert={onConvert} />
         : (
           <section className="ca-card ca-card--t2" data-testid="t2-photo-pane">
             <header>
@@ -260,7 +261,7 @@ const ANGLE_ORDER = ['front', 'rear', 'left', 'right', 'frontSeat', 'rearSeat', 
  *  component tests. Angle strip (warm dot on flagged angles, check on clean
  *  ones), the two photos with the suspected-region overlay, and the
  *  suggestion-only verdict card with its disclaimer inside. */
-export function PhotoPairPane({ detail }) {
+export function PhotoPairPane({ detail, onConvert }) {
   const { t } = useTranslation();
   const pairs = detail?.photoPairs || {};
   const suspects = useMemo(() => {
@@ -382,6 +383,30 @@ export function PhotoPairPane({ detail }) {
               <p className="ca-verdict-foot">
                 {t('checkinAudit.verdict.disclaimer', 'AI suggestion — a staff member confirms. The highlighted box is a pointer, not a measurement, and nothing is ever charged automatically.')}
               </p>
+
+              {/* THE HANDOFF (Mock 2) — the one-click path into the existing
+                  Report Damage wizard, evidence pre-loaded. Human-gated: the
+                  wizard's estimate/who-pays/validation all apply unchanged. */}
+              {suspect.status === 'OPEN' && onConvert ? (
+                <div className="ca-handoff" data-testid="convert-handoff" style={{ marginTop: 10, borderTop: '1px dashed var(--border-soft,#e6dfff)', paddingTop: 10 }}>
+                  <div style={{ fontSize: 12, marginBottom: 8 }}>
+                    {t('checkinAudit.handoff.sub', 'Opens the Report Damage wizard with the evidence already loaded — photos, view and description pre-filled; the agent enters the estimate and who pays.')}
+                  </div>
+                  <button type="button" className="button-primary" data-testid="convert-cta" onClick={() => onConvert(suspect)}>
+                    {t('checkinAudit.handoff.cta', 'Create damage report')} →
+                  </button>
+                </div>
+              ) : null}
+              {suspect.status === 'RESOLVED' && suspect.resolution === 'CONVERTED_TO_REPORT' ? (
+                <p className="ca-t2-note" data-testid="converted-note">
+                  {t('checkinAudit.handoff.converted', { name: suspect.dismissedByName || '—', defaultValue: `Converted to a damage report · ${suspect.dismissedByName || '—'}` })}
+                </p>
+              ) : null}
+              {suspect.status === 'RESOLVED' && suspect.resolution === 'PREEXISTING_BASELINED' ? (
+                <p className="ca-t2-note" data-testid="baselined-note">
+                  {t('checkinAudit.handoff.baselined', { name: suspect.dismissedByName || '—', defaultValue: `Added to the vehicle's damage baseline · ${suspect.dismissedByName || '—'}` })}
+                </p>
+              ) : null}
             </div>
           ) : (
             <p className="ca-t2-note" data-testid="t2-angle-clean">
@@ -456,6 +481,7 @@ function CheckinAuditInner({ me, logout }) {
   const [data, setData] = useState({ rows: [], counts: {}, kpis: {}, t2: {}, photoAiEnabled: false });
   const [detail, setDetail] = useState(null);
   const [dismissing, setDismissing] = useState(null);
+  const [converting, setConverting] = useState(null); // { loading } | { finding, prefill, reservation }
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -499,6 +525,26 @@ function CheckinAuditInner({ me, logout }) {
     } catch { /* malformed query string — stay on the queue */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The Mock-2 handoff: fetch the finding's prefill (evidence as data URLs)
+  // and the reservation row the wizard's summary needs, then open the SAME
+  // Report Damage wizard the reservation page uses. Nothing is written until
+  // the human completes the wizard's own submit.
+  const startConvert = async (finding) => {
+    if (!finding?.id || converting) return;
+    setMsg('');
+    setConverting({ loading: true });
+    try {
+      const [prefill, reservation] = await Promise.all([
+        api(`/api/checkin-audit/findings/${finding.id}/convert-prefill`, { bypassCache: true }),
+        api(`/api/reservations/${finding.reservationId}`, { bypassCache: true }),
+      ]);
+      setConverting({ finding, prefill, reservation });
+    } catch (e) {
+      setConverting(null);
+      setMsg(e.message);
+    }
+  };
 
   const doDismiss = async (classification) => {
     const f = dismissing;
@@ -601,7 +647,7 @@ function CheckinAuditInner({ me, logout }) {
                   </span>
                 ))}
               </div>
-              <AuditDetailCards detail={detail} />
+              <AuditDetailCards detail={detail} onConvert={startConvert} />
             </div>
           ) : (
             <AuditQueueTable rows={data.rows} lane={lane} onOpen={openDetail} t2={data.t2} photoAiEnabled={data.photoAiEnabled} />
@@ -615,6 +661,25 @@ function CheckinAuditInner({ me, logout }) {
           finding={dismissing}
           onCancel={() => setDismissing(null)}
           onDismiss={doDismiss}
+        />
+      ) : null}
+
+      {converting?.loading ? (
+        <div className="surface-note" data-testid="convert-loading">
+          {t('checkinAudit.handoff.loading', 'Loading the evidence…')}
+        </div>
+      ) : null}
+      {converting?.reservation ? (
+        <ReportDamageWizard
+          reservation={converting.reservation}
+          prefill={{ ...converting.prefill, sourceAuditFindingId: converting.finding.id }}
+          onClose={() => setConverting(null)}
+          onDone={async () => {
+            // The backend resolved the finding (CONVERTED_TO_REPORT) inside
+            // the submit — refresh so the queue/detail reflect it.
+            if (detail) await openDetail(detail.reservationId);
+            await load(lane);
+          }}
         />
       ) : null}
     </AppShell>

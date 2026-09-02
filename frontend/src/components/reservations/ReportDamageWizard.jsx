@@ -16,6 +16,13 @@
  *                    ({ damageReportId, chargeId, chargeAmount, incidentId, vehicleStatus })
  *   onComplete(result) — called ONLY when the agent clicks "Complete now" on the
  *                    confirmation (opens the incident DRAFT). "Later" just closes.
+ *   prefill     — OPTIONAL (2026-09-06, check-in audit handoff): initial values
+ *                 from an audit finding's evidence — { view, xPct, yPct,
+ *                 description, damagePhotos: [dataUrl…], sourceAuditFindingId,
+ *                 angle?, confidence? }. Everything stays editable; the money
+ *                 fields (estimate, who-pays) are NEVER prefilled — the agent
+ *                 enters them. sourceAuditFindingId rides on the submit so the
+ *                 backend resolves the finding as CONVERTED_TO_REPORT.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -53,16 +60,24 @@ function newIdempotencyKey() {
   return `rd-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function ReportDamageWizard({ reservation, token, onClose, onDone, onComplete }) {
+export function ReportDamageWizard({ reservation, token, onClose, onDone, onComplete, prefill = null }) {
   const vehicle = reservation?.vehicle || {};
   const customer = reservation?.customer || {};
   // vehicleType may live on the vehicle or at the reservation level.
   const diagramType = diagramTypeFor(vehicle?.vehicleType ? vehicle : { vehicleType: reservation?.vehicleType });
 
-  const [view, setView] = useState('FRONT');
-  const [mark, setMark] = useState(null);           // { xPct, yPct, view }
-  const [description, setDescription] = useState('');
-  const [photos, setPhotos] = useState([]);          // data URLs
+  // Audit-handoff prefill (checkin-audit Mock 2): view + region-center dot +
+  // description + the checkout/check-in photo pair arrive already loaded; the
+  // agent verifies and can change any of it before submitting.
+  const prefillView = prefill?.view && ['LEFT', 'RIGHT', 'FRONT', 'REAR', 'INTERIOR'].includes(prefill.view) ? prefill.view : null;
+  const prefillMark = prefillView && Number.isFinite(Number(prefill?.xPct)) && Number.isFinite(Number(prefill?.yPct))
+    ? { xPct: Number(prefill.xPct), yPct: Number(prefill.yPct), view: prefillView }
+    : null;
+
+  const [view, setView] = useState(prefillView || 'FRONT');
+  const [mark, setMark] = useState(prefillMark);     // { xPct, yPct, view }
+  const [description, setDescription] = useState(prefill?.description || '');
+  const [photos, setPhotos] = useState(() => (Array.isArray(prefill?.damagePhotos) ? prefill.damagePhotos.filter(Boolean) : []));          // data URLs
   const [estimate, setEstimate] = useState(null);    // data URL
   const [estimateName, setEstimateName] = useState('');
   const [party, setParty] = useState('CUSTOMER');
@@ -157,6 +172,10 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
       if (ackEnabled && ackSignature && ackSignerName.trim()) {
         body.customerAck = { signatureDataUrl: ackSignature, signerName: ackSignerName.trim() };
       }
+      // Audit handoff: the backend validates the finding (same tenant, same
+      // reservation, DAMAGE) and resolves it CONVERTED_TO_REPORT after the
+      // money commits.
+      if (prefill?.sourceAuditFindingId) body.sourceAuditFindingId = prefill.sourceAuditFindingId;
 
       const out = await api(`/api/report-damage/${reservation.id}/report-damage`, {
         method: 'POST', body: JSON.stringify(body),
@@ -207,6 +226,14 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
                   <InfoTile label="Reservation #" strong={reservation?.reservationNumber || '—'} sub="" />
                 </div>
               </div>
+
+              {/* audit-handoff evidence banner */}
+              {prefill?.sourceAuditFindingId ? (
+                <div data-testid="audit-prefill-note" style={{ borderRadius: 12, padding: '11px 13px', fontSize: 12.5, fontWeight: 600, background: 'rgba(135,82,254,.08)', border: '1px solid rgba(135,82,254,.28)', color: '#2d244d' }}>
+                  🔎 Evidence loaded from the check-in audit{prefill?.angle ? ` (${prefill.angle}${prefill?.confidence != null ? ` · ${prefill.confidence}%` : ''})` : ''} —
+                  photos, view and description are pre-filled and editable. <b>Verify on the vehicle before charging</b>; the estimate and who-pays are yours to enter.
+                </div>
+              ) : null}
 
               {/* damage capture */}
               <Divider />

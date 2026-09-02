@@ -39,6 +39,20 @@ checkinAuditRouter.get('/:reservationId', async (req, res) => {
   }
 });
 
+// GET /api/checkin-audit/findings/:id/convert-prefill
+// The Mock-2 handoff: everything the Report Damage wizard can be pre-filled
+// with from a DAMAGE finding's own evidence — view, dot, description, and the
+// check-in + checkout photos as data URLs. READ-ONLY: nothing changes until
+// the human completes the wizard's normal submit (estimate + who-pays are
+// theirs alone); the finding resolves only when that submit commits.
+checkinAuditRouter.get('/findings/:id/convert-prefill', async (req, res) => {
+  try {
+    res.json(await checkinAuditService.buildConvertPrefill(req.params.id, scopeFor(req)));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // POST /api/checkin-audit/findings/:id/dismiss
 // body: { classification: 'NOT_ISSUE' } or
 //       { classification: 'PREEXISTING', view, xPct, yPct, description?, photoDataUrl }

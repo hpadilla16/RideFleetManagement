@@ -930,7 +930,25 @@ async function getVehicleDamageHistory(vehicleId, scope = {}) {
     if (d.status === 'HARD_APPROVED') active.push(row);
     else fixed.push(row);
   }
-  return { vehicle: vehicleSummary(vehicle), active, fixed };
+
+  // Seed-from-history proposals (2026-09-06): REPORTED rows the seed job
+  // created await an admin's approve/discard on this same tab. Customer
+  // REPORTED rows are NOT included — those live in the inspection review
+  // queue; only source SEED_HISTORY surfaces here.
+  const proposedRows = await prisma.vehicleDamageReport.findMany({
+    where: { vehicleId, status: 'REPORTED', source: SEED_SOURCE },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    omit: { customerAckSignatureDataUrl: true, customerAckStatementText: true },
+  });
+  const proposed = [];
+  for (const d of proposedRows) {
+    const row = await project(d);
+    row.seedSourceRef = d.seedSourceRef || null;
+    proposed.push(row);
+  }
+
+  return { vehicle: vehicleSummary(vehicle), active, fixed, proposed };
 }
 
 /**
@@ -1016,6 +1034,294 @@ async function clearDamageReport({ reportId, reason, actorUserId, scope = {} }) 
   return { ok: true, status: 'FIXED', clearedReason: cleanReason.slice(0, 500) };
 }
 
+// ---------------------------------------------------------------------------
+// Seed from history (2026-09-06, audit/baseline closers — damage-baseline
+// NOTES §D5 path B, per vehicle). One-shot ADMIN action on the profile's
+// Damage-baseline tab: scan what the repo already stores about this vehicle
+// and mint PROPOSED (status REPORTED, source SEED_HISTORY) entries the admin
+// reviews — never HARD_APPROVED directly, never a photo faked.
+// ---------------------------------------------------------------------------
+
+export const SEED_SOURCE = 'SEED_HISTORY';
+export const SEED_CAP = 50;
+
+/** Pure candidate builder — exported for tests. Inputs are the raw rows the
+ *  seed job read; output is the deduped, capped create list.
+ *  Sources, in priority order:
+ *   1. SOFT_APPROVED VehicleDamageReport rows — damage a reviewer
+ *      acknowledged but never baselined; best quality (real view/dot/photo).
+ *   2. RentalAgreementInspection rows with free-text `damages` — desk-triage
+ *      material (view defaults FRONT, dot 50/50; the admin corrects on
+ *      approve).
+ *   3. DAMAGE ReservationIncident rows (non-VOID) — same triage posture.
+ *  Idempotence: every candidate carries a stable seedSourceRef
+ *  ('vdr:<id>' | 'insp:<id>' | 'inc:<id>'); refs already present on ANY of
+ *  the vehicle's rows are skipped, so a re-run creates nothing new. */
+export function buildSeedCandidates({ softApproved = [], inspections = [], incidents = [], existingRefs = [] } = {}, cap = SEED_CAP) {
+  const seen = new Set((existingRefs || []).filter(Boolean).map(String));
+  const candidates = [];
+  const push = (c) => { if (!seen.has(c.seedSourceRef)) { seen.add(c.seedSourceRef); candidates.push(c); } };
+
+  for (const d of softApproved) {
+    if (!d?.id) continue;
+    push({
+      seedSourceRef: `vdr:${d.id}`,
+      kind: 'SOFT_APPROVED',
+      phase: d.phase || 'CHECKIN',
+      view: d.view || 'FRONT',
+      xPct: d.xPct != null ? Number(d.xPct) : 50,
+      yPct: d.yPct != null ? Number(d.yPct) : 50,
+      description: (d.description || 'Acknowledged damage (soft-approved, never baselined)').slice(0, 500),
+      photoJson: d.photoJson || null,
+      reservationId: d.reservationId || null,
+      reservationNumber: d.reservationNumber || null,
+    });
+  }
+
+  for (const insp of inspections) {
+    const text = String(insp?.damages || '').trim();
+    if (!insp?.id || !text) continue;
+    const when = insp.capturedAt ? new Date(insp.capturedAt).toISOString().slice(0, 10) : '';
+    push({
+      seedSourceRef: `insp:${insp.id}`,
+      kind: 'INSPECTION_NOTE',
+      phase: insp.phase === 'CHECKOUT' ? 'CHECKOUT' : 'CHECKIN',
+      view: 'FRONT',
+      xPct: 50,
+      yPct: 50,
+      description: `[${insp.phase}${when ? ` ${when}` : ''}] ${text}`.slice(0, 500),
+      photoJson: null,
+      reservationId: insp.rentalAgreement?.reservationId || null,
+      reservationNumber: null,
+    });
+  }
+
+  for (const inc of incidents) {
+    if (!inc?.id) continue;
+    const bits = [inc.title, inc.narrative].filter(Boolean).join(' — ');
+    push({
+      seedSourceRef: `inc:${inc.id}`,
+      kind: 'INCIDENT',
+      phase: 'CHECKIN',
+      view: 'FRONT',
+      xPct: 50,
+      yPct: 50,
+      description: `[Incident ${inc.reportNumber || inc.id}] ${bits || 'Damage incident'}`.slice(0, 500),
+      photoJson: null,
+      reservationId: inc.reservationId || null,
+      reservationNumber: null,
+    });
+  }
+
+  const total = candidates.length;
+  const capped = total > cap;
+  return { candidates: candidates.slice(0, cap), totalCandidates: total, capped, cap };
+}
+
+/**
+ * The seed job. `dryRun: true` returns the exact candidate list WITHOUT
+ * creating anything — the confirm dialog lists what a real run would mint.
+ * A real run creates status-REPORTED entries (the existing draft state; the
+ * review queue semantics apply: approve → HARD_APPROVED, discard →
+ * SOFT_APPROVED tombstone that keeps the ref for idempotence), audit-logs
+ * each created entry against its reservation, and caps at SEED_CAP with an
+ * explicit `capped` notice.
+ */
+async function seedBaselineFromHistory({ vehicleId, dryRun = false, actorUserId = null, scope = {} }) {
+  const tenantId = scope?.tenantId;
+  if (!tenantId || tenantId === '__no_tenant__') throw new CheckoutSessionError('tenantId required', 400);
+  const vehicle = await prisma.vehicle.findFirst({
+    where: { id: String(vehicleId), tenantId },
+    select: { id: true, plate: true, internalNumber: true },
+  });
+  if (!vehicle) throw new CheckoutSessionError('Vehicle not found', 404);
+
+  // Everything already on the ledger: refs for idempotence + the open count
+  // (open HARD_APPROVED rows are ALREADY baseline — nothing to seed there).
+  const existing = await prisma.vehicleDamageReport.findMany({
+    where: { vehicleId: String(vehicleId) },
+    select: {
+      id: true, status: true, seedSourceRef: true, phase: true, view: true,
+      xPct: true, yPct: true, description: true, photoJson: true,
+      reservationId: true, reservationNumber: true,
+    },
+  });
+  const existingRefs = existing.map((r) => r.seedSourceRef).filter(Boolean);
+  const alreadyActive = existing.filter((r) => r.status === 'HARD_APPROVED').length;
+  const softApproved = existing.filter((r) => r.status === 'SOFT_APPROVED' && !r.seedSourceRef);
+
+  const inspections = await prisma.rentalAgreementInspection.findMany({
+    where: {
+      rentalAgreement: { vehicleId: String(vehicleId) },
+      damages: { not: null },
+    },
+    orderBy: { capturedAt: 'desc' },
+    take: 200,
+    select: {
+      id: true, phase: true, damages: true, capturedAt: true,
+      rentalAgreement: { select: { reservationId: true } },
+    },
+  }).catch(() => []);
+
+  const incidents = await prisma.reservationIncident.findMany({
+    where: {
+      type: 'DAMAGE',
+      status: { not: 'VOID' },
+      reservation: { vehicleId: String(vehicleId) },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    select: { id: true, reportNumber: true, title: true, narrative: true, reservationId: true },
+  }).catch(() => []);
+
+  const { candidates, totalCandidates, capped, cap } = buildSeedCandidates({
+    softApproved, inspections, incidents, existingRefs,
+  });
+
+  const summary = {
+    ok: true,
+    dryRun: !!dryRun,
+    vehicleId: String(vehicleId),
+    alreadyActive,
+    totalCandidates,
+    capped,
+    cap,
+    skippedExisting: existingRefs.length,
+    candidates: candidates.map((c) => ({
+      seedSourceRef: c.seedSourceRef,
+      kind: c.kind,
+      view: c.view,
+      description: c.description,
+      reservationId: c.reservationId,
+      hasPhoto: !!c.photoJson,
+    })),
+  };
+  if (dryRun) return { ...summary, created: 0 };
+
+  const createdIds = [];
+  for (const c of candidates) {
+    // eslint-disable-next-line no-await-in-loop
+    const row = await prisma.vehicleDamageReport.create({
+      data: {
+        tenantId,
+        vehicleId: String(vehicleId),
+        phase: c.phase,
+        view: c.view,
+        xPct: Math.max(0, Math.min(100, Number(c.xPct) || 50)),
+        yPct: Math.max(0, Math.min(100, Number(c.yPct) || 50)),
+        description: c.description,
+        status: 'REPORTED', // the existing draft state — an admin reviews
+        source: SEED_SOURCE,
+        seedSourceRef: c.seedSourceRef,
+        photoJson: c.photoJson || undefined,
+        reservationId: c.reservationId || null,
+        reservationNumber: c.reservationNumber || null,
+      },
+    });
+    createdIds.push(row.id);
+    // Audited per entry (AuditLog is reservation-anchored; sources without a
+    // reservation are covered by the row's own source/seedSourceRef trail).
+    if (c.reservationId) {
+      // eslint-disable-next-line no-await-in-loop
+      await prisma.auditLog.create({ data: {
+        tenantId,
+        reservationId: c.reservationId,
+        action: 'ADMIN_OVERRIDE',
+        actorUserId: actorUserId || null,
+        reason: 'Damage baseline seeded from history (proposed entry — pending review)',
+        metadata: JSON.stringify({
+          kind: 'damage_baseline_seed',
+          damageReportId: row.id,
+          vehicleId: String(vehicleId),
+          seedSourceRef: c.seedSourceRef,
+          seedKind: c.kind,
+        }),
+      } }).catch((e) => {
+        logger.warn('[customer-inspection] seed audit log failed (non-fatal)', {
+          damageReportId: row.id, message: e?.message || String(e),
+        });
+      });
+    }
+  }
+
+  logger.info('[customer-inspection] baseline seeded from history', {
+    vehicleId: String(vehicleId), created: createdIds.length, totalCandidates, capped,
+  });
+  return { ...summary, created: createdIds.length, createdIds };
+}
+
+/**
+ * Review one seeded proposal: approve → HARD_APPROVED (optionally correcting
+ * view/dot/description in the same call — the seeded FRONT·50/50 placeholder
+ * is desk-triage material), discard → SOFT_APPROVED ("acknowledged, never
+ * hits the vehicle record") which KEEPS the row + seedSourceRef so a re-run
+ * of the seed job cannot resurrect a discarded proposal. Reviewer stamped;
+ * gated to source SEED_HISTORY + status REPORTED.
+ */
+async function reviewSeededEntry({ reportId, action, view, xPct, yPct, description, actorUserId, scope = {} }) {
+  const act = String(action || '').toLowerCase();
+  if (!['approve', 'discard'].includes(act)) throw new CheckoutSessionError(`Unknown action: ${action}`, 400);
+  const report = await prisma.vehicleDamageReport.findFirst({
+    where: { id: String(reportId), ...tenantWhere(scope) },
+    select: { id: true, status: true, source: true, tenantId: true, vehicleId: true, reservationId: true },
+  });
+  if (!report) throw new CheckoutSessionError('Damage report not found', 404);
+  if (report.source !== SEED_SOURCE) {
+    throw new CheckoutSessionError('Only seeded proposals can be reviewed here', 400);
+  }
+  if (report.status !== 'REPORTED') {
+    throw new CheckoutSessionError(`Proposal already ${report.status}`, 409);
+  }
+
+  const data = {
+    status: act === 'approve' ? 'HARD_APPROVED' : 'SOFT_APPROVED',
+    reviewedByUserId: actorUserId || null,
+    reviewedAt: new Date(),
+  };
+  if (act === 'approve') {
+    if (view != null) {
+      const viewKey = String(view).toUpperCase();
+      if (!['FRONT', 'REAR', 'LEFT', 'RIGHT', 'INTERIOR'].includes(viewKey)) throw new CheckoutSessionError('Invalid view', 400);
+      data.view = viewKey;
+    }
+    const x = Number(xPct); const y = Number(yPct);
+    if (xPct != null) {
+      if (!Number.isFinite(x) || x < 0 || x > 100) throw new CheckoutSessionError('xPct must be 0..100', 400);
+      data.xPct = x;
+    }
+    if (yPct != null) {
+      if (!Number.isFinite(y) || y < 0 || y > 100) throw new CheckoutSessionError('yPct must be 0..100', 400);
+      data.yPct = y;
+    }
+    if (description != null) data.description = String(description).slice(0, 500);
+  }
+
+  await prisma.vehicleDamageReport.update({ where: { id: report.id }, data });
+  if (report.reservationId) {
+    await prisma.auditLog.create({ data: {
+      tenantId: report.tenantId || scope?.tenantId || null,
+      reservationId: report.reservationId,
+      action: 'ADMIN_OVERRIDE',
+      actorUserId: actorUserId || null,
+      reason: act === 'approve'
+        ? 'Seeded baseline proposal approved to the damage baseline'
+        : 'Seeded baseline proposal discarded (kept as SOFT_APPROVED tombstone)',
+      metadata: JSON.stringify({
+        kind: 'damage_baseline_seed_review',
+        damageReportId: report.id,
+        vehicleId: report.vehicleId,
+        action: act,
+      }),
+    } }).catch((e) => {
+      logger.warn('[customer-inspection] seed review audit log failed (non-fatal)', {
+        reportId: report.id, message: e?.message || String(e),
+      });
+    });
+  }
+  logger.info('[customer-inspection] seeded proposal reviewed', { reportId: report.id, action: act });
+  return { ok: true, status: data.status };
+}
+
 export const customerInspectionService = {
   sendCustomerInspection,
   sendCheckinInspection,
@@ -1033,4 +1339,6 @@ export const customerInspectionService = {
   addManualDamage,
   fixDamageReport,
   clearDamageReport,
+  seedBaselineFromHistory,
+  reviewSeededEntry,
 };

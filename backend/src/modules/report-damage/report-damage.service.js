@@ -32,6 +32,7 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { incidentReportService } from '../incident-report/incident-report.service.js';
 import { resolveVoziaCeiling } from '../rental-agreements/service-payment-guards.js';
 import { damageAcknowledgementSection } from '../checkout-session/terms-content.js';
+import { findConvertibleFinding, resolveFindingConvertedSafe } from '../checkin-audit/checkin-audit.service.js';
 
 const RESPONSIBLE_PARTIES = ['CUSTOMER', 'CUSTOMER_INSURANCE', 'OUR_INSURANCE'];
 // Hector's decision: the dropdown offers ALL VehicleStatus values, default IN_MAINTENANCE.
@@ -116,6 +117,21 @@ export const reportDamageService = {
 
     const actorUserId = user?.id || user?.sub || null;
     const description = body?.description ? String(body.description) : null;
+
+    // --- optional check-in-audit linkage (2026-09-06, audit/baseline closers).
+    // The audit's "Create damage report" handoff sends the finding id along
+    // with the human-completed wizard payload. Validated UP FRONT (exists,
+    // same tenant, DAMAGE category, SAME reservation) so a bogus id fails
+    // before any write; the finding itself resolves only after the money
+    // committed (post-success, best-effort — see the end of this method). ---
+    let auditFinding = null;
+    if (body?.sourceAuditFindingId) {
+      auditFinding = await findConvertibleFinding({
+        findingId: body.sourceAuditFindingId,
+        tenantId: reservation.tenantId,
+        reservationId: reservation.id,
+      });
+    }
 
     // --- optional customer acknowledgement (2026-07-25, validated BEFORE any
     // write — same convention as every other signature in this codebase) ---
@@ -230,6 +246,18 @@ export const reportDamageService = {
           logger.warn('[report-damage] duplicate submit suppressed (returning prior result, no second charge)', {
             reservationId: reservation.id, chargeId: recentCharge.id, damageReportId: prior?.id || null, customerAckSaved
           });
+          // Audit linkage on a replay: the FIRST submit normally resolved the
+          // finding already (updateMany-where-OPEN makes this a no-op then),
+          // but if it crashed between the charge and the resolve this replay
+          // closes the loop.
+          if (auditFinding && prior?.id) {
+            await resolveFindingConvertedSafe({
+              findingId: auditFinding.id,
+              tenantId: reservation.tenantId,
+              damageReportId: prior.id,
+              actorUserId,
+            });
+          }
           return {
             damageReportId: prior?.id || null,
             chargeId: recentCharge.id,
@@ -260,7 +288,12 @@ export const reportDamageService = {
       damageCostCents,
       ourDeductibleCents,
       responsibleParty,
-    }, dmgScope);
+    }, dmgScope,
+    // Internal-only provenance: the ledger row records WHICH audit flag the
+    // evidence came from. Source stays 'MANUAL' — this is the normal
+    // report-damage path (new damage, chargeable), NOT an AUDIT_PREEXISTING
+    // baseline append.
+    auditFinding ? { sourceAuditFindingId: auditFinding.id } : {});
     const damageReportId = damage.id;
 
     // --- 1b. Persist the customer acknowledgement (BEFORE money moves, so a
@@ -363,6 +396,20 @@ export const reportDamageService = {
       logger.error('[report-damage] incident DRAFT creation failed (damage + charge kept)', { err: e.message });
     }
 
+    // --- 5. Close the audit loop (best-effort — the money is committed).
+    // The finding leaves the queue as RESOLVED · CONVERTED_TO_REPORT, linked
+    // to this report; a race with a dismiss (or a replay) is a logged no-op. ---
+    let auditFindingResolved = false;
+    if (auditFinding) {
+      const r = await resolveFindingConvertedSafe({
+        findingId: auditFinding.id,
+        tenantId: reservation.tenantId,
+        damageReportId,
+        actorUserId,
+      });
+      auditFindingResolved = r?.resolved === true;
+    }
+
     logger.info('[report-damage] complete', {
       reservationId: reservation.id, damageReportId, chargeId, incidentId, vehicleStatus, responsibleParty
     });
@@ -375,6 +422,7 @@ export const reportDamageService = {
       damageCostCents: damageCostCents ?? null,
       ourDeductibleCents: ourDeductibleCents ?? null,
       customerAckSaved: !!customerAck,
+      auditFindingResolved,
     };
   },
 

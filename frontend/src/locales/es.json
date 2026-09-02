@@ -2460,6 +2460,13 @@
       "preexistingSub": "Se agrega al historial base del vehículo para que no se señale otra vez — y nunca se cobre a un cliente.",
       "preexistingT2": "Aplica a hallazgos de daño de la IA de fotos — espera el nivel de fotos (T2). Los hallazgos de reglas son números, no marcas.",
       "confirm": "Descartar"
+    },
+    "handoff": {
+      "cta": "Crear reporte de daño",
+      "sub": "Abre el asistente de Reporte de daño con la evidencia ya cargada — fotos, vista y descripción prellenadas; el agente captura el estimado y quién paga.",
+      "converted": "Convertida en reporte de daño · {{name}}",
+      "baselined": "Agregada al historial base del vehículo · {{name}}",
+      "loading": "Cargando la evidencia…"
     }
   },
   "damageBaseline": {
@@ -2484,6 +2491,42 @@
     "clearedAt": "eliminada",
     "clearedReason": "Eliminada: {{reason}}",
     "repairedRo": "Reparado · orden {{ro}}",
-    "repaired": "Reparado"
+    "repaired": "Reparado",
+    "views": {
+      "FRONT": "Frente",
+      "REAR": "Trasera",
+      "LEFT": "Izquierda",
+      "RIGHT": "Derecha",
+      "INTERIOR": "Interior"
+    },
+    "disclosure": {
+      "title": "Marcas documentadas de este vehículo",
+      "count": "{{n}} registradas",
+      "sub": "Señáleselas al cliente durante el recorrido — están registradas y NO son responsabilidad del cliente.",
+      "noDesc": "Marca documentada"
+    },
+    "seed": {
+      "action": "Sembrar desde el historial",
+      "title": "Sembrar desde el historial",
+      "sub": "Usa lo que el sistema ya guarda de este vehículo — reportes de daño reconocidos, notas de daños de inspecciones e incidentes de daño. Todo se crea como PROPUESTA que usted revisa; nada llega al historial base sin su aprobación.",
+      "scanning": "Escaneando el historial de este vehículo…",
+      "willCreate": "Creará {{n}} propuestas:",
+      "capped": "Límite de {{cap}} por corrida ({{total}} encontradas) — corra de nuevo para el resto.",
+      "confirm": "Crear {{n}} propuestas",
+      "running": "Sembrando…",
+      "nothing": "Nada nuevo que sembrar — el historial está vacío o ya se refleja en el historial base.",
+      "done": "Se sembraron {{n}} propuestas desde el historial — revíselas abajo",
+      "doneCapped": "Se sembraron {{n}} propuestas — límite alcanzado ({{total}} candidatas); corra de nuevo para el resto",
+      "approved": "Propuesta aprobada al historial base",
+      "discarded": "Propuesta descartada",
+      "proposedTitle": "Propuestas desde el historial ({{n}}) — apruebe o descarte",
+      "proposedSub": "Las entradas sembradas son borradores: elija la vista correcta y apruebe para ponerlas en el historial base, o descarte. Los puntos aprobados quedan al centro del diagrama — mueva la conversación con el cliente, no el punto.",
+      "kindSoft": "reporte reconocido",
+      "kindIncident": "incidente",
+      "kindInspection": "nota de inspección",
+      "viewLabel": "Vista",
+      "approve": "Aprobar",
+      "discard": "Descartar"
+    }
   }
 }
