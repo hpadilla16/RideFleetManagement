@@ -346,6 +346,27 @@ settingsRouter.put('/idle-vehicles', requireRole('ADMIN'), async (req, res, next
   }
 });
 
+// Check-in audit (T1 rules + T2 photo AI, 2026-09-02): rule toggle/band +
+// photo-AI opt-in/budget/model per tenant. Photo AI is OFF by default; its
+// CREDENTIAL is the shared Anthropic block (PUT /citation-ocr with apiKey),
+// resolved by the worker via resolveCitationOcrCredential(feature:
+// 'checkin-audit') — this route never touches a key.
+settingsRouter.get('/checkin-audit', async (_req, res, next) => {
+  try {
+    res.json(await settingsService.getCheckinAuditConfig(scopeFor(_req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/checkin-audit', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateCheckinAuditConfig(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Citations OCR — per-tenant vision-LLM credentials. GET returns masked config
 // (provider/model/hasKey, never the key). PUT (ADMIN) sets provider/model/apiKey
 // (key stored encrypted). { clearKey:true } removes the stored key.

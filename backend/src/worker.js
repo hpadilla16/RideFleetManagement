@@ -401,6 +401,22 @@ async function main() {
     });
   }
 
+  // Check-in audit — Tier 2 photo AI (2026-09-02). Polling sweep over closes
+  // that have T1 findings but no T2 verdict (citation-ocr scheduler pattern).
+  // Gated inside start...: kill switch CHECKIN_AUDIT_T2_ENABLED (default on),
+  // inspection-photo storage, then per-tenant photoAiEnabled + credential
+  // (feature 'checkin-audit' — a tenant with no key makes NO provider call).
+  // Dynamic import so a broken import chain can't kill the worker boot.
+  try {
+    const ckt2Mod = await import('./modules/checkin-audit/checkin-audit-t2.service.js');
+    ckt2Mod.startCheckinAuditT2Scheduler();
+    logger.info('[worker] started: checkin-audit T2 photo scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] checkin-audit T2 photo scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // Economy (RezLight) autonomous sync scheduler (2026-07-05). Gated by the
   // same ECONOMY_INTEGRATION_ENABLED flag (checked inside start...). Dynamic
   // import so a broken import chain can't kill the worker boot.

@@ -122,6 +122,15 @@ export const PLATFORM_CREDENTIAL_FEATURES = {
     label: 'Agent Copilot AI fallback (Anthropic)',
     settingsPath: 'Settings → Copilot AI',
   },
+  // Post-check-in photo audit (2026-09-02, checkin-audit T2). Shares the
+  // citationOcrConfig Anthropic block; the T2 sweep resolves through here
+  // with this feature key so the opt-in and the WARN name the audit, not the
+  // citations, when its photos go out.
+  'checkin-audit': {
+    envVar: 'ANTHROPIC_API_KEY',
+    label: 'Check-in photo audit (Anthropic)',
+    settingsPath: 'Settings → Modules → Check-in Audit (key under Citations → OCR)',
+  },
   sms: {
     envVar: 'TELNYX_API_KEY / TWILIO_AUTH_TOKEN / PLIVO_AUTH_TOKEN',
     label: 'Outbound SMS',

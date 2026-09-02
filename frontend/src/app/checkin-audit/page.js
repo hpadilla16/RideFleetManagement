@@ -1,19 +1,22 @@
 'use client';
 
-// Check-in Audit — the T1 review queue (2026-09-03, approved mockup).
-// Source of truth: design/mockups/checkin-audit-mockup.html (Mock 1 queue,
-// Mock 2 detail) + checkin-audit-NOTES.md. THIS IS T1 ONLY — rules, no AI:
+// Check-in Audit — the review queue (T1 rules 2026-09-03; T2 photo AI
+// 2026-09-02). Source of truth: design/mockups/checkin-audit-mockup.html
+// (Mock 1 queue, Mock 2 pair viewer + verdict card) + checkin-audit-NOTES.md
+// + damage-baseline-NOTES.md (the dismiss fork).
 // - Lanes are saved filters over one findings table (tolls/notifications rail
-//   pattern). The Possible-damage lane ships EMPTY with honest copy: photo AI
-//   (T2) is not enabled. The KPI strip has NO AI-spend tile for the same
-//   reason.
-// - The detail view renders the Mock-2 mileage/fuel + entry-check cards from
-//   the findings' own recorded numbers; the photo-pair pane is the T2
-//   placeholder.
+//   pattern). Everything AI-shaped keys off the API's photoAiEnabled flag: a
+//   T1-only tenant keeps the honest empty Possible-damage lane, the
+//   placeholder Photo AI column, and NO AI-spend KPI tile.
+// - With photo AI on, the Possible-damage lane fills from the T2 sweep, the
+//   Photo AI column shows each close's verdict, the AI-spend tile appears,
+//   and the detail's photo pane becomes the Mock-2 checkout↔check-in pair
+//   viewer with the AI verdict card (suggestion-only — the disclaimer lives
+//   inside the card).
 // - Dismissing offers the two verbs from the damage-baseline design: "Not an
 //   issue" (any finding) and "Real but pre-existing" (DAMAGE findings only —
-//   none exist in T1, so the verb renders disabled with the T2 note; the API
-//   underneath is already generic).
+//   T2's suspected-damage flags enable it; the backend derives the ledger
+//   entry from the finding's own evidence).
 // A check-in is never held by the audit — flags appear here after the close.
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
@@ -23,13 +26,15 @@ import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
 import {
   CHECKIN_AUDIT_LANE_GROUPS,
-  CHECKIN_AUDIT_KPIS,
   LANE_QUERY,
+  checkinAuditKpis,
   findingChip,
+  photoAiCell,
   groupRowsByReservation,
   mileageFuelAuditRows,
   entryAuditRows,
   canDismissPreexisting,
+  DAMAGE_SUSPECTED_PREFIX,
 } from '../../lib/checkin-audit-lanes';
 
 function fmtDateTime(d, lang) {
@@ -51,23 +56,39 @@ function Chip({ finding }) {
   );
 }
 
-/** KPI strip — exported for component tests (must NOT contain the AI tile). */
-export function KpiStrip({ kpis }) {
+/** KPI strip — exported for component tests. The AI-spend tile renders ONLY
+ *  when the tenant's photo AI is enabled (Mock 1's cost-transparency tile;
+ *  at a permanent $0.00 on a T1-only tenant it would be a lie). */
+export function KpiStrip({ kpis, photoAiEnabled = false }) {
   const { t } = useTranslation();
   return (
     <div className="ca-kpis" data-testid="ca-kpis">
-      {CHECKIN_AUDIT_KPIS.map((k) => (
-        <div key={k.id} className={`ca-kpi${k.tone === 'flag' ? ' ca-kpi--flag' : ''}`} data-testid={`kpi-${k.id}`}>
+      {checkinAuditKpis(photoAiEnabled).map((k) => (
+        <div key={k.id} className={`ca-kpi${k.tone === 'flag' ? ' ca-kpi--flag' : ''}${k.tone === 'money' ? ' ca-kpi--money' : ''}`} data-testid={`kpi-${k.id}`}>
           <div className="ca-kpi-lab">{t(`checkinAudit.kpis.${k.id}`, k.id)}</div>
-          <div className="ca-kpi-val tnum">{Number(kpis?.[k.key]) || 0}</div>
+          {k.tone === 'money' ? (
+            <div className="ca-kpi-val tnum">
+              ${(Number(kpis?.aiSpendTodayUsd) || 0).toFixed(2)}
+              <em className="ca-kpi-sub">
+                {t('checkinAudit.kpis.aiSpendSub', {
+                  n: Number(kpis?.aiAnalyzedToday) || 0,
+                  s: Number(kpis?.aiSkippedBudgetToday) || 0,
+                  defaultValue: `${Number(kpis?.aiAnalyzedToday) || 0} analyzed · ${Number(kpis?.aiSkippedBudgetToday) || 0} over budget`,
+                })}
+              </em>
+            </div>
+          ) : (
+            <div className="ca-kpi-val tnum">{Number(kpis?.[k.key]) || 0}</div>
+          )}
         </div>
       ))}
     </div>
   );
 }
 
-/** Queue table (Mock 1) — one row per reservation, T1 chips per finding. */
-export function AuditQueueTable({ rows, lane, onOpen }) {
+/** Queue table (Mock 1) — one row per reservation, T1 chips per finding,
+ *  Photo AI column from the API's per-reservation T2 summary. */
+export function AuditQueueTable({ rows, lane, onOpen, t2 = {}, photoAiEnabled = false }) {
   const { t, i18n } = useTranslation();
   const lang = i18n?.language || 'en';
   const grouped = useMemo(() => groupRowsByReservation(rows), [rows]);
@@ -75,7 +96,9 @@ export function AuditQueueTable({ rows, lane, onOpen }) {
     return (
       <div className="ca-empty" data-testid="ca-empty">
         {lane === 'damage'
-          ? t('checkinAudit.damageLaneEmpty', 'Photo AI is not enabled — this lane fills when the photo tier (T2) ships. Rules findings live in Entry errors and Mileage / fuel.')
+          ? (photoAiEnabled
+            ? t('checkinAudit.damageLaneClear', 'No possible-damage flags right now — the photo sweep runs a few minutes after each close.')
+            : t('checkinAudit.damageLaneEmpty', 'Photo AI is not enabled — this lane fills when the photo tier (T2) ships. Rules findings live in Entry errors and Mileage / fuel.'))
           : t('checkinAudit.laneEmpty', 'Nothing in this lane.')}
       </div>
     );
@@ -107,10 +130,15 @@ export function AuditQueueTable({ rows, lane, onOpen }) {
                 </span>
               </td>
               <td>
-                <span className="chip chip--neutral" data-testid="t2-placeholder">
-                  <span className="led" />
-                  {t('checkinAudit.photoAiOff', 'Photo AI not enabled')}
-                </span>
+                {(() => {
+                  const c = photoAiCell(t2?.[g.reservationId], photoAiEnabled);
+                  return (
+                    <span className={`chip chip--${c.tone}`} data-testid={photoAiEnabled ? `t2-cell-${c.key}` : 't2-placeholder'}>
+                      <span className="led" />
+                      {t(c.labelKey, { ...c.params, defaultValue: c.defaultLabel })}
+                    </span>
+                  );
+                })()}
               </td>
               <td>{g.closedByName || '—'}</td>
               <td>
@@ -209,16 +237,160 @@ export function AuditDetailCards({ detail }) {
         </div>
       </section>
 
-      <section className="ca-card ca-card--t2" data-testid="t2-photo-pane">
-        <header>
-          <h4>{t('checkinAudit.cards.photoPair', 'Photo comparison')}</h4>
-          <span className="ca-tier ca-tier--t2">T2 · {t('checkinAudit.photoAi', 'Photo AI')}</span>
-        </header>
-        <p className="ca-t2-note">
-          {t('checkinAudit.t2Placeholder', 'Photo AI is not enabled. When the photo tier ships (opt-in per tenant, tenant key), checkout and check-in photos of each angle are compared here and possible new damage lands in the queue — a person always confirms; nothing is ever charged automatically.')}
-        </p>
-      </section>
+      {(detail?.photoAiEnabled || detail?.t2Scan || (detail?.findings || []).some((f) => String(f.checkKey || '').startsWith(DAMAGE_SUSPECTED_PREFIX)))
+        ? <PhotoPairPane detail={detail} />
+        : (
+          <section className="ca-card ca-card--t2" data-testid="t2-photo-pane">
+            <header>
+              <h4>{t('checkinAudit.cards.photoPair', 'Photo comparison')}</h4>
+              <span className="ca-tier ca-tier--t2">T2 · {t('checkinAudit.photoAi', 'Photo AI')}</span>
+            </header>
+            <p className="ca-t2-note">
+              {t('checkinAudit.t2Placeholder', 'Photo AI is not enabled. When the photo tier ships (opt-in per tenant, tenant key), checkout and check-in photos of each angle are compared here and possible new damage lands in the queue — a person always confirms; nothing is ever charged automatically.')}
+            </p>
+          </section>
+        )}
     </div>
+  );
+}
+
+const ANGLE_ORDER = ['front', 'rear', 'left', 'right', 'frontSeat', 'rearSeat', 'dashboard', 'trunk'];
+
+/** Mock 2's checkout↔check-in pair viewer + AI verdict card — exported for
+ *  component tests. Angle strip (warm dot on flagged angles, check on clean
+ *  ones), the two photos with the suspected-region overlay, and the
+ *  suggestion-only verdict card with its disclaimer inside. */
+export function PhotoPairPane({ detail }) {
+  const { t } = useTranslation();
+  const pairs = detail?.photoPairs || {};
+  const suspects = useMemo(() => {
+    const map = {};
+    for (const f of detail?.findings || []) {
+      if (String(f.checkKey || '').startsWith(DAMAGE_SUSPECTED_PREFIX)) {
+        map[f.details?.angle || f.checkKey.slice(DAMAGE_SUSPECTED_PREFIX.length)] = f;
+      }
+    }
+    return map;
+  }, [detail]);
+  const angles = useMemo(() => {
+    const present = new Set([...Object.keys(pairs), ...Object.keys(suspects)]);
+    return ANGLE_ORDER.filter((a) => present.has(a));
+  }, [pairs, suspects]);
+  const [angle, setAngle] = useState(() => angles.find((a) => suspects[a]) || angles[0] || null);
+  const active = angle && angles.includes(angle) ? angle : (angles.find((a) => suspects[a]) || angles[0] || null);
+  const pair = active ? pairs[active] : null;
+  const suspect = active ? suspects[active] : null;
+  const region = suspect?.details?.region || null;
+  const scan = detail?.t2Scan || null;
+
+  return (
+    <section className="ca-card ca-card--t2 ca-card--pair" data-testid="t2-pair-viewer">
+      <header>
+        <h4>{t('checkinAudit.cards.photoPair', 'Photo comparison')}</h4>
+        <span className="ca-tier ca-tier--t2">T2 · {t('checkinAudit.photoAi', 'Photo AI')}</span>
+        {scan?.resolution === 'ANALYZED' ? (
+          <span className="chip chip--ok"><span className="led" />{t('checkinAudit.t2Analyzed', 'Analyzed')}</span>
+        ) : null}
+      </header>
+
+      {!angles.length ? (
+        <p className="ca-t2-note" data-testid="t2-pane-note">
+          {scan?.resolution === 'SKIPPED_BUDGET'
+            ? t('checkinAudit.t2SkippedBudget', 'Skipped — the daily photo-AI budget was reached before this close.')
+            : scan?.resolution === 'SKIPPED_NO_PHOTOS'
+              ? t('checkinAudit.t2SkippedNoPhotos', 'Skipped — no angle has a photo on both the checkout and check-in side.')
+              : scan?.resolution === 'FAILED'
+                ? t('checkinAudit.t2Failed', 'The photo analysis failed — the check-in itself is unaffected.')
+                : t('checkinAudit.t2Pending', 'Queued for the photo sweep — it runs a few minutes after each close.')}
+        </p>
+      ) : (
+        <div className="ca-pair-body">
+          <div className="ca-angle-strip" role="tablist" aria-label={t('checkinAudit.pair.angles', 'Inspection angles')}>
+            {angles.map((a) => (
+              <button
+                key={a}
+                type="button"
+                role="tab"
+                aria-selected={a === active}
+                className={`ca-angle${a === active ? ' is-on' : ''}${suspects[a] ? ' is-flagged' : ''}`}
+                data-testid={`angle-${a}`}
+                onClick={() => setAngle(a)}
+              >
+                <span className={suspects[a] ? 'dot' : 'tick'}>{suspects[a] ? '' : '✓'}</span>
+                {t(`checkinAudit.angles.${a}`, a)}
+              </button>
+            ))}
+          </div>
+
+          <div className="ca-pair" data-testid={`pair-${active}`}>
+            <figure className="ca-shot">
+              <figcaption>
+                <span className="ca-tag ca-tag--out">{t('checkinAudit.pair.checkout', 'Checkout')}</span>
+                {t('checkinAudit.pair.baseline', 'baseline')}
+              </figcaption>
+              {pair?.checkout
+                ? <img src={pair.checkout} alt={t('checkinAudit.pair.checkoutAlt', { angle: active, defaultValue: `Checkout photo · ${active}` })} />
+                : <div className="ca-shot-missing">{t('checkinAudit.pair.missing', 'No photo for this angle')}</div>}
+            </figure>
+            <figure className="ca-shot">
+              <figcaption>
+                <span className="ca-tag ca-tag--in">{t('checkinAudit.pair.checkin', 'Check-in')}</span>
+                {t('checkinAudit.pair.returned', 'returned')}
+              </figcaption>
+              {pair?.checkin ? (
+                <div className="ca-shot-img">
+                  <img src={pair.checkin} alt={t('checkinAudit.pair.checkinAlt', { angle: active, defaultValue: `Check-in photo · ${active}` })} />
+                  {region ? (
+                    <span
+                      className="ca-region"
+                      data-testid="suspect-region"
+                      style={{
+                        left: `${Math.round((region.x || 0) * 1000) / 10}%`,
+                        top: `${Math.round((region.y || 0) * 1000) / 10}%`,
+                        width: `${Math.round((region.w || 0) * 1000) / 10}%`,
+                        height: `${Math.round((region.h || 0) * 1000) / 10}%`,
+                      }}
+                    >
+                      <span className="ca-region-label">
+                        {t('checkinAudit.pair.suspected', 'Suspected')}{suspect?.details?.kind ? ` · ${suspect.details.kind}` : ''}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+              ) : <div className="ca-shot-missing">{t('checkinAudit.pair.missing', 'No photo for this angle')}</div>}
+            </figure>
+          </div>
+
+          {suspect ? (
+            <div className="ca-verdict" data-testid="ai-verdict-card">
+              <div className="ca-verdict-top">
+                <span className="ca-tier ca-tier--t2">{t('checkinAudit.verdict.source', 'AI vision · T2')}</span>
+                <span className={`chip chip--${suspect.severity === 'ERROR' ? 'danger' : 'warn'}`}>
+                  <span className="led" />{t('checkinAudit.verdict.title', 'Possible new damage')}
+                </span>
+                <span className="ca-conf-bar" title={`${suspect.details?.confidence ?? '—'}%`}>
+                  <i style={{ width: `${Number(suspect.details?.confidence) || 0}%` }} />
+                </span>
+                <span className="ca-conf tnum">{suspect.details?.confidence ?? '—'}%</span>
+              </div>
+              {suspect.details?.description ? <p className="ca-verdict-desc">“{suspect.details.description}”</p> : null}
+              {(suspect.details?.knownDamageMatched || []).length ? (
+                <p className="ca-verdict-known" data-testid="known-damage-note">
+                  {t('checkinAudit.verdict.knownMatched', 'The model also matched documented baseline damage in this view — shown for context, never hidden.')}
+                </p>
+              ) : null}
+              <p className="ca-verdict-foot">
+                {t('checkinAudit.verdict.disclaimer', 'AI suggestion — a staff member confirms. The highlighted box is a pointer, not a measurement, and nothing is ever charged automatically.')}
+              </p>
+            </div>
+          ) : (
+            <p className="ca-t2-note" data-testid="t2-angle-clean">
+              {t('checkinAudit.pair.clean', 'No new marks suspected on this angle.')}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -281,7 +453,7 @@ function CheckinAuditInner({ me, logout }) {
   const { t, i18n } = useTranslation();
   const lang = i18n?.language || 'en';
   const [lane, setLane] = useState('entry');
-  const [data, setData] = useState({ rows: [], counts: {}, kpis: {} });
+  const [data, setData] = useState({ rows: [], counts: {}, kpis: {}, t2: {}, photoAiEnabled: false });
   const [detail, setDetail] = useState(null);
   const [dismissing, setDismissing] = useState(null);
   const [msg, setMsg] = useState('');
@@ -292,7 +464,13 @@ function CheckinAuditInner({ me, logout }) {
     setMsg('');
     try {
       const out = await api(`/api/checkin-audit?lane=${encodeURIComponent(LANE_QUERY[l] || 'entry')}`, { bypassCache: true });
-      setData({ rows: out?.rows || [], counts: out?.counts || {}, kpis: out?.kpis || {} });
+      setData({
+        rows: out?.rows || [],
+        counts: out?.counts || {},
+        kpis: out?.kpis || {},
+        t2: out?.t2 || {},
+        photoAiEnabled: out?.photoAiEnabled === true,
+      });
     } catch (e) {
       setMsg(e.message);
     } finally {
@@ -348,15 +526,21 @@ function CheckinAuditInner({ me, logout }) {
           <span className="chip chip--ok" style={{ marginLeft: 'auto' }}>
             <span className="led" />{t('checkinAudit.rulesOn', 'Rules audit · on')}
           </span>
-          <span className="chip chip--neutral">
-            <span className="led" />{t('checkinAudit.photoAiOff', 'Photo AI not enabled')}
-          </span>
+          {data.photoAiEnabled ? (
+            <span className="chip chip--ok" data-testid="photo-ai-on">
+              <span className="led" />{t('checkinAudit.photoAiOn', 'Photo AI · tenant key')}
+            </span>
+          ) : (
+            <span className="chip chip--neutral">
+              <span className="led" />{t('checkinAudit.photoAiOff', 'Photo AI not enabled')}
+            </span>
+          )}
         </div>
       </div>
 
       {msg ? <div className="label">{msg}</div> : null}
 
-      <KpiStrip kpis={data.kpis} />
+      <KpiStrip kpis={data.kpis} photoAiEnabled={data.photoAiEnabled} />
 
       <div className="tq-body">
         <aside className="tq-rail" aria-label={t('checkinAudit.title', 'Check-in Audit')}>
@@ -420,7 +604,7 @@ function CheckinAuditInner({ me, logout }) {
               <AuditDetailCards detail={detail} />
             </div>
           ) : (
-            <AuditQueueTable rows={data.rows} lane={lane} onOpen={openDetail} />
+            <AuditQueueTable rows={data.rows} lane={lane} onOpen={openDetail} t2={data.t2} photoAiEnabled={data.photoAiEnabled} />
           )}
           {loading ? <div className="surface-note">{t('common.loading', 'Loading…')}</div> : null}
         </div>

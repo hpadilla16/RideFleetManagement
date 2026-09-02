@@ -53,6 +53,7 @@
       "maintSnoozed": "Maintenance snoozed at check-in — {{unit}}",
       "maintCheckinSent": "Sent to maintenance at check-in — {{unit}} · {{ro}}",
       "checkinAuditEntryError": "Entry error — {{res}}. Odometer entered below checkout reading ({{out}} → {{in}}).",
+      "checkinAuditDamage": "Possible damage — {{res}}. New mark suspected on the {{angle}} ({{conf}}%).",
       "idleVehicle": "Idle vehicle — {{unit}}, {{days}} days without a rental",
       "billingSuspended": "Subscription suspended — payment past due"
     },
@@ -2332,6 +2333,13 @@
     "sub": "Post-return review — rules audit on every close",
     "rulesOn": "Rules audit · on",
     "photoAiOff": "Photo AI not enabled",
+    "photoAiOn": "Photo AI · tenant key",
+    "damageLaneClear": "No possible-damage flags right now — the photo sweep runs a few minutes after each close.",
+    "t2Analyzed": "Analyzed",
+    "t2SkippedBudget": "Skipped — the daily photo-AI budget was reached before this close.",
+    "t2SkippedNoPhotos": "Skipped — no angle has a photo on both the checkout and check-in side.",
+    "t2Failed": "The photo analysis failed — the check-in itself is unaffected.",
+    "t2Pending": "Queued for the photo sweep — it runs a few minutes after each close.",
     "photoAi": "Photo AI",
     "rules": "Rules",
     "pass": "Pass",
@@ -2361,7 +2369,9 @@
       "auditedToday": "Audited · today",
       "cleanPassToday": "Clean pass · today",
       "openDamage": "Possible damage",
-      "openEntryErrors": "Entry errors"
+      "openEntryErrors": "Entry errors",
+      "aiSpendToday": "Photo AI · today",
+      "aiSpendSub": "{{n}} analyzed · {{s}} over budget"
     },
     "cols": {
       "reservation": "Reservation",
@@ -2378,7 +2388,41 @@
       "FUEL_DROP_NO_FEE": "Fuel ↓ no refill fee",
       "ENTRIES_INCOMPLETE": "Entries incomplete",
       "BACKDATED_RETURN": "Backdated return · {{n}}h",
+      "DAMAGE_SUSPECTED": "Possible damage {{conf}}%",
+      "T2_CLEAN": "No new marks",
+      "T2_SKIPPED_BUDGET": "Skipped · daily budget",
+      "T2_SKIPPED_NO_PHOTOS": "Skipped · angles missing",
+      "T2_FAILED": "Analysis failed",
+      "T2_PENDING": "Queued for photo AI",
       "UNKNOWN": "Finding"
+    },
+    "angles": {
+      "front": "Front",
+      "rear": "Rear",
+      "left": "Left",
+      "right": "Right",
+      "frontSeat": "F. Seat",
+      "rearSeat": "R. Seat",
+      "dashboard": "Dash",
+      "trunk": "Trunk"
+    },
+    "pair": {
+      "angles": "Inspection angles",
+      "checkout": "Checkout",
+      "checkin": "Check-in",
+      "baseline": "baseline",
+      "returned": "returned",
+      "missing": "No photo for this angle",
+      "suspected": "Suspected",
+      "clean": "No new marks suspected on this angle.",
+      "checkoutAlt": "Checkout photo · {{angle}}",
+      "checkinAlt": "Check-in photo · {{angle}}"
+    },
+    "verdict": {
+      "source": "AI vision · T2",
+      "title": "Possible new damage",
+      "knownMatched": "The model also matched documented baseline damage in this view — shown for context, never hidden.",
+      "disclaimer": "AI suggestion — a staff member confirms. The highlighted box is a pointer, not a measurement, and nothing is ever charged automatically."
     },
     "cards": {
       "mileageFuel": "Mileage & fuel audit",

@@ -45,7 +45,7 @@
     "test:ops": "node --test src/modules/ops/disk-space.test.mjs",
     "test:maintenance": "node --test --test-force-exit src/modules/maintenance/maintenance.service.test.mjs",
     "test:maintenance-checkin": "node --test --test-force-exit src/modules/maintenance/maintenance-checkin.test.mjs",
-    "test:checkin-audit": "node --test --test-force-exit src/modules/checkin-audit/checkin-audit.test.mjs",
+    "test:checkin-audit": "node --test --test-force-exit src/modules/checkin-audit/checkin-audit.test.mjs src/modules/checkin-audit/checkin-audit-t2.test.mjs",
     "test:idle-vehicle": "node --test --test-force-exit src/modules/vehicles/idle-vehicle.test.mjs",
     "test:copilot": "node --test --test-force-exit src/modules/copilot/copilot.test.mjs",
     "test:booking-source": "node --test --test-force-exit src/modules/integrations/booking-source/booking-source.test.mjs",

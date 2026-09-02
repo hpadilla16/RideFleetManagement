@@ -34,6 +34,8 @@ import logger from '../../lib/logger.js';
 import { emitNotificationSafe } from '../notifications/notifications-emit.js';
 import { settingsService } from '../settings/settings.service.js';
 import { canonicalPhotoKey } from '../rental-agreements/inspection-photos-normalize.js';
+import { isStorageEnabled, getPhotosBucket, materializeStorageRefs } from '../rental-agreements/inspection-photos.js';
+import { downloadObject } from '../../lib/storage/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Contract constants
@@ -68,6 +70,30 @@ export const DEFAULT_CHECKIN_AUDIT_CONFIG = Object.freeze({
 export const REQUIRED_ANGLES = Object.freeze([
   'front', 'rear', 'left', 'right', 'frontSeat', 'rearSeat', 'dashboard', 'trunk',
 ]);
+
+// ── T2 (photo AI, 2026-09-02) row contract on the SAME table ────────────────
+// One T2_SCAN marker row per audited reservation (tier T2, category PASS,
+// status RESOLVED; `resolution` = ANALYZING|ANALYZED|FAILED|SKIPPED_BUDGET|
+// SKIPPED_NO_PHOTOS). It is metadata, not a lane row — every lane read below
+// excludes it. Suspected pairs land as OPEN category-DAMAGE findings with
+// checkKey 'DAMAGE_SUSPECTED:<angle>' (per-angle keys because the dedupe
+// unique is (reservationId, checkKey) and each mark is dismissed/baselined on
+// its own). Worker: checkin-audit-t2.service.js.
+export const T2_SCAN_CHECK_KEY = 'T2_SCAN';
+export const DAMAGE_SUSPECTED_PREFIX = 'DAMAGE_SUSPECTED:';
+
+/** The angle→ledger-view map (damage-baseline-NOTES.md §D2: rear→REAR,
+ *  interior angles→INTERIOR). */
+export const ANGLE_TO_VIEW = Object.freeze({
+  front: 'FRONT',
+  rear: 'REAR',
+  left: 'LEFT',
+  right: 'RIGHT',
+  frontSeat: 'INTERIOR',
+  rearSeat: 'INTERIOR',
+  dashboard: 'INTERIOR',
+  trunk: 'INTERIOR',
+});
 
 export function normalizeCheckinAuditConfig(cfg = {}) {
   const num = (v, fallback, { min = 0 } = {}) => {
@@ -507,14 +533,16 @@ function tenantWhere(scope = {}) {
 export async function listCheckinAudits(query = {}, scope = {}) {
   const where = tenantWhere(scope);
   const lane = String(query.lane || 'entry');
+  // T2_SCAN marker rows are sweep metadata, not audit findings — every lane
+  // that isn't already keyed to a specific checkKey/category excludes them.
   const laneWhere = {
     entry: { status: 'OPEN', category: 'ENTRY' },
     mileageFuel: { status: 'OPEN', category: 'MILEAGE_FUEL' },
     damage: { status: 'OPEN', category: 'DAMAGE' },
     passed: { checkKey: 'PASS' },
     dismissed: { status: 'DISMISSED_NOT_ISSUE' },
-    resolved: { status: 'RESOLVED', checkKey: { not: 'PASS' } },
-    all: {},
+    resolved: { status: 'RESOLVED', checkKey: { notIn: ['PASS', T2_SCAN_CHECK_KEY] } },
+    all: { checkKey: { not: T2_SCAN_CHECK_KEY } },
   }[lane] || { status: 'OPEN', category: 'ENTRY' };
 
   const limit = Math.min(200, Math.max(1, Number(query.limit) || 100));
@@ -529,36 +557,117 @@ export async function listCheckinAudits(query = {}, scope = {}) {
     prisma.checkinAuditFinding.count({ where: { ...where, status: 'OPEN', category: 'DAMAGE' } }),
     prisma.checkinAuditFinding.count({ where: { ...where, checkKey: 'PASS' } }),
     prisma.checkinAuditFinding.count({ where: { ...where, status: 'DISMISSED_NOT_ISSUE' } }),
-    prisma.checkinAuditFinding.count({ where: { ...where, status: 'RESOLVED', checkKey: { not: 'PASS' } } }),
-    prisma.checkinAuditFinding.count({ where }),
+    prisma.checkinAuditFinding.count({ where: { ...where, status: 'RESOLVED', checkKey: { notIn: ['PASS', T2_SCAN_CHECK_KEY] } } }),
+    prisma.checkinAuditFinding.count({ where: { ...where, checkKey: { not: T2_SCAN_CHECK_KEY } } }),
   ]);
 
-  // KPI strip (Mock 1, WITHOUT the AI-spend tile): today's audited
-  // reservations, today's clean passes, open damage (always 0 in T1), open
-  // entry errors. "Today" = server day; the strip is a pulse, not a report.
+  // Photo AI (T2): the honesty flag is now the tenant's real config —
+  // T1-only tenants keep the empty lane + no AI KPI tile.
+  let photoAiEnabled = false;
+  try {
+    const cfg = await settingsService.getCheckinAuditConfig({ tenantId: scope?.tenantId || null });
+    photoAiEnabled = cfg?.photoAiEnabled === true;
+  } catch { /* settings unreadable — report OFF, never guess ON */ }
+
+  // KPI strip (Mock 1): today's audited reservations, today's clean passes,
+  // open damage, open entry errors. "Today" = server day; the strip is a
+  // pulse, not a report.
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
   const [todayRows, passToday] = await Promise.all([
     prisma.checkinAuditFinding.findMany({
-      where: { ...where, createdAt: { gte: dayStart } },
+      where: { ...where, createdAt: { gte: dayStart }, checkKey: { not: T2_SCAN_CHECK_KEY } },
       select: { reservationId: true },
       distinct: ['reservationId'],
     }),
     prisma.checkinAuditFinding.count({ where: { ...where, checkKey: 'PASS', createdAt: { gte: dayStart } } }),
   ]);
+  const kpis = {
+    auditedToday: todayRows.length,
+    cleanPassToday: passToday,
+    openDamage: damage,
+    openEntryErrors: entry,
+  };
+
+  // Per-reservation T2 status for the queue's "Photo AI · T2" column, and the
+  // AI-spend KPI tile (Mock 1's cost-transparency tile — ONLY when enabled).
+  let t2 = {};
+  if (photoAiEnabled) {
+    const reservationIds = [...new Set(rows.map((r) => r.reservationId))];
+    const t2Rows = reservationIds.length
+      ? await prisma.checkinAuditFinding.findMany({
+        where: {
+          ...where,
+          reservationId: { in: reservationIds },
+          OR: [{ checkKey: T2_SCAN_CHECK_KEY }, { checkKey: { startsWith: DAMAGE_SUSPECTED_PREFIX } }],
+        },
+      }).catch(() => [])
+      : [];
+    t2 = buildT2Summary(t2Rows);
+
+    const scansToday = await prisma.checkinAuditFinding.findMany({
+      where: { ...where, checkKey: T2_SCAN_CHECK_KEY, createdAt: { gte: dayStart } },
+      select: { resolution: true, detailsJson: true },
+    }).catch(() => []);
+    let aiCallsToday = 0; let aiSpendTodayUsd = 0; let aiAnalyzedToday = 0; let aiSkippedBudgetToday = 0;
+    for (const s of scansToday) {
+      if (s.resolution === 'ANALYZED') aiAnalyzedToday += 1;
+      if (s.resolution === 'SKIPPED_BUDGET') aiSkippedBudgetToday += 1;
+      try {
+        const dtl = s.detailsJson ? JSON.parse(s.detailsJson) : null;
+        aiCallsToday += Number(dtl?.aiCalls) || 0;
+        aiSpendTodayUsd += Number(dtl?.estimatedCostUsd) || 0;
+      } catch { /* unreadable scan details — counts stay honest-low */ }
+    }
+    kpis.aiAnalyzedToday = aiAnalyzedToday;
+    kpis.aiSkippedBudgetToday = aiSkippedBudgetToday;
+    kpis.aiCallsToday = aiCallsToday;
+    kpis.aiSpendTodayUsd = Number(aiSpendTodayUsd.toFixed(4));
+  }
 
   return {
     lane,
     rows: rows.map(projectFinding),
     counts: { entry, mileageFuel, damage, passed, dismissed, resolved, all },
-    kpis: {
-      auditedToday: todayRows.length,
-      cleanPassToday: passToday,
-      openDamage: damage,
-      openEntryErrors: entry,
-    },
-    // Honesty flag for the empty Possible-damage lane (T2 not shipped).
-    photoAiEnabled: false,
+    kpis,
+    t2,
+    photoAiEnabled,
   };
+}
+
+/**
+ * Fold raw T2 rows (the T2_SCAN marker + any DAMAGE_SUSPECTED findings) into
+ * one status object per reservation for the queue's Photo AI column. Pure —
+ * exported for tests.
+ *   { [reservationId]: { status, suspected: [{ checkKey, angle, confidence,
+ *     severity, status }] } }
+ * status: ANALYZED | ANALYZING | FAILED | SKIPPED_BUDGET | SKIPPED_NO_PHOTOS
+ * | PENDING (no scan row yet).
+ */
+export function buildT2Summary(t2Rows = []) {
+  const map = {};
+  const entryFor = (rid) => {
+    if (!map[rid]) map[rid] = { status: 'PENDING', suspected: [] };
+    return map[rid];
+  };
+  for (const row of t2Rows) {
+    const e = entryFor(row.reservationId);
+    if (row.checkKey === T2_SCAN_CHECK_KEY) {
+      e.status = row.resolution || 'ANALYZING';
+      continue;
+    }
+    if (String(row.checkKey || '').startsWith(DAMAGE_SUSPECTED_PREFIX)) {
+      let details = null;
+      try { details = row.detailsJson ? JSON.parse(row.detailsJson) : null; } catch { details = null; }
+      e.suspected.push({
+        checkKey: row.checkKey,
+        angle: details?.angle || row.checkKey.slice(DAMAGE_SUSPECTED_PREFIX.length),
+        confidence: details?.confidence ?? null,
+        severity: row.severity,
+        status: row.status,
+      });
+    }
+  }
+  return map;
 }
 
 function projectFinding(row) {
@@ -587,7 +696,9 @@ function projectFinding(row) {
   };
 }
 
-/** Every finding (any status) for one reservation — the detail view. */
+/** Every finding (any status) for one reservation — the detail view. With
+ *  photo AI on, also materializes the checkout↔checkin photo pairs (signed
+ *  URLs, Mock 2's pair viewer) and projects the T2 scan record. */
 export async function getCheckinAuditDetail(reservationId, scope = {}) {
   const where = tenantWhere(scope);
   const rows = await prisma.checkinAuditFinding.findMany({
@@ -595,14 +706,65 @@ export async function getCheckinAuditDetail(reservationId, scope = {}) {
     orderBy: { createdAt: 'asc' },
   });
   if (!rows.length) { const e = new Error('No audit recorded for this reservation'); e.status = 404; throw e; }
+
+  let photoAiEnabled = false;
+  try {
+    const cfg = await settingsService.getCheckinAuditConfig({ tenantId: scope?.tenantId || null });
+    photoAiEnabled = cfg?.photoAiEnabled === true;
+  } catch { /* report OFF */ }
+
+  const scanRow = rows.find((r) => r.checkKey === T2_SCAN_CHECK_KEY) || null;
+  const findings = rows.filter((r) => r.checkKey !== T2_SCAN_CHECK_KEY).map(projectFinding);
+  let t2Scan = null;
+  if (scanRow) {
+    let details = null;
+    try { details = scanRow.detailsJson ? JSON.parse(scanRow.detailsJson) : null; } catch { details = null; }
+    t2Scan = { resolution: scanRow.resolution || 'ANALYZING', createdAt: scanRow.createdAt, details };
+  }
+
+  // Photo pairs for the viewer — best effort: a storage hiccup degrades to
+  // no photos, never a 500 on the audit detail.
+  let photoPairs = null;
+  const hasT2 = !!scanRow || rows.some((r) => String(r.checkKey || '').startsWith(DAMAGE_SUSPECTED_PREFIX));
+  const agreementId = rows.find((r) => r.rentalAgreementId)?.rentalAgreementId || null;
+  if ((photoAiEnabled || hasT2) && agreementId && isStorageEnabled()) {
+    try {
+      const inspections = await prisma.rentalAgreementInspection.findMany({
+        where: { rentalAgreementId: String(agreementId) },
+        select: { phase: true, photoStorageRefs: true, capturedAt: true },
+      });
+      const checkout = inspections.find((i) => i.phase === 'CHECKOUT') || null;
+      const checkin = inspections.find((i) => i.phase === 'CHECKIN') || null;
+      const [outUrls, inUrls] = await Promise.all([
+        materializeStorageRefs(checkout?.photoStorageRefs || []),
+        materializeStorageRefs(checkin?.photoStorageRefs || []),
+      ]);
+      const first = (v) => (Array.isArray(v) ? v[0] : v) || null;
+      photoPairs = {};
+      for (const angle of REQUIRED_ANGLES) {
+        const o = first(outUrls[angle]);
+        const i = first(inUrls[angle]);
+        if (o || i) photoPairs[angle] = { checkout: o, checkin: i };
+      }
+      if (!Object.keys(photoPairs).length) photoPairs = null;
+    } catch (err) {
+      logger.warn('[checkin-audit] photo pair materialization failed (detail served without photos)', {
+        reservationId: String(reservationId), message: String(err?.message || err),
+      });
+      photoPairs = null;
+    }
+  }
+
   return {
     reservationId: String(reservationId),
     reservationNumber: rows[0].reservationNumber,
     vehicleLabel: rows[0].vehicleLabel,
     returnedAt: rows[0].returnedAt,
     closedByName: rows[0].closedByName,
-    findings: rows.map(projectFinding),
-    photoAiEnabled: false,
+    findings,
+    t2Scan,
+    photoPairs,
+    photoAiEnabled,
   };
 }
 
@@ -673,6 +835,51 @@ export async function dismissFinding(findingId, body = {}, scope = {}, deps = {}
   }
   if (!finding.vehicleId) { const e = new Error('Finding has no vehicle'); e.status = 400; throw e; }
 
+  // T2 findings carry everything the ledger append needs in their own
+  // detailsJson (damage-baseline-NOTES.md §4.2: "view from the flagged angle,
+  // dot defaulted to region center → agent adjusts, CHECKIN photo attached").
+  // Explicit body values always win; the derivation only fills what the
+  // reviewer's one-click dismiss left out.
+  let view = body.view;
+  let xPct = body.xPct;
+  let yPct = body.yPct;
+  let description = body.description || null;
+  let photoDataUrl = body.photoDataUrl;
+  if (finding.tier === 'T2') {
+    let details = null;
+    try { details = finding.detailsJson ? JSON.parse(finding.detailsJson) : null; } catch { details = null; }
+    if (details) {
+      if (!view) view = details.view || ANGLE_TO_VIEW[details.angle] || null;
+      if (xPct == null || yPct == null) {
+        // Region center (photo-relative 0..1) → diagram dot (0..100). The dot
+        // is a starting point the agent can move on the profile — the region
+        // was always "a pointer, not a measurement".
+        const r = details.region;
+        const cx = r && Number.isFinite(Number(r.x)) ? Number(r.x) + (Number(r.w) || 0) / 2 : 0.5;
+        const cy = r && Number.isFinite(Number(r.y)) ? Number(r.y) + (Number(r.h) || 0) / 2 : 0.5;
+        if (xPct == null) xPct = Math.max(0, Math.min(100, Math.round(cx * 100)));
+        if (yPct == null) yPct = Math.max(0, Math.min(100, Math.round(cy * 100)));
+      }
+      if (!description) description = details.description || null;
+      if (!photoDataUrl && details.checkinPhoto?.path) {
+        // The evidence photo IS the check-in photo the model flagged —
+        // download the bytes so the ledger append keeps its photo-required
+        // validation without the browser round-tripping a signed URL.
+        try {
+          const download = deps.download || downloadObject;
+          const bucket = deps.bucket || getPhotosBucket();
+          const obj = await download({ bucket, path: details.checkinPhoto.path });
+          const ct = details.checkinPhoto.contentType || obj.contentType || 'image/jpeg';
+          photoDataUrl = `data:${ct};base64,${Buffer.from(obj.body).toString('base64')}`;
+        } catch (err) {
+          logger.warn('[checkin-audit] could not attach the check-in photo to the baseline entry', {
+            findingId: finding.id, message: String(err?.message || err),
+          });
+        }
+      }
+    }
+  }
+
   // The existing manual-damage create owns validation (view, 0..100 dot,
   // photo REQUIRED) and the HARD_APPROVED + reviewer stamp. The internal
   // opts ride outside body so a route caller can never spoof provenance.
@@ -682,11 +889,11 @@ export async function dismissFinding(findingId, body = {}, scope = {}, deps = {}
   const created = await customerInspectionService.addManualDamage(
     finding.vehicleId,
     {
-      view: body.view,
-      xPct: body.xPct,
-      yPct: body.yPct,
-      description: body.description || null,
-      photoDataUrl: body.photoDataUrl,
+      view,
+      xPct,
+      yPct,
+      description,
+      photoDataUrl,
       reservationId: finding.reservationId,
       reservationNumber: finding.reservationNumber || null,
     },
