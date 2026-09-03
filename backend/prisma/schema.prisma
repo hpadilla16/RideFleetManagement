@@ -6213,6 +6213,19 @@ model KioskSession {
   nameUpdateCodeHash      String?
   nameUpdateCodeExpiresAt DateTime?
 
+  // F1 remote assist (2026-09-03, plan MUST-CHANGE 3): the Valet conversation
+  // bound to THIS session, written by the device-guarded path when the guest
+  // opens Get Help. Every remote (service-account) read of a kiosk session
+  // requires a conversationId that matches this column — the tenant token
+  // alone never reaches a session. The per-conversation SECRET is never
+  // stored here. Cleared (null) when the iframe resets/closes.
+  voziaConversationId String?
+  // Server-written marker (F1 truth): persistIdPhotos stored at least one
+  // LICENSE photo for this session. eventsJson also carries ID_PHOTOS_STORED,
+  // but the events endpoint accepts any client-fed name, so the assist-view
+  // (and F3's remote verify gate) read THIS column, never the event.
+  idPhotosStoredAt DateTime?
+
   // B5 Phase 1 — ONE payment intent per kiosk session. paymentIntentRef is the
   // transactionReferenceId minted once and REUSED by every payment-link retry
   // (two live intents = two genuine charges the reference dedupe is

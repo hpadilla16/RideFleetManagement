@@ -133,6 +133,16 @@ const ALLOWED = [
   // author+ticketId, and is idempotent per reservation (repeat call = ONE bus,
   // callCount+1, back to READY so the floor banner re-fires).
   ['POST', '/api/shuttle-requests'],
+  // Kiosk ↔ Valet remote assist F1 (2026-09-03, plan MUST-CHANGE 3 + SHOULD
+  // "historial antes de Get Help"). READ-ONLY, enum-only, PII-free view of
+  // ONE kiosk session. The route 404s unless the session is in the caller's
+  // tenant AND bound (KioskSession.voziaConversationId, written by the
+  // device-guarded kiosk path) to the ?conversationId the agent holds — so
+  // the tenant token alone can never enumerate or read kiosk sessions.
+  // NOTE: the mount also carries requireModuleAccess('kiosk'); the service
+  // account's role (AGENT) defaults kiosk=false → Hector grants the module to
+  // the account in People (access-control change, not made here).
+  ['GET', '/api/kiosk/admin/sessions/:id/assist-view'],
 ];
 
 // -----------------------------------------------------------------------------

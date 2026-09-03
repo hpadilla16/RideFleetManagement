@@ -1,8 +1,8 @@
 /**
  * Ride Kiosk — device-facing routes (Fase B1+B2, 2026-07-05). Mounted at
  * /api/kiosk in main.js BEFORE the authed admin router: no route here shares
- * a path with the admin ones (/devices*, GET /sessions exact), so admin
- * requests fall through to the authed router below this mount.
+ * a path with the admin ones (/devices*, GET /sessions exact, /admin/*), so
+ * admin requests fall through to the authed router below this mount.
  *
  * NO user auth. /pair is the single tokenless route (hashed single-use code
  * + TTL + lockout); everything else requires X-Kiosk-Token via
@@ -207,4 +207,13 @@ kioskRouter.post('/sessions/:id/name-update/confirm', deviceGuards, ok(
 // POST /api/kiosk/sessions/:id/escalate — { reason: ESCALATE_REASONS enum }
 kioskRouter.post('/sessions/:id/escalate', deviceGuards, ok(
   (req) => kioskSessionService.escalate(req.params.id, req.kioskDevice, req.body || {}),
+));
+
+// POST /api/kiosk/sessions/:id/vozia-conversation — { conversationId } (F1
+// remote assist, plan MUST-CHANGE 3). Binds the session to the Valet
+// conversation the shell received over postMessage; null/'' clears it.
+// Persists the id ONLY (never the per-conversation secret). Idempotent.
+// Every service-account read of this session then requires a matching id.
+kioskRouter.post('/sessions/:id/vozia-conversation', deviceGuards, ok(
+  (req) => kioskSessionService.bindVoziaConversation(req.params.id, req.kioskDevice, req.body || {}),
 ));

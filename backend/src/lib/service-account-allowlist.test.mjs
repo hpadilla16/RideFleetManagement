@@ -331,3 +331,21 @@ test('S28: precheckin staff-complete is allowed; adjacent precheckin surfaces st
   denied('POST', '/api/reservations/abc123/precheckin/staff-complete/extra'); // nested sneak
   denied('POST', '/api/reservations/abc123/agreement/payments/manual');       // sigue muerto
 });
+
+// ── Kiosk ↔ Valet remote assist F1 (2026-09-03) — assist-view read ──────────
+
+test('F1: kiosk assist-view is allowed (GET only, with query); every other kiosk surface stays denied', () => {
+  allowed('GET', '/api/kiosk/admin/sessions/ckabc123/assist-view');
+  allowed('GET', '/api/kiosk/admin/sessions/ckabc123/assist-view?conversationId=conv_1');
+  denied('POST', '/api/kiosk/admin/sessions/ckabc123/assist-view');   // read-only surface
+  denied('GET', '/api/kiosk/admin/sessions/ckabc123/assist-view/extra');
+  denied('GET', '/api/kiosk/admin/sessions/ckabc123');                 // no raw session read
+  denied('GET', '/api/kiosk/admin/sessions');                          // no enumeration
+  denied('GET', '/api/kiosk/sessions');                                // admin list = humans
+  denied('GET', '/api/kiosk/sessions/ckabc123/offers');                // device-token routes
+  denied('POST', '/api/kiosk/sessions/ckabc123/vozia-conversation');   // binding = device path only
+  denied('POST', '/api/kiosk/sessions/ckabc123/staff-assist/verify-id');
+  denied('GET', '/api/kiosk/devices');
+  denied('GET', '/api/kiosk/vozia-config');
+  denied('GET', '/api/kiosk/admin/sessions/a%2Fb/assist-view');        // encoded-slash sneak
+});

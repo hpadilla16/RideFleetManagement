@@ -793,6 +793,35 @@ test('verify-id: valid license photo persists via the base64 fallback (validated
   });
   assert.equal(result.verified, true);
   assert.equal(db.customers[0].idPhotoUrl, dataUrl, 'validated license lands in the legacy slot');
+  // F1 truth: the SERVER stamps idPhotosStoredAt when a license photo landed
+  assert.ok(db.sessions[0].idPhotosStoredAt instanceof Date, 'idPhotosStoredAt stamped');
+});
+
+test('F1 idPhotosStoredAt: not stamped without a license photo (no photo / selfie only / column already filled)', async () => {
+  seedKioskSession();
+  seedWorld();
+  const jpeg = Buffer.alloc(4096, 0x11);
+  jpeg[0] = 0xff; jpeg[1] = 0xd8; jpeg[2] = 0xff;
+  const dataUrl = `data:image/jpeg;base64,${jpeg.toString('base64')}`;
+
+  // no photo at all
+  await kioskCheckoutService.verifyId('ks1', DEVICE, { aamvaFields: GOOD_SCAN });
+  assert.equal(db.sessions[0].idPhotosStoredAt, undefined, 'no photo → no stamp');
+
+  // selfie only: not a license → no stamp (fallback mode has no selfie column anyway)
+  db.sessions[0].idVerifiedAt = null;
+  await kioskCheckoutService.verifyId('ks1', DEVICE, { aamvaFields: GOOD_SCAN, selfiePhoto: dataUrl });
+  assert.equal(db.sessions[0].idPhotosStoredAt, undefined, 'selfie only → no stamp');
+
+  // fallback mode with the legacy column ALREADY filled: nothing is stored → honest false
+  db.customers[0].idPhotoUrl = 'data:image/jpeg;base64,PRE-EXISTING';
+  db.sessions[0].idVerifiedAt = null;
+  await kioskCheckoutService.verifyId('ks1', DEVICE, { aamvaFields: GOOD_SCAN, licensePhoto: dataUrl });
+  assert.equal(db.customers[0].idPhotoUrl, 'data:image/jpeg;base64,PRE-EXISTING', 'never clobbers');
+  assert.equal(db.sessions[0].idPhotosStoredAt, undefined, 'nothing stored → no stamp');
+  // a client-fed ID_PHOTOS_STORED event must not be mistaken for the stamp
+  db.sessions[0].eventsJson.push({ at: 'x', step: 'ID', event: 'ID_PHOTOS_STORED', data: { storage: true } });
+  assert.equal(db.sessions[0].idPhotosStoredAt, undefined);
 });
 
 test('verify-id age parity (S4): implausible DOB and configured max age get their own codes', async () => {

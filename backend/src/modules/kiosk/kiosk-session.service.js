@@ -767,6 +767,169 @@ async function listSessions(scope = {}, { outcome, deviceId, locationId, take } 
   return { sessions, counts };
 }
 
+// ── F1 Kiosk ↔ Valet remote assist (2026-09-03) ─────────────────────────────
+//
+// Plan: doc/kiosk-valet-remote-assist-plan-2026-09-03.md — MUST-CHANGE 3
+// (binding BEFORE any remote read/write) + SHOULD "historial antes de Get
+// Help" (read-only assist-view). Contract consumed by Valet:
+// doc/kiosk-valet-remote-assist-VALET-PROMPT-2026-09-03.md §F1.
+
+// Valet conversation ids are opaque tokens (cuid/uuid-ish). Anything else
+// is rejected — the column is a lookup key, never free text.
+export const VOZIA_CONVERSATION_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+// Enum-shaped names only (event names, error codes, reasons). Same regex the
+// F0 kiosk uses for refusal reasons — free text is DROPPED, never normalized.
+export const ASSIST_ENUM_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+// The funnel steps the shell mirrors onto KioskSession.step (FUNNEL_STEP in
+// frontend/src/app/kiosk/page.js) + the server-written 'ID'. Anything else → null.
+export const ASSIST_STEPS = Object.freeze(['WELCOME', 'LOOKUP', 'ID', 'UPSELL', 'PAYMENT', 'SIGN', 'DONE']);
+export const ASSIST_TIMELINE_CAP = 200;
+
+/**
+ * POST /sessions/:id/vozia-conversation — device-guarded binding of the
+ * session to the Valet conversation the shell just received over postMessage.
+ * Persists ONLY the conversation id (the secret stays in page memory).
+ * null / '' clears the binding (iframe reset/close). Idempotent. Not gated on
+ * IN_PROGRESS on purpose: a guest can open Get Help on an ESCALATED session
+ * and the agent must still be able to read it.
+ */
+async function bindVoziaConversation(sessionId, device, { conversationId } = {}) {
+  const session = await getSessionForDevice(sessionId, device);
+  const raw = conversationId == null ? '' : String(conversationId).trim();
+  if (raw && !VOZIA_CONVERSATION_ID_RE.test(raw)) {
+    throw new KioskError('conversationId must be 1-64 chars of [A-Za-z0-9_-]', 422, 'INVALID_CONVERSATION_ID');
+  }
+  const next = raw || null;
+  if (session.voziaConversationId !== next) {
+    await prisma.kioskSession.update({
+      where: { id: session.id },
+      data: { voziaConversationId: next, lastActivityAt: new Date() },
+    });
+    logger.info('[kiosk] vozia conversation bound', {
+      sessionId: session.id, deviceId: device.id, tenantId: device.tenantId, bound: !!next,
+    });
+  }
+  return { ok: true, sessionId: session.id, bound: !!next };
+}
+
+function enumOrNull(value, re = ASSIST_ENUM_RE) {
+  const v = value == null ? '' : String(value);
+  return re.test(v) ? v : null;
+}
+
+function isoOrNull(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * Pure projection of eventsJson → the agent-facing timeline. Exported for
+ * tests. Rules (Valet prompt F1):
+ *   - `event` must match ASSIST_ENUM_RE, else the entry is DROPPED;
+ *   - `step` is whitelisted to ASSIST_STEPS (else null);
+ *   - `code` comes ONLY from data.code / data.reason / data.reasons[0] and
+ *     only when enum-shaped — `data` itself NEVER leaves (agreement numbers,
+ *     free-text reasons, photo refs live there);
+ *   - consecutive duplicates (same event+step+code) collapse into `count`,
+ *     keeping the FIRST `at` of the run;
+ *   - capped to the most recent ASSIST_TIMELINE_CAP entries after collapsing.
+ */
+export function projectAssistTimeline(events) {
+  const out = [];
+  for (const raw of Array.isArray(events) ? events : []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const event = enumOrNull(raw.event);
+    if (!event) continue;
+    const step = ASSIST_STEPS.includes(raw.step) ? raw.step : null;
+    const data = raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data) ? raw.data : null;
+    const code = data
+      ? (enumOrNull(data.code) || enumOrNull(data.reason)
+        || (Array.isArray(data.reasons) ? enumOrNull(data.reasons[0]) : null))
+      : null;
+    const at = isoOrNull(raw.at);
+    // Innovation F1 SHOULD-2: an entry with no parseable timestamp cannot be
+    // ordered or split around "asked for help", and the Valet client drops it
+    // anyway — do not ship a hole the other side has to defend against.
+    if (!at) continue;
+    const last = out[out.length - 1];
+    if (last && last.event === event && last.step === step && last.code === code) {
+      last.count += 1;
+      continue;
+    }
+    out.push({ at, step, event, count: 1, code });
+  }
+  return out.length > ASSIST_TIMELINE_CAP ? out.slice(out.length - ASSIST_TIMELINE_CAP) : out;
+}
+
+/**
+ * GET /api/kiosk/admin/sessions/:kioskSessionId/assist-view?conversationId=
+ * Read-only, enum-only, PII-free view for the Valet agent (service account).
+ * 404 unless the row is in the caller's tenant AND its voziaConversationId
+ * equals the query's — one indistinguishable error for wrong tenant / wrong
+ * conversation / unbound session, so the endpoint never confirms that a
+ * session id exists. `truth` comes from SERVER columns only (never from
+ * eventsJson, which the kiosk client can write freely).
+ */
+async function assistView(scope = {}, kioskSessionId, { conversationId } = {}) {
+  if (!scope?.tenantId) throw new KioskError('A tenant scope is required (super-admins pass ?tenantId=)', 400, 'TENANT_SCOPE_REQUIRED');
+  const conv = conversationId == null ? '' : String(conversationId).trim();
+  if (!VOZIA_CONVERSATION_ID_RE.test(conv)) {
+    throw new KioskError('conversationId is required', 400, 'CONVERSATION_ID_REQUIRED');
+  }
+  // Valet polls this behind a 1.5s timeout, so every read is a PRIMARY-KEY
+  // findUnique with a narrow select (never a scan, never the photo-bearing
+  // columns) and the projection below is pure in-memory work. Tenant is
+  // checked in JS rather than in the where-clause so the lookup stays on the
+  // PK index — a cross-tenant id resolves and is then rejected as 404, the
+  // same error a missing id gets.
+  const session = kioskSessionId
+    ? await prisma.kioskSession.findUnique({
+      where: { id: String(kioskSessionId) },
+      select: {
+        tenantId: true, outcome: true, step: true, voziaConversationId: true,
+        idVerifiedAt: true, idVerifyMethod: true, idPhotosStoredAt: true,
+        paymentIntentState: true, reservationId: true, checkoutSessionId: true,
+        eventsJson: true,
+      },
+    })
+    : null;
+  if (!session || session.tenantId !== scope.tenantId
+    || !session.voziaConversationId || session.voziaConversationId !== conv) {
+    throw new KioskError('Session not found', 404, 'SESSION_NOT_FOUND');
+  }
+
+  const [resv, cs] = await Promise.all([
+    session.reservationId
+      ? prisma.reservation.findUnique({
+        where: { id: session.reservationId },
+        select: { tenantId: true, vehicleId: true },
+      })
+      : null,
+    session.checkoutSessionId
+      ? prisma.checkoutSession.findUnique({
+        where: { id: session.checkoutSessionId },
+        select: { tenantId: true, currentStep: true },
+      })
+      : null,
+  ]);
+  const sameTenant = (row) => !!row && row.tenantId === scope.tenantId;
+
+  return {
+    outcome: session.outcome,
+    step: ASSIST_STEPS.includes(session.step) ? session.step : null,
+    truth: {
+      idVerified: !!session.idVerifiedAt,
+      idVerifyMethod: enumOrNull(session.idVerifyMethod),
+      vehicleAssigned: sameTenant(resv) && !!resv.vehicleId,
+      checkoutStep: sameTenant(cs) ? enumOrNull(cs.currentStep) : null,
+      paymentIntentState: enumOrNull(session.paymentIntentState),
+      idPhotosStored: !!session.idPhotosStoredAt,
+    },
+    timeline: projectAssistTimeline(session.eventsJson),
+  };
+}
+
 export const kioskSessionService = {
   createSession,
   appendEvents,
@@ -775,4 +938,6 @@ export const kioskSessionService = {
   assignVehicle,
   escalate,
   listSessions,
+  bindVoziaConversation,
+  assistView,
 };

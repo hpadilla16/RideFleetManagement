@@ -64,6 +64,24 @@ kioskAdminRouter.post('/devices/:id/revoke', ok(
   (req) => kioskDeviceService.revokeDevice(req.params.id, scopeFor(req)),
 ));
 
+// GET /api/kiosk/admin/sessions/:kioskSessionId/assist-view?conversationId=
+// F1 remote assist (2026-09-03) — the Valet agent's read-only, enum-only,
+// PII-free view of ONE kiosk session: outcome/step + server-truth columns
+// (idVerifiedAt, checkoutSession.currentStep, paymentIntentState, vehicle
+// assigned, license photos stored) + a projection of eventsJson (names,
+// counts, timestamps, enum codes — never `data`). 404 unless the session is
+// in the caller's tenant AND bound to exactly that conversationId (the
+// tenant token alone never reaches a session — plan MUST-CHANGE 3).
+// Path keeps the `/admin/` segment the Valet contract was issued with; it
+// cannot collide with the device router (no /admin/* there). Service
+// accounts reach it via service-account-allowlist.js; the mount's
+// requireAuth + tenantRateLimit + requireModuleAccess('kiosk') apply.
+kioskAdminRouter.get('/admin/sessions/:kioskSessionId/assist-view', ok(
+  (req) => kioskSessionService.assistView(scopeFor(req), req.params.kioskSessionId, {
+    conversationId: req.query?.conversationId ? String(req.query.conversationId) : undefined,
+  }),
+));
+
 // GET /api/kiosk/sessions?outcome=&deviceId=&locationId=&take= — list + per-outcome counts
 kioskAdminRouter.get('/sessions', ok(
   (req) => kioskSessionService.listSessions(scopeFor(req), {

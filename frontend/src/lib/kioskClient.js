@@ -298,6 +298,21 @@ export function completeSession(sessionId) {
   });
 }
 
+/**
+ * F1 remote assist (2026-09-03): bind the session to the Valet conversation
+ * the shell received over postMessage, so the agent's service account can
+ * read this session's assist-view (RFM 404s any read without a matching
+ * conversationId). Persists the id ONLY — the secret never leaves page
+ * memory. `null` clears the binding (iframe reset/close). Fire-and-forget
+ * like sendEvents: never throws, never blocks the guest wizard.
+ */
+export function bindVoziaConversation(sessionId, conversationId) {
+  if (!sessionId) return Promise.resolve(null);
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/vozia-conversation`, {
+    method: 'POST', body: { conversationId: conversationId || null },
+  }).catch(() => null);
+}
+
 // reason must be one of the backend's canonical ESCALATE_REASONS.
 export function escalateSession(sessionId, reason) {
   return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/escalate`, {

@@ -275,7 +275,27 @@ export function evaluateIdRules({ fields = {}, pickupAt, returnAt, locationConfi
  * customerField names an EMPTY Customer column (idPhotoUrl / licenseBackUrl),
  * the stored ref ("bucket:path" convention) or the validated data URL
  * (fallback mode) is written through to it.
+ *
+ * F1 remote assist (2026-09-03): once at least one LICENSE photo actually
+ * landed somewhere server-side (bucket object, or the legacy Customer column
+ * in fallback mode), KioskSession.idPhotosStoredAt is stamped. That column —
+ * never the ID_PHOTOS_STORED telemetry event, which the events endpoint lets
+ * the client write — is what the assist-view reports as `idPhotosStored`
+ * and what F3's remote verify will gate on.
  */
+/** License-family kinds: 'license' (guest scan / name-update), 'license-front' / 'license-back' (staff assist). */
+const isLicensePhotoKind = (kind) => /^license/i.test(String(kind || ''));
+
+/** Server-written marker for the assist-view (F1) — only when a LICENSE photo was stored. */
+async function stampIdPhotosStored(session, stored) {
+  if (!stored.some((p) => isLicensePhotoKind(p.kind))) return;
+  if (session.idPhotosStoredAt) return; // first store wins; idempotent
+  await prisma.kioskSession.update({
+    where: { id: session.id },
+    data: { idPhotosStoredAt: new Date() },
+  }).catch(() => {});
+}
+
 export async function persistIdPhotos({ session, device, customer, photos }) {
   try {
     const provided = photos.filter((p) => p.dataUrl && p.buffer);
@@ -293,6 +313,7 @@ export async function persistIdPhotos({ session, device, customer, photos }) {
       }
       if (Object.keys(patch).length && customer) {
         await prisma.customer.update({ where: { id: customer.id }, data: patch }).catch(() => {});
+        await stampIdPhotosStored(session, provided.filter((p) => p.customerField && patch[p.customerField]));
       }
       logger.warn('[kiosk-checkout] photo storage disabled — base64 fallback used where a legacy column exists', {
         sessionId: session.id, tenantId: device.tenantId, kinds: provided.map((p) => p.kind),
@@ -320,6 +341,7 @@ export async function persistIdPhotos({ session, device, customer, photos }) {
       if (Object.keys(patch).length && customer) {
         await prisma.customer.update({ where: { id: customer.id }, data: patch }).catch(() => {});
       }
+      await stampIdPhotosStored(session, refs);
       await recordSessionTelemetry(session, {
         step: 'ID', event: 'ID_PHOTOS_STORED', data: { storage: true, refs },
       });

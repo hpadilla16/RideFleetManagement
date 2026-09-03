@@ -30,6 +30,8 @@ import {
   maskCustomerName,
   MAX_SESSION_EVENTS,
   MAX_LOOKUP_MISSES,
+  projectAssistTimeline,
+  ASSIST_TIMELINE_CAP,
 } from './kiosk-session.service.js';
 import { setKioskSmartMatcher } from './kiosk-smart-match.js';
 import { samePickupDay } from './kiosk-session.service.js';
@@ -1114,4 +1116,221 @@ test('B3g: fail matchType telemetry on a miss', async () => {
   );
   const ev = session.eventsJson.find((e) => e.event === 'LOOKUP_RESULT');
   assert.deepEqual(ev.data, { matchType: 'fail', candidateCount: 0 });
+});
+
+// ---------------------------------------------------------------------------
+// F1 Kiosk ↔ Valet remote assist (2026-09-03): binding + assist-view
+// ---------------------------------------------------------------------------
+
+test('F1 bind: sets, is idempotent, clears on null/"", device-scoped 404, validation 422', async () => {
+  const device = seedDevice();
+  const session = seedSession();
+
+  const bound = await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: ' conv_ABC-123 ' });
+  assert.deepEqual(bound, { ok: true, sessionId: 'ks1', bound: true });
+  assert.equal(session.voziaConversationId, 'conv_ABC-123', 'trimmed id persisted');
+  const stamp = session.lastActivityAt;
+
+  // idempotent: same id → no write (lastActivityAt untouched)
+  await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: 'conv_ABC-123' });
+  assert.equal(session.lastActivityAt, stamp);
+
+  // validation: free text / too long / path-ish → 422, binding untouched
+  for (const bad of ['juan perez', 'a'.repeat(65), 'conv/../x', 'conv?x=1', 'conv.id', { id: 1 }]) {
+    await rejects(
+      kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: bad }),
+      { status: 422, code: 'INVALID_CONVERSATION_ID' },
+    );
+  }
+  assert.equal(session.voziaConversationId, 'conv_ABC-123');
+
+  // clear on null and on ''
+  let cleared = await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: null });
+  assert.deepEqual(cleared, { ok: true, sessionId: 'ks1', bound: false });
+  assert.equal(session.voziaConversationId, null);
+  await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: 'conv2' });
+  cleared = await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: '' });
+  assert.equal(cleared.bound, false);
+  assert.equal(session.voziaConversationId, null);
+  await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), {});
+  assert.equal(session.voziaConversationId, null);
+
+  // never the secret: the payload's other fields are ignored entirely
+  await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: 'conv3', secret: 's3cret' });
+  assert.ok(!JSON.stringify(session).includes('s3cret'));
+
+  // device binding: another device (even same tenant) → 404
+  const other = seedDevice({ id: 'dev2', tokenHash: sha256Hex('other') });
+  await rejects(
+    kioskSessionService.bindVoziaConversation('ks1', deviceCtx(other), { conversationId: 'conv9' }),
+    { status: 404, code: 'SESSION_NOT_FOUND' },
+  );
+  assert.equal(session.voziaConversationId, 'conv3');
+});
+
+test('F1 bind: an ESCALATED session can still be bound (guest opens Get Help after escalating)', async () => {
+  const device = seedDevice();
+  const session = seedSession({ outcome: 'ESCALATED', escalatedReason: 'ID_SCAN_FAILED', endedAt: new Date() });
+  const out = await kioskSessionService.bindVoziaConversation('ks1', deviceCtx(device), { conversationId: 'conv-esc' });
+  assert.equal(out.bound, true);
+  assert.equal(session.voziaConversationId, 'conv-esc');
+});
+
+test('F1 assist-view: 404 (one indistinguishable error) for wrong tenant / wrong conversationId / unbound; 400 without conversationId or scope', async () => {
+  seedDevice();
+  seedSession({ voziaConversationId: 'conv-1' });
+  const unbound = seedSession({ id: 'ks2' });
+
+  // happy path resolves (shape asserted in the next test)
+  const ok = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-1' });
+  assert.equal(ok.outcome, 'IN_PROGRESS');
+
+  await rejects(kioskSessionService.assistView({ tenantId: 't2' }, 'ks1', { conversationId: 'conv-1' }), { status: 404, code: 'SESSION_NOT_FOUND' });
+  await rejects(kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-2' }), { status: 404, code: 'SESSION_NOT_FOUND' });
+  await rejects(kioskSessionService.assistView({ tenantId: 't1' }, 'ks2', { conversationId: 'conv-1' }), { status: 404, code: 'SESSION_NOT_FOUND' });
+  await rejects(kioskSessionService.assistView({ tenantId: 't1' }, 'nope', { conversationId: 'conv-1' }), { status: 404, code: 'SESSION_NOT_FOUND' });
+  assert.equal(unbound.voziaConversationId, undefined, 'read path never writes a binding');
+
+  // an unbound row must not match an "empty" conversationId either (400, not a hit)
+  await rejects(kioskSessionService.assistView({ tenantId: 't1' }, 'ks2', { conversationId: '' }), { status: 400, code: 'CONVERSATION_ID_REQUIRED' });
+  await rejects(kioskSessionService.assistView({ tenantId: 't1' }, 'ks2', {}), { status: 400, code: 'CONVERSATION_ID_REQUIRED' });
+  await rejects(kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'not valid!' }), { status: 400, code: 'CONVERSATION_ID_REQUIRED' });
+  // super-admin without ?tenantId → fail closed
+  await rejects(kioskSessionService.assistView({}, 'ks1', { conversationId: 'conv-1' }), { status: 400, code: 'TENANT_SCOPE_REQUIRED' });
+});
+
+test('F1 assist-view: truth comes from SERVER columns, never from eventsJson; exact response shape', async () => {
+  seedDevice();
+  // Client-fed telemetry CLAIMS everything passed — none of it is server truth.
+  const forged = [
+    { at: '2026-09-03T14:00:00.000Z', step: 'ID', event: 'VERIFY_ID_PASSED', data: null },
+    { at: '2026-09-03T14:00:01.000Z', step: 'ID', event: 'ID_PHOTOS_STORED', data: { storage: true, refs: [{ path: 'kiosk-id/ks1/license.jpg' }] } },
+    { at: '2026-09-03T14:00:02.000Z', step: 'PAYMENT', event: 'SANDBOX_PAYMENT_STAMPED', data: null },
+  ];
+  seedSession({
+    voziaConversationId: 'conv-1', step: 'PAYMENT', eventsJson: forged,
+    reservationId: 'res1', checkoutSessionId: 'cs1',
+    idVerifiedAt: null, idVerifyMethod: null, idPhotosStoredAt: null, paymentIntentState: null,
+  });
+  seedReservation({ vehicleId: null });
+  db.checkoutSessions.push({ id: 'cs1', tenantId: 't1', reservationId: 'res1', currentStep: 'PAYMENT_PENDING' });
+
+  let view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-1' });
+  assert.deepEqual(Object.keys(view), ['outcome', 'step', 'truth', 'timeline']);
+  assert.deepEqual(view.truth, {
+    idVerified: false, idVerifyMethod: null, vehicleAssigned: false,
+    checkoutStep: 'PAYMENT_PENDING', paymentIntentState: null, idPhotosStored: false,
+  });
+  assert.equal(view.step, 'PAYMENT');
+  assert.equal(view.timeline.length, 3, 'the forged events still show as telemetry…');
+  assert.ok(!JSON.stringify(view).includes('kiosk-id/ks1'), '…but their data never leaves');
+
+  // Now the SERVER stamps the columns → truth flips, events unchanged.
+  Object.assign(db.sessions[0], {
+    idVerifiedAt: new Date(), idVerifyMethod: 'STAFF_OVERRIDE', idPhotosStoredAt: new Date(), paymentIntentState: 'PAID',
+  });
+  db.reservations[0].vehicleId = 'veh1';
+  db.checkoutSessions[0].currentStep = 'CLOSED';
+  view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-1' });
+  assert.deepEqual(view.truth, {
+    idVerified: true, idVerifyMethod: 'STAFF_OVERRIDE', vehicleAssigned: true,
+    checkoutStep: 'CLOSED', paymentIntentState: 'PAID', idPhotosStored: true,
+  });
+
+  // No reservation / no checkout session yet → false / null, never a throw.
+  seedSession({ id: 'ks3', voziaConversationId: 'conv-3', step: 'LOOKUP' });
+  view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks3', { conversationId: 'conv-3' });
+  assert.deepEqual(view.truth, {
+    idVerified: false, idVerifyMethod: null, vehicleAssigned: false,
+    checkoutStep: null, paymentIntentState: null, idPhotosStored: false,
+  });
+  assert.deepEqual(view.timeline, []);
+
+  // A cross-tenant checkout-session / reservation id is not read (scoped lookups).
+  seedSession({ id: 'ks4', voziaConversationId: 'conv-4', reservationId: 'resX', checkoutSessionId: 'csX' });
+  db.reservations.push({ id: 'resX', tenantId: 't2', vehicleId: 'vehX' });
+  db.checkoutSessions.push({ id: 'csX', tenantId: 't2', currentStep: 'CLOSED' });
+  view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks4', { conversationId: 'conv-4' });
+  assert.equal(view.truth.vehicleAssigned, false);
+  assert.equal(view.truth.checkoutStep, null);
+});
+
+test('F1 timeline projection: enum-only names, step whitelist, code from reason/reasons[0], data never leaks, collapsing, cap', () => {
+  const events = [
+    { at: '2026-09-03T14:00:00.000Z', step: 'LOOKUP', event: 'STEP', data: null },
+    { at: '2026-09-03T14:00:05.000Z', step: 'LOOKUP', event: 'LOOKUP_RESULT', data: { matchType: 'exact', candidateCount: 1 } },
+    // consecutive duplicates → count (first `at` kept)
+    { at: '2026-09-03T14:01:00.000Z', step: 'ID', event: 'VERIFY_ID_FAILED', data: { reasons: ['NAME_MISMATCH'], agreementNumber: 'RA-778899' } },
+    { at: '2026-09-03T14:01:30.000Z', step: 'ID', event: 'VERIFY_ID_FAILED', data: { reasons: ['NAME_MISMATCH'] } },
+    // same event, different code → separate entry
+    { at: '2026-09-03T14:02:00.000Z', step: 'ID', event: 'VERIFY_ID_FAILED', data: { reasons: ['LICENSE_EXPIRED'] } },
+    // free-text event name → DROPPED (not normalized)
+    { at: '2026-09-03T14:02:10.000Z', step: 'ID', event: 'juan perez 787-555-0100', data: null },
+    { at: '2026-09-03T14:02:11.000Z', step: 'ID', event: 'lowercase_event', data: null },
+    // unknown / client-invented step → null; code from data.reason (F0 refusal)
+    { at: '2026-09-03T14:03:00.000Z', step: 'WHATEVER', event: 'VOZIA_COMMAND_REFUSED', data: { command: 'flow_completed', reason: 'CHECKOUT_NOT_CLOSED' } },
+    // data.code free text → no code; data.reason free text → no code
+    { at: '2026-09-03T14:03:10.000Z', step: null, event: 'ESCALATED', data: { code: 'see staff at desk 3', reason: 'customer said no' } },
+    // junk entries ignored
+    null, 'garbage', { data: { x: 1 } }, { event: 42 },
+    // bad timestamp → DROPPED (SHOULD-2: we never ship an entry we cannot order)
+    { at: 'not-a-date', step: 'DONE', event: 'SESSION_WIPED', data: null },
+    { at: '2026-09-03T14:04:00.000Z', step: 'DONE', event: 'SESSION_WIPED', data: null },
+  ];
+  const timeline = projectAssistTimeline(events);
+  assert.deepEqual(timeline, [
+    { at: '2026-09-03T14:00:00.000Z', step: 'LOOKUP', event: 'STEP', count: 1, code: null },
+    { at: '2026-09-03T14:00:05.000Z', step: 'LOOKUP', event: 'LOOKUP_RESULT', count: 1, code: null },
+    { at: '2026-09-03T14:01:00.000Z', step: 'ID', event: 'VERIFY_ID_FAILED', count: 2, code: 'NAME_MISMATCH' },
+    { at: '2026-09-03T14:02:00.000Z', step: 'ID', event: 'VERIFY_ID_FAILED', count: 1, code: 'LICENSE_EXPIRED' },
+    { at: '2026-09-03T14:03:00.000Z', step: null, event: 'VOZIA_COMMAND_REFUSED', count: 1, code: 'CHECKOUT_NOT_CLOSED' },
+    { at: '2026-09-03T14:03:10.000Z', step: null, event: 'ESCALATED', count: 1, code: null },
+    { at: '2026-09-03T14:04:00.000Z', step: 'DONE', event: 'SESSION_WIPED', count: 1, code: null },
+  ]);
+  const serialized = JSON.stringify(timeline);
+  for (const leak of ['RA-778899', 'agreementNumber', 'matchType', 'exact', 'flow_completed', 'desk 3', 'customer said', 'juan', 'data']) {
+    assert.ok(!serialized.includes(leak), `must not leak "${leak}"`);
+  }
+  assert.ok(timeline.every((e) => Object.keys(e).join(',') === 'at,step,event,count,code'));
+
+  // cap: most recent ASSIST_TIMELINE_CAP entries survive (after collapsing)
+  const many = Array.from({ length: MAX_SESSION_EVENTS }, (_, i) => ({ at: new Date(Date.UTC(2026, 8, 3, 0, 0, i)).toISOString(), step: 'ID', event: `E${i}`, data: null }));
+  const capped = projectAssistTimeline(many);
+  assert.equal(capped.length, ASSIST_TIMELINE_CAP);
+  assert.equal(capped[0].event, `E${MAX_SESSION_EVENTS - ASSIST_TIMELINE_CAP}`);
+  assert.equal(capped.at(-1).event, `E${MAX_SESSION_EVENTS - 1}`);
+  // 500 identical events collapse to ONE entry with count 500
+  const firstAt = new Date(Date.UTC(2026, 8, 3, 1, 0, 0)).toISOString();
+  const same = Array.from({ length: MAX_SESSION_EVENTS }, (_, i) => ({ at: new Date(Date.UTC(2026, 8, 3, 1, 0, i)).toISOString(), step: 'ID', event: 'ID_PHOTO_EXTRACT', data: { ok: false } }));
+  assert.deepEqual(projectAssistTimeline(same), [{ at: firstAt, step: 'ID', event: 'ID_PHOTO_EXTRACT', count: MAX_SESSION_EVENTS, code: null }]);
+  // Innovation F1 SHOULD-2: an entry we cannot timestamp is dropped, not shipped
+  // as `at: null` for the other side to defend against.
+  assert.deepEqual(projectAssistTimeline([
+    { at: 'x', step: 'ID', event: 'VERIFY_ID_FAILED', data: null },
+    { at: null, step: 'ID', event: 'VERIFY_ID_FAILED', data: null },
+    { at: firstAt, step: 'ID', event: 'VERIFY_ID_PASSED', data: null },
+  ]), [{ at: firstAt, step: 'ID', event: 'VERIFY_ID_PASSED', count: 1, code: null }]);
+  assert.deepEqual(projectAssistTimeline(null), []);
+  assert.deepEqual(projectAssistTimeline('nope'), []);
+});
+
+test('F1 routes are wired: device POST (guarded) + admin GET under /admin/ (no device-router collision)', async () => {
+  const { kioskRouter } = await import('./kiosk.routes.js');
+  const { kioskAdminRouter } = await import('./kiosk-admin.routes.js');
+
+  const bind = kioskRouter.stack.find((l) => l.route?.path === '/sessions/:id/vozia-conversation' && l.route.methods.post)?.route;
+  assert.ok(bind, 'device binding route exists');
+  // deviceGuards (meta + rate limit + requireKioskDevice) + handler
+  assert.equal(bind.stack.length, 4, 'binding route carries the device guard stack');
+  assert.ok(bind.stack.some((l) => l.handle === requireKioskDevice), 'requireKioskDevice is on the binding route');
+
+  const view = kioskAdminRouter.stack.find((l) => l.route?.path === '/admin/sessions/:kioskSessionId/assist-view' && l.route.methods.get)?.route;
+  assert.ok(view, 'admin assist-view route exists');
+  assert.equal(view.stack.length, 1, 'no extra role gate — module + allowlist + binding are the gates');
+
+  // The device router must NOT own anything under /admin/* (it is mounted
+  // first and would shadow the authed router).
+  assert.ok(!kioskRouter.stack.some((l) => String(l.route?.path || '').startsWith('/admin')));
+  // …and the assist-view must not be reachable through a device-guarded path.
+  assert.ok(!kioskRouter.stack.some((l) => String(l.route?.path || '').includes('assist-view')));
 });

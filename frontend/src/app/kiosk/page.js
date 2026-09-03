@@ -26,6 +26,7 @@ import {
   attachReservation,
   completeSession,
   createSession,
+  bindVoziaConversation,
   escalateSession,
   getAgreement,
   getOffers,
@@ -173,6 +174,14 @@ export default function KioskPage() {
     // over", DONE auto-reset) records SESSION_WIPED. Fire-and-forget.
     if (sessionRef.current?.id) {
       sendEvents(sessionRef.current.id, { step: null, event: 'SESSION_WIPED' });
+      // F1: the dead session must not stay bound to a conversation. Goes
+      // through the SAME serialized chain (QA MINOR-1): a bind already in
+      // flight for this very session could otherwise land AFTER this null and
+      // re-bind the abandoned row, leaving the agent reading a check-in the
+      // guest walked away from. Pinned to the OUTGOING id so a later bind for
+      // the next session is unaffected. restart_flow keeps the conversation
+      // and re-binds the NEW session when it is created (effect below).
+      bindVoziaConvFor(sessionRef.current.id, null);
     }
     genRef.current += 1;
     setSession(null);
@@ -317,6 +326,22 @@ export default function KioskPage() {
     return () => clearTimeout(timer);
   }, [agentToast]);
 
+  // F1 remote assist: server-side binding session ↔ conversation (plan
+  // MUST-CHANGE 3). Fire-and-forget, but SERIALIZED: a reset (null) and the
+  // next conversation's id can be posted back-to-back, and two independent
+  // fetches could land out of order — the late null would erase the fresh
+  // binding. Chaining keeps last-write-wins honest. Never rejects.
+  const voziaBindChainRef = useRef(Promise.resolve());
+  const bindVoziaConvFor = useCallback((sessionId, conversationId) => {
+    if (!sessionId) return;
+    voziaBindChainRef.current = voziaBindChainRef.current
+      .then(() => bindVoziaConversation(sessionId, conversationId))
+      .catch(() => null);
+  }, []);
+  const bindVoziaConv = useCallback((conversationId) => {
+    bindVoziaConvFor(sessionRef.current?.id, conversationId);
+  }, [bindVoziaConvFor]);
+
   const onVoziaConversation = useCallback(({ conversationId, secret }) => {
     if (!conversationId || !secret) {
       // Reset/close from the iframe → discard the identity INSTANTLY.
@@ -324,13 +349,25 @@ export default function KioskPage() {
       voziaAppliedIdsRef.current = new Set();
       voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
       setVoziaConvActive(false);
+      bindVoziaConv(null); // clear the server-side binding (best-effort)
       return;
     }
     voziaIdentityRef.current = { conversationId, secret };
     voziaAppliedIdsRef.current = new Set(); // applied-ids are per conversation
     voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
     setVoziaConvActive(true);
-  }, []);
+    bindVoziaConv(conversationId); // best-effort, never blocks the flow
+  }, [bindVoziaConv]);
+
+  // Get Help can be opened on WELCOME (no session yet). When the session is
+  // created while a conversation is already active, bind it then — otherwise
+  // the agent's assist-view would 404 for the whole check-in.
+  useEffect(() => {
+    if (session?.id && voziaConvActive && voziaIdentityRef.current.conversationId) {
+      bindVoziaConv(voziaIdentityRef.current.conversationId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
 
   /**
    * Agent → kiosk commands (§3). Redelivered ~2s until acked: apply is
@@ -1257,6 +1294,11 @@ export default function KioskPage() {
             voziaAppliedIdsRef.current = new Set();
             voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
             setVoziaConvActive(false);
+            // Innovation F1 MUST-CHANGE: unmounting the iframe ends the chat, but
+            // the wizard session keeps running underneath — without this the row
+            // keeps its voziaConversationId and the agent goes on reading this
+            // guest's timeline and truth after they closed the conversation.
+            bindVoziaConv(null);
             setVoziaOpen(false);
           }}
         />
