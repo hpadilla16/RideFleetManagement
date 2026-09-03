@@ -1308,6 +1308,11 @@ export default function KioskPage() {
             voziaIdentityRef.current = { conversationId: null, secret: null };
             voziaAppliedIdsRef.current = new Set();
             voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
+            // The reported step dies with the identity HERE too — this is the third wipe site and
+            // the only one that does not go through a session wipe, so a stale step could otherwise
+            // ride into the NEXT conversation and report the previous guest's position as this
+            // guest's. Same reason the secret is discarded on this line. (Caught by the caller test.)
+            lastVoziaStepRef.current = null;
             setVoziaConvActive(false);
             // Innovation F1 MUST-CHANGE: unmounting the iframe ends the chat, but
             // the wizard session keeps running underneath — without this the row
