@@ -51,7 +51,9 @@ import { StaffAssistScreen } from '../../components/kiosk/StaffAssistScreen';
 import { NameUpdateFlow } from '../../components/kiosk/NameUpdateFlow';
 import { VoziaHelpOverlay } from '../../components/kiosk/VoziaHelpOverlay';
 import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
-import { ackKioskCommand, postKioskState, voziaStepForScreen } from '../../lib/voziaBridge';
+import {
+  ackKioskCommand, decideFlowCompletedAck, noteFirstRefusal, postKioskState, voziaPendingStepKey, voziaStepForScreen,
+} from '../../lib/voziaBridge';
 import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
 
 const DONE_RESET_S = 30;
@@ -112,7 +114,12 @@ export default function KioskPage() {
   // ── B3f VozIA embed (contract: voice-ai-customer-service/KIOSK-EMBED.md) ──
   const [voziaOpen, setVoziaOpen] = useState(false);
   const [agentMsg, setAgentMsg] = useState(''); // show_message banner (OK-dismiss)
-  const [agentToast, setAgentToast] = useState(''); // transient ~2.5s toast
+  // Transient toast: { text, ms } — 2.5s default for the ✓ "agent updated"
+  // cue; the F0 refusal toast asks for 6s (GD: only cue in a failure state).
+  const [agentToast, setAgentToastRaw] = useState(null);
+  const setAgentToast = useCallback((text, ms = 2500) => {
+    setAgentToastRaw(text ? { text, ms } : null);
+  }, []);
   // remount key for retry_step — bumping it re-enters the current screen clean
   const [stepEpoch, setStepEpoch] = useState(0);
   // Conversation identity — MEMORY ONLY (never localStorage). A stale secret
@@ -120,6 +127,16 @@ export default function KioskPage() {
   // iframe's null/null reset, on session wipe, and replaced on new identity.
   const voziaIdentityRef = useRef({ conversationId: null, secret: null });
   const voziaAppliedIdsRef = useRef(new Set());
+  // F0: flow_completed commands whose completeSession() round-trip is still
+  // in flight, keyed `${conversationId}:${commandId}` (command ids are only
+  // unique per conversation). Redelivery every ~2s must not fire a second
+  // /complete while the first is pending; entries self-clear on settle, so
+  // this never needs the wipe/restore dance the applied-ids set gets.
+  const voziaInFlightRef = useRef(new Set());
+  // F0 storm guard: refused flow_completed keys (same shape) that already
+  // showed the toast + wrote the VOZIA_COMMAND_REFUSED event. A redelivered
+  // id (lost ack) still re-proves against /complete, silently.
+  const voziaRefusedIdsRef = useRef(new Set());
   const [voziaConvActive, setVoziaConvActive] = useState(false);
   // Co-presence extras: client-side verify retry counter + last error code
   // for the active step (strict enum, consumed by the next kiosk-state post).
@@ -182,6 +199,7 @@ export default function KioskPage() {
     // (restart_flow snapshots + restores around this call on purpose.)
     voziaIdentityRef.current = { conversationId: null, secret: null };
     voziaAppliedIdsRef.current = new Set();
+    voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
     setVoziaConvActive(false);
     setVoziaOpen(false);
     setAgentMsg('');
@@ -273,6 +291,9 @@ export default function KioskPage() {
       totalSteps: 5,
       attempts: Math.max(1, verifyAttemptsRef.current || 1),
       errorCode: errorCode || voziaErrorRef.current || undefined,
+      // v4 additive: lets Valet bind this conversation to the RFM kiosk
+      // session (plan MUST-CHANGE 3). Ignored by v3 hosts, never a 400.
+      kioskSessionId: sessionRef.current?.id || undefined,
     });
     voziaErrorRef.current = null;
   }, [vozia?.host]);
@@ -289,10 +310,10 @@ export default function KioskPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, voziaConvActive]);
 
-  // Transient agent-action toast (~2.5s, non-blocking).
+  // Transient agent-action toast (per-call duration, non-blocking).
   useEffect(() => {
     if (!agentToast) return undefined;
-    const timer = setTimeout(() => setAgentToast(''), 2500);
+    const timer = setTimeout(() => setAgentToastRaw(null), agentToast.ms || 2500);
     return () => clearTimeout(timer);
   }, [agentToast]);
 
@@ -301,11 +322,13 @@ export default function KioskPage() {
       // Reset/close from the iframe → discard the identity INSTANTLY.
       voziaIdentityRef.current = { conversationId: null, secret: null };
       voziaAppliedIdsRef.current = new Set();
+      voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
       setVoziaConvActive(false);
       return;
     }
     voziaIdentityRef.current = { conversationId, secret };
     voziaAppliedIdsRef.current = new Set(); // applied-ids are per conversation
+    voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
     setVoziaConvActive(true);
   }, []);
 
@@ -366,30 +389,97 @@ export default function KioskPage() {
       case 'show_message':
         setAgentMsg(String(cmd.message || '').slice(0, 500));
         break;
-      case 'flow_completed': {
-        // The agent finished the check-in from RFM — the shared checkout-
-        // session is CLOSED, so a real complete() returns the actual
-        // key-handoff info AND flips KioskSession to COMPLETED (honest
-        // KPIs). Fall back to the generic DONE screen if it fails.
-        ui.setSessionActive(false);
-        setDoneCountdown(DONE_RESET_S);
-        setVoziaOpen(false);
-        const gen = genRef.current;
-        (async () => {
-          try {
-            const out = await completeSession(sessionRef.current.id);
-            if (gen !== genRef.current) return;
-            setDoneData(out);
-          } catch { /* fallback: DONE with defaults (staff handoff) */ }
-          if (gen === genRef.current) setScreen('DONE');
-        })();
-        break;
-      }
+      // 'flow_completed' is NOT handled here — it is async and its ack
+      // depends on the server's answer (see completeFromAgent, intercepted
+      // in onVoziaCommands before the idempotency set is touched).
       default:
         break; // unknown command — ack anyway so it stops redelivering
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t, resetAll, ui]);
+
+  /**
+   * F0 (G3, 2026-09-03): honest `flow_completed`. The agent claims the
+   * check-in is CLOSED in RFM; the kiosk PROVES it with completeSession()
+   * (hard gate 409 CHECKOUT_NOT_CLOSED) BEFORE touching the screen, while
+   * the overlay stays mounted and the session stays active.
+   *   success → DONE (key handoff), countdown, overlay closed, plain ack,
+   *             command marked applied.
+   *   failure → screen unchanged, overlay/iframe alive, ack `refused:true`
+   *             with an enum-like reason, 6s toast naming the pending step.
+   *             NOT marked applied: a refused ack clears the command from
+   *             Valet's queue (the agent issues a NEW one once the blocker is
+   *             fixed); the same id only comes back if the ack was lost, and
+   *             then we re-prove against /complete instead of blindly acking.
+   * Fatal client errors (unpaired / offline) route like every other handler
+   * (routeFatal) — the guest never reads "falta un paso" on a dead device.
+   * Storm guard: toast + telemetry event fire once per conversation+command
+   * (voziaRefusedIdsRef); silent re-proofs never fill eventsJson.
+   * Conversation change mid-await (iframe reset / new identity / guest ✕)
+   * does not bump genRef: on success the session DID complete → DONE, but
+   * no applied-mark / toast / ack for the dead conversation; on failure →
+   * nothing at all (after fatal routing, which is device truth).
+   * The old behavior (DONE on ANY outcome + iframe unmount) could show
+   * "listo" with nothing signed or paid and disconnect the agent.
+   */
+  const completeFromAgent = useCallback(async (cmd) => {
+    const host = vozia?.host;
+    const identity = voziaIdentityRef.current;
+    const key = `${identity.conversationId}:${cmd.id}`;
+    const gen = genRef.current;
+    const sessionId = sessionRef.current?.id;
+    const sameConversation = () => identity.conversationId === voziaIdentityRef.current.conversationId;
+    const refuse = (decision) => {
+      if (!sameConversation()) return;
+      if (noteFirstRefusal(voziaRefusedIdsRef.current, key)) {
+        const stepKey = voziaPendingStepKey(screenRef.current);
+        setAgentToast(
+          stepKey
+            ? t('kiosk.voziaCompleteRefusedStep', { step: t(stepKey) })
+            : t('kiosk.voziaCompleteRefused'),
+          6000,
+        );
+        if (sessionId) {
+          sendEvents(sessionId, { step: null, event: 'VOZIA_COMMAND_REFUSED', data: { command: 'flow_completed', reason: decision.reason } });
+        }
+      }
+      ackKioskCommand(host, identity, cmd.id, decision);
+    };
+
+    if (!sessionId) {
+      refuse(decideFlowCompletedAck({ ok: false, errorCode: 'NO_SESSION' }));
+      return;
+    }
+    let out;
+    try {
+      out = await completeSession(sessionId);
+    } catch (e) {
+      if (gen !== genRef.current) return; // wiped mid-flight: no ack, no screen change
+      const routed = routeFatal(e);
+      if (!sameConversation()) return;
+      const decision = decideFlowCompletedAck({ ok: false, errorCode: e?.code });
+      if (routed) {
+        // Device is on PAIRING / OUT_OF_SERVICE now — still tell the agent,
+        // but no toast over a screen the guest can't act on.
+        ackKioskCommand(host, identity, cmd.id, decision);
+      } else {
+        refuse(decision);
+      }
+      return;
+    }
+    if (gen !== genRef.current) return;
+    // Server truth: the session is COMPLETED regardless of who is on the chat.
+    setDoneData(out);
+    setDoneCountdown(DONE_RESET_S);
+    ui.setSessionActive(false);
+    setScreen('DONE');
+    setVoziaOpen(false);
+    sendEvents(sessionId, { step: null, event: 'VOZIA_COMMAND_APPLIED', data: { command: 'flow_completed' } });
+    if (!sameConversation()) return; // dead conversation: no applied-mark, no ack
+    voziaAppliedIdsRef.current.add(cmd.id);
+    ackKioskCommand(host, identity, cmd.id, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t, ui, routeFatal, setAgentToast, vozia?.host]);
 
   const onVoziaCommands = useCallback((commands, envelopeConversationId) => {
     const activeId = voziaIdentityRef.current.conversationId;
@@ -398,6 +488,20 @@ export default function KioskPage() {
       if (!cmd || cmd.id == null || !cmd.command) continue;
       const cmdConversation = cmd.conversationId ?? envelopeConversationId ?? activeId;
       if (cmdConversation !== activeId) continue; // stale conversation — discard, no ack
+      if (cmd.command === 'flow_completed' && !voziaAppliedIdsRef.current.has(cmd.id)) {
+        // F0: the ack travels WITH the server's verdict (success or
+        // refused:true) — never a blind ack, never applied before proof.
+        // Either ack clears the command from Valet's queue; the same id only
+        // shows up again if that ack was lost. After a success the id is in
+        // the applied set and falls through to the plain ack below; after a
+        // refusal it re-proves here (silently — see voziaRefusedIdsRef).
+        const key = `${activeId}:${cmd.id}`;
+        if (!voziaInFlightRef.current.has(key)) {
+          voziaInFlightRef.current.add(key);
+          completeFromAgent(cmd).finally(() => voziaInFlightRef.current.delete(key));
+        }
+        continue;
+      }
       if (!voziaAppliedIdsRef.current.has(cmd.id)) {
         voziaAppliedIdsRef.current.add(cmd.id);
         applyAgentCommand(cmd);
@@ -410,7 +514,7 @@ export default function KioskPage() {
       ackKioskCommand(vozia?.host, voziaIdentityRef.current, cmd.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyAgentCommand, vozia?.host]);
+  }, [applyAgentCommand, completeFromAgent, vozia?.host]);
 
   const escalate = useCallback(async (reason) => {
     setHelpOpen(false);
@@ -1151,6 +1255,7 @@ export default function KioskPage() {
             // (the iframe's own end-call is its side of the contract).
             voziaIdentityRef.current = { conversationId: null, secret: null };
             voziaAppliedIdsRef.current = new Set();
+            voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
             setVoziaConvActive(false);
             setVoziaOpen(false);
           }}
@@ -1168,11 +1273,15 @@ export default function KioskPage() {
         </div>
       ) : null}
 
-      {/* Transient agent-action toast — auto-dismisses, never blocks. */}
+      {/* Transient agent-action toast — auto-dismisses, never blocks.
+          Anchored at the TOP (mockup pattern, clear of the overlay's 48px ✕
+          at top:10): the Valet iframe underneath keeps its composer and the
+          agent's latest bubble at the bottom, where a 6s toast would sit
+          right on top of what the guest needs to read. */}
       {agentToast ? (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 72, display: 'flex', justifyContent: 'center', zIndex: 85, pointerEvents: 'none' }}>
-          <div style={{ background: 'rgba(33,26,56,.92)', color: '#fff', borderRadius: 999, padding: '12px 22px', fontWeight: 750, fontSize: 15, boxShadow: '0 10px 24px rgba(35,21,80,.35)' }}>
-            {agentToast}
+        <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, top: 84, display: 'flex', justifyContent: 'center', zIndex: 85, pointerEvents: 'none' }}>
+          <div style={{ background: 'rgba(33,26,56,.92)', color: '#fff', borderRadius: 999, padding: '12px 22px', fontWeight: 750, fontSize: 15, boxShadow: '0 10px 24px rgba(35,21,80,.35)', maxWidth: '86%', textAlign: 'center' }}>
+            {agentToast.text}
           </div>
         </div>
       ) : null}

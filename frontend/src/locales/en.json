@@ -656,6 +656,8 @@
     "voziaSkipUnavailable": "This step can't be skipped from the chat — let's finish it together here.",
     "voziaAgentMsgTitle": "Message from our team",
     "voziaAppliedToast": "✓ Your agent updated your check-in",
+    "voziaCompleteRefused": "One step is still pending — your agent can see it.",
+    "voziaCompleteRefusedStep": "One step is still pending ({{step}}) — your agent can see it.",
     "voziaEndTitle": "End help chat?",
     "voziaEndBody": "Your conversation will end.",
     "voziaEndCancel": "Cancel",

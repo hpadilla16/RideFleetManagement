@@ -656,6 +656,8 @@
     "voziaSkipUnavailable": "Este paso no se puede saltar desde el chat — vamos a terminarlo juntos aquí.",
     "voziaAgentMsgTitle": "Mensaje de nuestro equipo",
     "voziaAppliedToast": "✓ Tu agente actualizó tu check-in",
+    "voziaCompleteRefused": "Todavía falta un paso — tu agente lo ve en pantalla.",
+    "voziaCompleteRefusedStep": "Todavía falta un paso ({{step}}) — tu agente lo ve en pantalla.",
     "voziaEndTitle": "¿Cerrar el chat de ayuda?",
     "voziaEndBody": "Tu conversación terminará.",
     "voziaEndCancel": "Cancelar",
