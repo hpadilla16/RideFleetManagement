@@ -367,16 +367,20 @@ test('emitter 1 (overdue geofence) fires on the CREATE branch only, with per-ale
     'back-inside-geofence marks the envelope self-resolved');
 });
 
-test('emitter 2 (toll staff alert) fires after the staffNotifiedAt claim, ABOVE the alertEmailFor guard', () => {
+// REVERSED 2026-09-03 (Hector): "no deje que notifications se llene con los
+// peajes, ya eso está en dashboard". Every billable toll already appears on the
+// dashboard and in the tolls queue; the third copy made the bell 100% tolls
+// (48 of 48 envelopes in production) and buried the alerts that have nowhere
+// else to surface. This test now pins the ABSENCE — the staff email and the
+// exactly-once staffNotifiedAt claim must survive the removal untouched.
+test('the toll staff-alert path notifies staff WITHOUT an envelope (dashboard owns tolls)', () => {
   const src = moduleSource('../tolls/tolls.service.js');
-  const claim = src.indexOf('if (claimed.count !== 1) continue;');
-  const emit = src.indexOf("dedupeKey: `toll:${toll.id}`");
-  const emailGuard = src.indexOf('const to = await alertEmailFor(toll.locationId);');
-  assert.ok(claim > -1 && emit > -1 && emailGuard > -1);
-  assert.ok(claim < emit, 'only a claimed (exactly-once) toll emits');
-  assert.ok(emit < emailGuard, 'a sede without alertEmail still gets the envelope — the email guard must not gate it');
-  assert.match(src, /sourceType: 'TOLL',\s*\n\s*sourceRefId: toll\.id/, 'sourceRef = the transaction (ack delegation anchor)');
-  // ...and the tray ack mirrors back onto the envelope.
+  assert.ok(src.indexOf('if (claimed.count !== 1) continue;') > -1, 'exactly-once claim survives');
+  assert.ok(src.indexOf('const to = await alertEmailFor(toll.locationId);') > -1, 'staff email survives');
+  assert.equal(src.indexOf("dedupeKey: `toll:${toll.id}`"), -1, 'no toll envelope is emitted');
+  assert.ok(!/emitNotificationSafe/.test(src), 'tolls emits nothing into the notification center');
+  // The ack mirror STAYS: envelopes emitted before this change still resolve
+  // from the tray, so the 48 already in production can be cleared normally.
   assert.match(src, /ackNotificationBySourceRefSafe\(\{\s*\n\s*tenantId: row\.tenantId,\s*\n\s*sourceType: 'TOLL'/);
 });
 

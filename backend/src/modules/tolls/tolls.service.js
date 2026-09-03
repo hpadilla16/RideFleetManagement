@@ -20,7 +20,7 @@ import {
 import { buildTollListWhere, buildTollExportWhere, tollsToCsv, tollExportFilename, TOLL_EXPORT_MAX_ROWS } from './tolls-export.js';
 import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
 import { sendEmail } from '../../lib/mailer.js';
-import { emitNotificationSafe, ackNotificationBySourceRefSafe } from '../notifications/notifications-emit.js';
+import { ackNotificationBySourceRefSafe } from '../notifications/notifications-emit.js';
 // beta.357 latent fix: the agreement-mirror catch already called logger.error
 // but the import was missing - a mirror failure would have thrown
 // ReferenceError out of the sync instead of logging. Only the failure path
@@ -1620,30 +1620,11 @@ async function notifyStaffOfNewTolls(reservation, transactions = []) {
     if (claimed.count !== 1) continue;
     notified += 1;
 
-    // Notification Center emitter (2026-09-01) — ABOVE the alertEmailFor
-    // guard on purpose: a sede without a configured alertEmail gets no email
-    // today but the in-app alert still exists, and the envelope must match
-    // that. Deduped on the toll id, so the claim-release retry path below can
-    // re-run without duplicating the row. Safe emit — never breaks the sync.
-    await emitNotificationSafe({
-      tenantId: reservation.tenantId,
-      locationId: toll.locationId || pickupLocationId || null,
-      severity: 'NEEDS_ACTION',
-      sourceType: 'TOLL',
-      sourceRefId: toll.id,
-      title: agreementClosed
-        ? `New billable toll on a closed contract — $${toMoney(toll.amount).toFixed(2)}`
-        : `New billable toll — $${toMoney(toll.amount).toFixed(2)}`,
-      body: [
-        toll.plateRaw || toll.plateNormalized || null,
-        contractLabel ? `Contract ${contractLabel}` : null,
-        toll.location || null,
-      ].filter(Boolean).join(' · ') || null,
-      deepLink: `/reservations/${reservation.id}`,
-      dedupeKey: `toll:${toll.id}`,
-      templateKey: agreementClosed ? 'tollClosed' : 'tollNew',
-      paramsJson: { amt: `$${toMoney(toll.amount).toFixed(2)}` },
-    });
+    // NO Notification Center emit here (removed 2026-09-03, Hector): every
+    // billable toll already surfaces on the dashboard and in the tolls queue.
+    // Emitting a third copy made the bell 100% tolls (48 of 48 rows in prod)
+    // and buried the alerts that have nowhere else to appear. The staff email
+    // below and staffNotifiedAt are untouched.
 
     const to = await alertEmailFor(toll.locationId);
     if (!to) continue;
