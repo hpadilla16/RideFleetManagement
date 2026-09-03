@@ -22,7 +22,21 @@ export const VOZIA_ERROR_CODES = Object.freeze([
 ]);
 
 // Kiosk wizard screen → contract step enum. additional_drivers never applies.
+//
+// EVERY screen that can hold a guest while help is open must be here. The six that were missing
+// (BOOT, WELCOME, ESCALATED, PAIRING, OUT_OF_SERVICE, WALKUP_SOON) made `postVoziaState` return
+// early, so the agent's Kiosk tab read "no state reported" for the WHOLE session: measured
+// 2026-09-03, of eleven kiosk conversations ever created only ONE ever carried a state, from the
+// July E2E. A guest most naturally taps Ayuda from WELCOME, which is exactly one of the six.
+//
+// BOOT and WELCOME are honest funnel positions — the guest has not found their reservation yet.
+// The others are NOT positions in the funnel: they are overlays that can happen at any step, so
+// they map to null ON PURPOSE and `postVoziaState` reports the last real step instead of
+// inventing one. Telling an agent the guest is on `find_reservation` when they escalated from
+// the signature pad would be worse than telling them nothing.
 const SCREEN_TO_STEP = {
+  BOOT: 'find_reservation',
+  WELCOME: 'find_reservation',
   LOOKUP: 'find_reservation',
   SUMMARY: 'find_reservation',
   ID: 'license_scan',

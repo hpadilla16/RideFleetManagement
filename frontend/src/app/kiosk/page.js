@@ -154,6 +154,9 @@ export default function KioskPage() {
   const sessionRef = useRef(null);
   useEffect(() => { sessionRef.current = session; }, [session]);
   const screenRef = useRef('BOOT');
+  // Last funnel step actually reported to Valet — an overlay screen reuses it instead of dropping
+  // the co-presence post. Cleared with the conversation and with the session, like the identity.
+  const lastVoziaStepRef = useRef(null);
   useEffect(() => { screenRef.current = screen; }, [screen]);
   // Stale-response guard: bumped on every wipe. Async handlers capture the
   // generation before awaiting and drop responses that land after a reset —
@@ -208,6 +211,7 @@ export default function KioskPage() {
     // (restart_flow snapshots + restores around this call on purpose.)
     voziaIdentityRef.current = { conversationId: null, secret: null };
     voziaAppliedIdsRef.current = new Set();
+    lastVoziaStepRef.current = null;
     voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
     setVoziaConvActive(false);
     setVoziaOpen(false);
@@ -289,11 +293,21 @@ export default function KioskPage() {
 
   const vozia = ui.device?.vozia || null; // {host, widgetKey} — null-safe/dark
 
-  /** Immediate co-presence post (step transitions + notable errors). */
+  /**
+   * Immediate co-presence post (step transitions + notable errors).
+   *
+   * An overlay screen (ESCALATED, PAIRING, OUT_OF_SERVICE, WALKUP_SOON) is not a position in the
+   * funnel, so it reports the LAST REAL step rather than nothing: dropping the post is what left
+   * the agent's tab reading "no state reported" for a whole session, and inventing a step would be
+   * worse — an escalation from the signature pad must not read as "find reservation". BOOT and
+   * WELCOME DO map (the guest genuinely has not found their reservation yet), so the very first
+   * post — the one fired when the conversation identity arrives — always has something true to say.
+   */
   const postVoziaState = useCallback((screenName, errorCode = null) => {
     if (!vozia?.host || !voziaIdentityRef.current.conversationId) return;
-    const step = voziaStepForScreen(screenName);
+    const step = voziaStepForScreen(screenName) || lastVoziaStepRef.current;
     if (!step) return;
+    lastVoziaStepRef.current = step;
     postKioskState(vozia.host, voziaIdentityRef.current, {
       step,
       stepNumber: screenName === 'DONE' ? 5 : (PROGRESS_OF[screenName] || 0),
@@ -348,6 +362,7 @@ export default function KioskPage() {
       voziaIdentityRef.current = { conversationId: null, secret: null };
       voziaAppliedIdsRef.current = new Set();
       voziaRefusedIdsRef.current = new Set(); // QA MINOR-1: refusal keys are per conversation too
+      lastVoziaStepRef.current = null;
       setVoziaConvActive(false);
       bindVoziaConv(null); // clear the server-side binding (best-effort)
       return;
