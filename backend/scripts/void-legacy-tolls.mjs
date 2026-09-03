@@ -111,7 +111,19 @@ async function main() {
     cur.n += 1; cur.amount += Number(r.amount || 0);
     byStatus.set(k, cur);
   }
-  const postedReservations = [...new Set(rows.filter((r) => r.reservationId).map((r) => r.reservationId))];
+  // Only a POSTED row means money already sits on a customer's contract. A row
+  // that merely carries a reservationId (PENDING, DISPUTED) was matched but
+  // never billed, so warning about it would send an operator hunting for a
+  // charge that does not exist.
+  const POSTED = ['POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'];
+  const postedReservations = [...new Set(
+    rows.filter((r) => r.reservationId && POSTED.includes(String(r.billingStatus || '').toUpperCase()))
+      .map((r) => r.reservationId)
+  )];
+  const attachedUnbilled = [...new Set(
+    rows.filter((r) => r.reservationId && !POSTED.includes(String(r.billingStatus || '').toUpperCase()))
+      .map((r) => r.reservationId)
+  )];
 
   console.log(`\nTenant:        ${tenant.name}`);
   console.log(`Cutoff:        transactionAt < ${BEFORE}`);
@@ -121,9 +133,12 @@ async function main() {
     console.log(`  ${k.padEnd(34)} ${String(v.n).padStart(6)}  $${money(v.amount)}`);
   }
   if (postedReservations.length) {
-    console.log(`\n  ⚠ ${postedReservations.length} reservation(s) carry these tolls. Voiding the toll does`);
-    console.log(`    NOT remove the charge already posted to those contracts:`);
+    console.log(`\n  ⚠ ${postedReservations.length} reservation(s) were already CHARGED for these tolls.`);
+    console.log(`    Voiding the toll does NOT remove that charge from the contract:`);
     console.log(`    ${postedReservations.slice(0, 40).join(' ')}${postedReservations.length > 40 ? ' …' : ''}`);
+  }
+  if (attachedUnbilled.length) {
+    console.log(`\n  ${attachedUnbilled.length} reservation(s) are attached but were never billed — nothing to reverse.`);
   }
   if (!APPLY) {
     console.log(`\nDRY RUN — nothing written. Re-run with --apply --actor-email <email> to void.\n`);
