@@ -28,7 +28,6 @@ export const NOTIFICATION_LANE_GROUPS = [
   {
     id: 'needsAction', tone: 'warn',
     lanes: [
-      { id: 'tolls', filter: { sourceType: 'TOLL' } },
       { id: 'maintenance', filter: { sourceType: 'MAINTENANCE' } },
       { id: 'shuttle', filter: { sourceType: 'SHUTTLE' } },
       { id: 'documents', filter: { sourceType: 'DOCUMENTS' } },
