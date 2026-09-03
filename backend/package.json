@@ -169,6 +169,7 @@
     "test:tolls-export": "node --test --test-force-exit src/modules/tolls/tolls-export.test.mjs",
     "test:tolls-evidence": "node --test --test-force-exit src/modules/tolls/tolls-evidence-candidates.test.mjs",
     "test:tolls-scope": "node --test --test-force-exit src/modules/tolls/tolls-location-scope.test.mjs",
+    "test:tolls-scoring": "node --test --test-force-exit src/modules/tolls/tolls-scoring.test.mjs",
     "test:tolls-scope-guard": "node --test --test-force-exit src/modules/tolls/tolls-scope-guard.test.mjs",
     "test:maintenance-scope": "node --test --test-force-exit src/modules/maintenance/maintenance-location-scope.test.mjs",
     "test:reports-scope-guard": "node --test --test-force-exit src/modules/reports/reports-v2-scope-guard.test.mjs",
