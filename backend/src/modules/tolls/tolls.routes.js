@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { tollsService } from './tolls.service.js';
+import { settingsService } from '../settings/settings.service.js';
 import { providerForIngest, parseDisabledIngestProviders } from './tolls-ingest-provider.js';
 
 export const tollsRouter = Router();
@@ -236,6 +237,27 @@ tollsRouter.put('/provider-account', requireRole('ADMIN', 'OPS'), rejectLocation
     if (/required|enabled/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }
+    next(error);
+  }
+});
+
+// Auto-confirm threshold (2026-09-03). Per-tenant: a toll whose best candidate
+// scores >= this value is AUTO_CONFIRMED, below it a human reviews. Default 70.
+// Writing re-tunes matching for the WHOLE tenant, so it carries ADMIN plus the
+// same rejectLocationScopedUsers guard as the provider account — a
+// branch-scoped user must not change how every sede's tolls are attributed.
+tollsRouter.get('/match-config', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getTollsMatchConfig(scopeFor(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+tollsRouter.put('/match-config', requireRole('ADMIN'), rejectLocationScopedUsers, async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateTollsMatchConfig(req.body || {}, scopeFor(req)));
+  } catch (error) {
     next(error);
   }
 });

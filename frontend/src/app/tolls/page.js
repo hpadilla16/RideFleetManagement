@@ -210,9 +210,9 @@ function TollWaiveSelectedDialog({ rows, busy, onCancel, onApply }) {
 
 const TONE_CLASS = { ok: 'w-ok', warn: 'w-warn', bad: 'w-bad', info: 'w-info' };
 
-function ConfidenceCell({ row, t, onMore, overflow }) {
+function ConfidenceCell({ row, t, onMore, overflow, autoConfirmScore }) {
   const score = confidenceForRow(row);
-  const lane = laneForScore(score);
+  const lane = laneForScore(score, autoConfirmScore);
   const { chips } = inlineChipsForRow(row);
   const laneClass = lane === 'high' ? '' : lane === 'mid' ? ' mid' : lane === 'low' ? ' low' : ' none';
   return (
@@ -240,8 +240,13 @@ function ConfidenceCell({ row, t, onMore, overflow }) {
   );
 }
 
-function EvidenceDrawer({ row, t }) {
+function EvidenceDrawer({ row, t, autoConfirmScore }) {
   const score = confidenceForRow(row);
+  // The threshold the BACKEND actually used for this tenant, so the ledger's
+  // closing line quotes the real number instead of a baked-in 85.
+  const threshold = Number.isFinite(Number(autoConfirmScore))
+    ? Number(autoConfirmScore)
+    : AUTO_CONFIRM_SCORE;
   const ledger = scoreLedgerForRow(row);
   // Phase 2 — the losing candidate explained (mockup B). What the backend can
   // honestly ship: superseded suggestions on OTHER reservations. When the
@@ -289,9 +294,9 @@ function EvidenceDrawer({ row, t }) {
                   ))}
                   <tr className="total">
                     <td>
-                      {score != null && Number(score) < AUTO_CONFIRM_SCORE
-                        ? t('tolls.evidence.belowAuto', 'Suggested — below auto-confirm ({{threshold}})', { threshold: AUTO_CONFIRM_SCORE })
-                        : t('tolls.evidence.atAuto', 'At or above auto-confirm ({{threshold}})', { threshold: AUTO_CONFIRM_SCORE })}
+                      {score != null && Number(score) < threshold
+                        ? t('tolls.evidence.belowAuto', 'Suggested — below auto-confirm ({{threshold}})', { threshold })
+                        : t('tolls.evidence.atAuto', 'At or above auto-confirm ({{threshold}})', { threshold })}
                     </td>
                     <td className="pts">{score == null ? '—' : Number(score)}</td>
                   </tr>
@@ -485,6 +490,15 @@ function TollsInner({ token, me, logout }) {
   }, [token, statusFilter, reviewOnly, activeTenantId, isSuper]);
 
   const transactions = useMemo(() => Array.isArray(dashboard?.transactions) ? dashboard.transactions : [], [dashboard]);
+  // The tenant's configured auto-confirm threshold, straight from the payload
+  // the matcher itself used. AUTO_CONFIRM_SCORE is only the pre-load fallback
+  // — see the note on the constant in lib/toll-triage.js.
+  // null/'' are guarded explicitly — Number(null) is 0, which is finite, so a
+  // bare isFinite check would read a missing threshold as a bar of zero.
+  const rawThreshold = dashboard?.matchConfig?.autoConfirmScore;
+  const autoConfirmScore = rawThreshold === null || rawThreshold === undefined || `${rawThreshold}`.trim() === '' || !Number.isFinite(Number(rawThreshold))
+    ? AUTO_CONFIRM_SCORE
+    : Number(rawThreshold);
   // The counts come from the DATABASE (dashboard.queueCounts). Counting the
   // loaded page is what made the queue climb from 19 to 21 after staff
   // confirmed 19 rows: the list is capped at 200 over a queue thousands deep,
@@ -1097,6 +1111,7 @@ function TollsInner({ token, me, logout }) {
               row={row}
               t={t}
               overflow={overflow}
+              autoConfirmScore={autoConfirmScore}
               onMore={() => setEvidenceId((prev) => prev === row.id ? '' : row.id)}
             />
           </td>
@@ -1112,7 +1127,7 @@ function TollsInner({ token, me, logout }) {
             </div>
           </td>
         </tr>
-        {evidenceId === row.id ? <EvidenceDrawer row={row} t={t} /> : null}
+        {evidenceId === row.id ? <EvidenceDrawer row={row} t={t} autoConfirmScore={autoConfirmScore} /> : null}
       </Fragment>
     );
   };

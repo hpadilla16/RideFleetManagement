@@ -11,6 +11,12 @@ import {
 } from './tolls-responsibility.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { countQueues } from './tolls-queue-counts.js';
+import {
+  DEFAULT_AUTO_CONFIRM_SCORE,
+  autoConfirmCapFor,
+  matchStatusForScore,
+  normalizeAutoConfirmScore
+} from './tolls-match-config.js';
 import { buildTollListWhere, buildTollExportWhere, tollsToCsv, tollExportFilename, TOLL_EXPORT_MAX_ROWS } from './tolls-export.js';
 import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
 import { sendEmail } from '../../lib/mailer.js';
@@ -922,6 +928,32 @@ async function loadTenantVehicleMatchCache(scope = {}) {
   }));
 }
 
+/**
+ * The tenant's effective auto-confirm score threshold.
+ *
+ * Resolved ONCE PER MATCHING RUN and threaded down, for the same reason
+ * loadTenantVehicleMatchCache is: the value is identical for every toll in a
+ * run, and a sweep processes thousands of rows — reading the AppSetting inside
+ * the per-toll matcher would add a DB round trip per row. Read directly rather
+ * than through settingsService to keep tolls -> settings out of the import
+ * graph; the key and the normalization are shared via tolls-match-config.js so
+ * the two cannot drift.
+ */
+async function resolveAutoConfirmScore(scope = {}) {
+  if (!scope?.tenantId) return DEFAULT_AUTO_CONFIRM_SCORE;
+  try {
+    const row = await prisma.appSetting.findUnique({
+      where: { key: `tenant:${scope.tenantId}:tollsMatchConfig` }
+    });
+    if (!row?.value) return DEFAULT_AUTO_CONFIRM_SCORE;
+    return normalizeAutoConfirmScore(JSON.parse(row.value)?.autoConfirmScore);
+  } catch {
+    // Unreadable or malformed config must never harden into "auto-confirm
+    // everything" or "auto-confirm nothing" — fall back to the shipped default.
+    return DEFAULT_AUTO_CONFIRM_SCORE;
+  }
+}
+
 async function listTenantVehiclesForMatch(scope = {}, transaction = null, vehicleCache = null) {
   const normalizedRows = Array.isArray(vehicleCache)
     ? vehicleCache
@@ -1021,7 +1053,15 @@ async function listReservationCandidates(scope = {}, vehicleIds = [], transactio
   });
 }
 
-export function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates = 1 }) {
+export function scoreCandidate({
+  transaction,
+  vehicle,
+  reservation,
+  siblingCandidates = 1,
+  // The effective auto-confirm threshold for this run. Both safety caps below
+  // are derived from it, so they hold the line wherever a tenant sets it.
+  autoConfirmScore = DEFAULT_AUTO_CONFIRM_SCORE
+}) {
   const plate = normalizeNullableToken(transaction.plateRaw || transaction.plateNormalized);
   const tag = normalizeNullableToken(transaction.tagRaw || transaction.tagNormalized);
   const sello = normalizeNullableToken(transaction.selloRaw || transaction.selloNormalized);
@@ -1058,6 +1098,10 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
   const reasons = [];
   let withinTripWindow = responsibility.withinTripWindow;
   let strongIdentifierMatches = 0;
+  // One point below the effective threshold. Every safety cap below uses THIS,
+  // never a literal, so "capped" always means "cannot auto-confirm" — see the
+  // derivation note in tolls-match-config.js.
+  const belowAutoConfirm = autoConfirmCapFor(autoConfirmScore);
 
   if (responsibility.withinEffectiveWindow && vehicle?.id) {
     score += 70;
@@ -1117,7 +1161,11 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
   if (responsibility.dispatchConfirmationRequired) {
     reasons.push('dispatchConfirmationRequired');
     if (!multiSignalOverride) {
-      score = Math.min(score, 79);
+      // Was `Math.min(score, 79)`, a literal that only worked because the
+      // threshold was hardcoded at 85. Now derived from the effective
+      // threshold, so the cap still holds the toll below the auto-confirm line
+      // at 70 — where a stale 79 would have sailed straight over it.
+      score = Math.min(score, belowAutoConfirm);
     } else {
       reasons.push('multiSignalOverride');
     }
@@ -1126,12 +1174,18 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
   // RES-849093 FIX 1b: a pure time-window match (+70 responsibilityWindow / +25
   // tripWindow) must NEVER be enough to AUTO_CONFIRM. Auto-confirmation requires
   // at least ONE strong identifier (plate/tag/sello) tying the toll to THIS
-  // vehicle. With zero identifier matches, cap the score below the 85
-  // AUTO_CONFIRMED threshold (mirrors the existing Math.min(score, 79) cap) so
-  // the toll lands as SUGGESTED / needs-review for a human to attribute. When an
-  // identifier DOES match, behavior is unchanged.
+  // vehicle. With zero identifier matches, cap the score below the AUTO_CONFIRMED
+  // threshold so the toll lands as SUGGESTED / needs-review for a human to
+  // attribute. When an identifier DOES match, behavior is unchanged.
+  //
+  // The cap was `Math.min(score, 79)` — a literal chosen only because the
+  // threshold was hardcoded at 85. Deriving it from the effective threshold is
+  // what keeps this invariant TRUE once the threshold is configurable: at 70 a
+  // capped 79 would have been ABOVE the line, and this very guard would have
+  // started auto-attributing zero-identifier tolls to real customers — the
+  // exact outcome it exists to prevent.
   if (strongIdentifierMatches === 0) {
-    score = Math.min(score, 79);
+    score = Math.min(score, belowAutoConfirm);
     reasons.push('noStrongIdentifier');
   }
 
@@ -1181,7 +1235,7 @@ async function reservationHasTollCoverage(reservationId, scope = {}) {
   return covered > 0;
 }
 
-async function buildMatchSuggestion(transaction, scope = {}, vehicleCache = null) {
+async function buildMatchSuggestion(transaction, scope = {}, vehicleCache = null, autoConfirmScore = DEFAULT_AUTO_CONFIRM_SCORE) {
   let vehicles = await listTenantVehiclesForMatch(scope, transaction, vehicleCache);
 
   // TollBridge finding (a), 2026-07-26: when the toll carries a sede stamp,
@@ -1228,7 +1282,7 @@ async function buildMatchSuggestion(transaction, scope = {}, vehicleCache = null
     .filter((vehicle) => reservationReferencesVehicle(reservation, vehicle.id))
     .map((vehicle) => {
       const siblingCandidates = reservations.filter((item) => reservationReferencesVehicle(item, vehicle.id)).length;
-      const scored = scoreCandidate({ transaction, vehicle, reservation, siblingCandidates });
+      const scored = scoreCandidate({ transaction, vehicle, reservation, siblingCandidates, autoConfirmScore });
       return {
         vehicle,
         reservation,
@@ -1253,9 +1307,14 @@ async function buildMatchSuggestion(transaction, scope = {}, vehicleCache = null
   }
 
   const top = candidates[0];
-  let matchStatus = top.dispatchConfirmationRequired
-    ? 'SUGGESTED'
-    : top.score >= 85 ? 'AUTO_CONFIRMED' : top.score >= 60 ? 'SUGGESTED' : null;
+  // The threshold is the tenant's configured value (default 70), resolved once
+  // per run and threaded in. The safety caps inside scoreCandidate are derived
+  // from this same number, so a capped candidate can never land here at or
+  // above the line no matter how the tenant sets it.
+  let matchStatus = matchStatusForScore(top.score, {
+    dispatchConfirmationRequired: top.dispatchConfirmationRequired,
+    autoConfirmScore
+  });
   let coveredAutoConfirm = false;
   // 2026-08-05 (Hector): when the ONLY candidate reservation carries a
   // coversTolls package, confirm instead of queueing review. Nothing gets
@@ -1324,8 +1383,8 @@ async function replaceSuggestedAssignments(tx, transaction, suggestion, matchedB
 // Used by the manual bulk-auto-match route AND the scheduled re-match sweep so
 // the two paths can never drift. Returns the suggestion (with `unchanged: true`
 // when nothing was written).
-async function rematchTransactionRow(transaction, scope, actorUserId = null, vehicleCache = null) {
-  const suggestion = await buildMatchSuggestion(transaction, scope, vehicleCache);
+async function rematchTransactionRow(transaction, scope, actorUserId = null, vehicleCache = null, autoConfirmScore = DEFAULT_AUTO_CONFIRM_SCORE) {
+  const suggestion = await buildMatchSuggestion(transaction, scope, vehicleCache, autoConfirmScore);
 
   // No-op guard (QA 2026-07-26): the sweep re-processes the same window every
   // few hours, and for a stable backlog the suggestion is identical each time.
@@ -1982,9 +2041,14 @@ function reviewActionLabel(action) {
 export const tollsService = {
   async getDashboard(scope = {}, filters = {}) {
     const tollState = await getTenantTollsState(scope);
+    // Echo the threshold the matcher actually used, so the queue's evidence
+    // pane can quote the real number instead of a constant baked into the
+    // bundle (it rendered a stale "85" for every tenant before 2026-09-03).
+    const matchConfig = { autoConfirmScore: await resolveAutoConfirmScore(scope) };
     if (scope?.tenantId && !tollState.tollsEnabled) {
       return {
         tollsEnabled: false,
+        matchConfig,
         metrics: {
           importedToday: 0,
           matched: 0,
@@ -2096,6 +2160,7 @@ export const tollsService = {
 
     return {
       tollsEnabled: true,
+      matchConfig,
       metrics: {
         importedToday,
         matched: matchedCount,
@@ -2727,6 +2792,8 @@ export const tollsService = {
 
     // Same fleet for every row in this batch — load it once, not per toll.
     const bulkVehicleCache = await loadTenantVehicleMatchCache(scope);
+    // Same threshold for every row too — resolved once, for the same reason.
+    const bulkAutoConfirmScore = await resolveAutoConfirmScore(scope);
 
     let autoConfirmed = 0;
     let suggested = 0;
@@ -2734,7 +2801,7 @@ export const tollsService = {
     const reservationIdsToSync = new Set();
 
     for (const transaction of rows) {
-      const suggestion = await rematchTransactionRow(transaction, scope, actorUserId, bulkVehicleCache);
+      const suggestion = await rematchTransactionRow(transaction, scope, actorUserId, bulkVehicleCache, bulkAutoConfirmScore);
 
       reviewed += 1;
       if (suggestion.matchStatus === 'AUTO_CONFIRMED') {
@@ -2852,6 +2919,8 @@ export const tollsService = {
 
     // Load the fleet ONCE for the whole run — see loadTenantVehicleMatchCache.
     const vehicleCache = await loadTenantVehicleMatchCache(scope);
+    // And the threshold ONCE — see resolveAutoConfirmScore.
+    const sweepAutoConfirmScore = await resolveAutoConfirmScore(scope);
 
     let scanned = 0;
     let eligibleCount = 0;
@@ -2896,11 +2965,11 @@ export const tollsService = {
 
       for (const transaction of eligible) {
         if (dryRun) {
-          const suggestion = await buildMatchSuggestion(transaction, scope, vehicleCache);
+          const suggestion = await buildMatchSuggestion(transaction, scope, vehicleCache, sweepAutoConfirmScore);
           if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) autoConfirmed += 1;
           continue;
         }
-        const suggestion = await rematchTransactionRow(transaction, scope, null, vehicleCache);
+        const suggestion = await rematchTransactionRow(transaction, scope, null, vehicleCache, sweepAutoConfirmScore);
         if (!suggestion.unchanged) changed += 1;
         if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) {
           autoConfirmed += 1;
@@ -3236,6 +3305,8 @@ export const tollsService = {
     const created = [];
     let duplicateExistingCount = 0;
     const reservationIdsToSync = new Set();
+    // Resolved ONCE for the whole import, not per row — see resolveAutoConfirmScore.
+    const importAutoConfirmScore = await resolveAutoConfirmScore(scope);
     for (const raw of inputRows) {
       const transactionAt = normalizeDateTime(raw.transactionAt);
       const plateRaw = String(raw.plate || raw.plateRaw || '').trim();
@@ -3279,7 +3350,7 @@ export const tollsService = {
         }
       }
 
-      const suggestion = await buildMatchSuggestion(draft, scope);
+      const suggestion = await buildMatchSuggestion(draft, scope, null, importAutoConfirmScore);
       const row = await prisma.$transaction(async (tx) => {
         const createdTransaction = await tx.tollTransaction.create({
           data: {

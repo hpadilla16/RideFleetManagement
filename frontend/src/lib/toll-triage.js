@@ -24,14 +24,30 @@ export const TOLL_LANE_GROUPS = [
   { id: 'NO_MATCH', tone: 'bad', views: ['UNMATCHED'] }
 ];
 
-/** Auto-confirm threshold — mirrors tolls.service.js (score >= 85 = AUTO_CONFIRMED). */
+/**
+ * Auto-confirm threshold — FALLBACK ONLY.
+ *
+ * The real threshold is per-tenant and configurable (tollsMatchConfig
+ * .autoConfirmScore, default 70); it rides on the dashboard payload as
+ * `matchConfig.autoConfirmScore`. Callers should pass that value through —
+ * this constant only covers the first paint, before the payload lands, and
+ * any caller that has none. It stays at the historical 85 rather than
+ * tracking the new default so a threshold-less render is CONSERVATIVE: it
+ * under-claims which rows auto-confirm instead of over-claiming.
+ */
 export const AUTO_CONFIRM_SCORE = 85;
 
-/** Green >= 85, amber 40–84, red < 40, none when the backend sent nothing. */
-export function laneForScore(score) {
+/** Green >= threshold, amber 40–(threshold-1), red < 40, none when the backend sent nothing. */
+export function laneForScore(score, threshold = AUTO_CONFIRM_SCORE) {
   if (score == null || Number.isNaN(Number(score))) return 'none';
   const n = Number(score);
-  if (n >= AUTO_CONFIRM_SCORE) return 'high';
+  // Guard null/'' explicitly: Number(null) and Number('') are 0, which is
+  // finite — a bare isFinite check would turn a missing threshold into a bar
+  // of ZERO and paint every scored row green.
+  const line = threshold === null || threshold === undefined || `${threshold}`.trim() === '' || !Number.isFinite(Number(threshold))
+    ? AUTO_CONFIRM_SCORE
+    : Number(threshold);
+  if (n >= line) return 'high';
   if (n >= 40) return 'mid';
   return 'low';
 }

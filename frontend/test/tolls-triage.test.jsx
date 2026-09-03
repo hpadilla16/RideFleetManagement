@@ -24,7 +24,8 @@ import {
   matchesQueueView,
   primaryActionForRow,
   overflowActionsForRow,
-  MAX_INLINE_CHIPS
+  MAX_INLINE_CHIPS,
+  AUTO_CONFIRM_SCORE
 } from '../src/lib/toll-triage';
 
 const lookup = (bundle, key) => key.split('.').reduce((acc, part) => acc?.[part], bundle);
@@ -157,6 +158,27 @@ describe('lane bucketing', () => {
     expect(laneForScore(0)).toBe('low');
     expect(laneForScore(null)).toBe('none');
     expect(laneForScore(undefined)).toBe('none');
+  });
+
+  it('score -> lane honors a per-tenant threshold, defaulting to the constant', () => {
+    // The auto-confirm bar is configurable per tenant (default 70 in the
+    // backend). AUTO_CONFIRM_SCORE stays the no-payload fallback, so an
+    // explicit threshold has to win over it.
+    expect(laneForScore(70, 70)).toBe('high');
+    expect(laneForScore(69, 70)).toBe('mid');
+    expect(laneForScore(84, 85)).toBe('mid');
+    expect(laneForScore(85, 85)).toBe('high');
+
+    // Omitted / unusable thresholds fall back to the exported constant.
+    expect(laneForScore(84)).toBe('mid');
+    expect(laneForScore(AUTO_CONFIRM_SCORE)).toBe('high');
+    expect(laneForScore(84, undefined)).toBe('mid');
+    expect(laneForScore(84, null)).toBe('mid');
+    expect(laneForScore(90, 'junk')).toBe('high');
+
+    // The red band is unchanged by the threshold.
+    expect(laneForScore(39, 70)).toBe('low');
+    expect(laneForScore(null, 70)).toBe('none');
   });
 
   it('confidence falls back from transaction to latest assignment', () => {

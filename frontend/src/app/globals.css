@@ -658,6 +658,22 @@ input[type='file']::-webkit-file-upload-button {
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 760px; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; vertical-align: top; }
+
+/* Nested tables opt out of the two rules above.
+   The `min-width` floor and the `nowrap` are written for TOP-LEVEL data
+   grids, which sit in a scroll well (.table-shell / .table-scroll /
+   .tq-scroll) and can afford to be wider than their container. A table
+   rendered INSIDE a cell has no well of its own: the floor becomes a hard
+   minimum it cannot go below, so it overflows its container and paints
+   over whatever sits beside it. That is the /tolls evidence-pane bug —
+   measured at a 1440px viewport, .tq-ledger was forced to 760px inside a
+   528px grid track, overflowing it by 250px, so all five right-aligned
+   score deltas landed on top of the neighbouring column.
+   Two element selectors, so this beats the bare `table` rule here AND the
+   `table { min-width: 640px }` in the mobile block below (specificity
+   wins over source order, and media queries add none). */
+td table, th table { min-width: 0; }
+td table th, td table td, th table th, th table td { white-space: normal; }
 /* Operational table heads: 11px strong is the DEFAULT (review §4 — the
    target's 10px/4.67:1 mono th is permitted only on reports-v2 desktop).
    --text-2 on --surface-2 = 8.53:1 AAA. */
@@ -2534,14 +2550,22 @@ tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 .tq-menu-pop .sep { height: 1px; background: var(--border-subtle); margin: 4px 2px; }
 .tq-menu-pop small { display: block; font-size: 10.5px; color: var(--text-3); font-weight: 400; margin-top: 1px; }
 
-/* evidence drawer under a focused row */
-.tq-table tr.evidence td { height: auto; background: var(--surface-1); padding: 0; border-bottom: 1px solid var(--border); }
-.tq-evi { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 0; border-top: 1px dashed var(--border); }
-.tq-evi > div { padding: 14px 18px; border-right: 1px solid var(--border-subtle); min-width: 0; }
+/* evidence drawer under a focused row
+   The pane is prose + numbers, not a data grid, so it wraps instead of
+   scrolling sideways: each column is min-width:0 (so a grid track may
+   shrink below its content) and every box inside may break a long token.
+   The 760px floor that used to force .tq-ledger over its neighbour is
+   released by the `td table` rule up at the global table block. */
+.tq-table tr.evidence td { height: auto; background: var(--surface-1); padding: 0; border-bottom: 1px solid var(--border); white-space: normal; }
+.tq-evi { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0; border-top: 1px dashed var(--border); }
+.tq-evi > div { padding: 14px 18px; border-right: 1px solid var(--border-subtle); min-width: 0; overflow-wrap: anywhere; }
 .tq-evi > div:last-child { border-right: 0; }
 .tq-evi h5 { font-size: 10px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--text-3); margin: 0 0 9px; }
-.tq-ledger { width: 100%; border-collapse: collapse; }
-.tq-ledger td { height: auto; padding: 3px 0; font-size: 12px; border: 0; color: var(--text-2); background: transparent; }
+/* table-layout:fixed pins the label column to (container - the 56px pts
+   column), so a long reason label — or a Spanish one, ~30% longer — wraps
+   onto a second line instead of widening the table past its grid track. */
+.tq-ledger { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.tq-ledger td { height: auto; padding: 3px 0; font-size: 12px; border: 0; color: var(--text-2); background: transparent; overflow-wrap: anywhere; }
 .tq-ledger td.pts { text-align: right; font-size: 11.5px; color: var(--ok-tx); font-weight: 600; width: 56px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tq-ledger td.pts.neg { color: var(--danger-tx); }
 .tq-ledger tr.total td { border-top: 1px solid var(--border); padding-top: 6px; font-weight: 660; color: var(--text-1); }
@@ -2554,7 +2578,8 @@ tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 .tq-tline .win { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--p-100); border: 1px solid var(--brand-a25); }
 :root[data-theme='dark'] .tq-tline .win { background: var(--brand-a16); }
 .tq-tline .tick { position: absolute; top: -3px; width: 2px; height: 14px; border-radius: 1px; background: var(--brand); }
-.tq-tline .lbls { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-3); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.tq-tline .lbls { display: flex; flex-wrap: wrap; gap: 2px 12px; justify-content: space-between; font-size: 10.5px; color: var(--text-3); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.tq-tline .lbls > span { white-space: nowrap; }
 .tq-evi-raw { font-size: 10.5px; color: var(--text-3); margin-top: 10px; word-break: break-all; }
 
 /* table footer: selection + bulk bar */

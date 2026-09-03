@@ -15,6 +15,7 @@ import { invalidateTenantTerminalConfig } from '../payment-gateway/tenant-termin
 import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
+import { normalizeAutoConfirmScore, normalizeTollsMatchConfig } from '../tolls/tolls-match-config.js';
 
 const DEFAULTS = {
   companyName: 'Ride Fleet',
@@ -1045,6 +1046,30 @@ export const settingsService = {
       update: { value: JSON.stringify(next) }
     });
     return next;
+  },
+
+  // Tolls matching (2026-09-03): per-tenant auto-confirm score threshold.
+  // A toll whose best candidate scores >= this value is AUTO_CONFIRMED; below
+  // it the toll waits for a human. Default 70 (Hector: rows at 70+ are visibly
+  // his cars, so the old fixed 85 was holding real matches in review). The
+  // normalization — and the safety caps DERIVED from this value — live in
+  // tolls-match-config.js, so the matcher enforces exactly what this writes.
+  async getTollsMatchConfig(scope = {}) {
+    return normalizeTollsMatchConfig(await readJsonSetting(scopedKey('tollsMatchConfig', scope), null));
+  },
+
+  async updateTollsMatchConfig(payload = {}, scope = {}) {
+    const key = scopedKey('tollsMatchConfig', scope);
+    const current = await readJsonSetting(key, {});
+    const next = { ...current };
+    // Junk / out-of-band input resolves to the DEFAULT rather than to a
+    // clamped edge value, so a fat-fingered 8500 can't silently disable
+    // auto-confirm and a 5 can't turn the review queue into a rubber stamp.
+    if (payload?.autoConfirmScore !== undefined) {
+      next.autoConfirmScore = normalizeAutoConfirmScore(payload.autoConfirmScore);
+    }
+    await writeJsonSetting(key, next);
+    return this.getTollsMatchConfig(scope);
   },
 
   // Check-in audit (2026-09-03 T1; photo AI added 2026-09-02): per-tenant T1
