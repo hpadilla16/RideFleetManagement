@@ -53,6 +53,22 @@ export function voziaStepForScreen(screen) {
   return SCREEN_TO_STEP[screen] || null;
 }
 
+/**
+ * The step a co-presence post should carry, given the screen and the last step already reported.
+ *
+ * PURE and exported ON PURPOSE: this is the rule that broke (`if (!step) return` threw the post
+ * away for six of sixteen screens), and a rule that only exists inside a React callback can only
+ * be tested by matching the text of page.js — a test that snaps on a reformat and, worse, can go
+ * green because its pattern stopped applying. Here the behaviour tests call the SHIPPED function.
+ *
+ * An overlay screen (ESCALATED, PAIRING, OUT_OF_SERVICE, WALKUP_SOON) is not a position in the
+ * funnel, so it repeats the last real step rather than inventing one — and with no last step it
+ * returns null, because a kiosk that never got anywhere has nothing true to say.
+ */
+export function resolveCoPresenceStep(screenName, lastStep = null) {
+  return voziaStepForScreen(screenName) || lastStep || null;
+}
+
 export function voziaOrigin(host) {
   try { return new URL(host).origin; } catch { return null; }
 }

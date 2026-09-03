@@ -1,82 +1,93 @@
-// The CALLER of the step map — the half where the bug actually lived.
+// The RULE that broke, tested on the shipped function — plus the one thing about the caller that
+// only the caller can tell us.
 //
-// `vozia-step-map.test.mjs` protects the map: every screen is a funnel step or a declared overlay.
-// It does NOT protect the line that consumes it. The original bug was `if (!step) return`, which
-// threw the post away whenever the map said nothing — so a guest who tapped Ayuda from WELCOME was
-// invisible to the agent for the entire session. Restoring that line would leave the map test green
-// and the product broken, which is exactly how this survived a month and a half.
+// `vozia-step-map.test.mjs` protects the table. This protects the rule that consumes it: the
+// original defect was `if (!step) return`, which threw the co-presence post away for six of the
+// sixteen screens the kiosk drives, so a guest who tapped Ayuda from WELCOME was invisible to the
+// agent for a whole session.
 //
-// (Tests requested by the RFM kiosk session, 2026-09-03, reviewing the fix.)
+// That rule now lives in `resolveCoPresenceStep` (voziaBridge.js) rather than inside a React
+// callback, ON PURPOSE: a rule buried in a component can only be checked by matching the TEXT of
+// page.js, and a text assertion snaps on a reformat — or, far worse, goes green because its pattern
+// stopped applying and it quietly stops guarding anything. These call the real function.
+//
+// One text assertion survives, and only because it is about the component's LIFECYCLE, which no
+// pure function can express: every place that discards the conversation identity must discard the
+// reported step with it. It is written as a RELATIONSHIP (one reset per wipe) rather than a fixed
+// number or a shape, so a rename fails it loudly instead of silently excusing it — and it is the
+// assertion that caught a third wipe site the fix had missed.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { voziaStepForScreen } from './voziaBridge.js';
+import { resolveCoPresenceStep } from './voziaBridge.js';
 
-const page = readFileSync(new URL('../app/kiosk/page.js', import.meta.url), 'utf8');
-
-describe('the caller keeps the fallback', () => {
-  test('postVoziaState resolves the step through the last-known-step fallback', () => {
-    assert.match(
-      page,
-      /voziaStepForScreen\(screenName\)\s*\|\|\s*lastVoziaStepRef\.current/,
-      'the overlay fallback is gone — an overlay screen would report nothing again',
-    );
-  });
-
-  test('no bare `if (!step) return` survives without the fallback on the same resolve', () => {
-    // The exact shape of the original defect: a step resolved with NO fallback, then dropped.
-    const bare = /const\s+step\s*=\s*voziaStepForScreen\([^)]*\)\s*;\s*\n\s*if\s*\(!step\)\s*return\s*;/;
-    assert.ok(!bare.test(page), 'the early-return-without-fallback pattern is back');
-  });
-
-  test('the last-step ref is cleared in BOTH wipes, next to the identity', () => {
-    // Guest A stuck on the pad, session wiped, guest B asks for help from an overlay: without these
-    // resets the agent reads A's `signature` as B's position. Same class as the leak QA caught in
-    // the F1 assist-view buffer. The ref must die with the conversation AND with the session.
-    // EVERY site that discards the identity must discard the step with it. There are three: the
-    // session wipe, the iframe reset, and the iframe unmount — and the third was missed on the
-    // first pass, which is precisely why this counts them instead of trusting a comment.
-    const identityWipes = page.match(/voziaIdentityRef\.current = \{ conversationId: null, secret: null \}/g) || [];
-    const resets = page.match(/lastVoziaStepRef\.current\s*=\s*null/g) || [];
-    assert.ok(identityWipes.length >= 3, `expected 3+ identity wipes, found ${identityWipes.length}`);
-    assert.equal(resets.length, identityWipes.length,
-      `the step ref is cleared ${resets.length}× but the identity ${identityWipes.length}× — a wipe site is missing its reset`);
-  });
-});
-
-describe('the behaviour that shape produces', () => {
-  // Mirrors the caller's resolve exactly (pinned to the real source by the pattern tests above).
-  const run = (screens, { wipeAfter = -1 } = {}) => {
+describe('the rule, on the shipped function', () => {
+  const run = (screens, { wipeAt = -1 } = {}) => {
     let last = null;
     return screens.map((s, i) => {
-      if (i === wipeAfter) last = null; // session wipe / conversation reset
-      const step = voziaStepForScreen(s) || last;
+      if (i === wipeAt) last = null; // session wipe / conversation reset / iframe unmount
+      const step = resolveCoPresenceStep(s, last);
       if (!step) return null; // nothing true to say — the post is dropped
       last = step;
       return step;
     });
   };
 
+  test('a guest who asks for help from WELCOME is reported, not dropped', () => {
+    // The whole bug, in one line: this returned null for a month and a half.
+    assert.equal(resolveCoPresenceStep('WELCOME', null), 'find_reservation');
+    assert.equal(resolveCoPresenceStep('BOOT', null), 'find_reservation');
+  });
+
   test('an escalation from the signature pad reads as signature, not as a guess', () => {
     assert.deepEqual(run(['LOOKUP', 'SIGN', 'ESCALATED']), ['find_reservation', 'signature', 'signature']);
   });
 
   test('coming back to WELCOME resets the position honestly', () => {
-    assert.deepEqual(
-      run(['SIGN', 'ESCALATED', 'WELCOME']),
-      ['signature', 'signature', 'find_reservation'],
-    );
-  });
-
-  test('after a session wipe an overlay reports NOTHING — the previous guest never leaks', () => {
-    // Guest A reaches the pad; the session is wiped; guest B opens help from an overlay screen.
-    const out = run(['SIGN', 'ESCALATED', 'OUT_OF_SERVICE'], { wipeAfter: 2 });
-    assert.deepEqual(out, ['signature', 'signature', null], "guest A's step reached guest B");
+    assert.deepEqual(run(['SIGN', 'ESCALATED', 'WELCOME']), ['signature', 'signature', 'find_reservation']);
   });
 
   test('every overlay carries the last real step forward', () => {
     for (const overlay of ['ESCALATED', 'PAIRING', 'OUT_OF_SERVICE', 'WALKUP_SOON']) {
       assert.deepEqual(run(['PAYMENT', overlay]), ['payment', 'payment'], overlay);
     }
+  });
+
+  test('an overlay with NO last step reports nothing — a dead kiosk is not "finding a reservation"', () => {
+    assert.equal(resolveCoPresenceStep('OUT_OF_SERVICE', null), null);
+    assert.equal(resolveCoPresenceStep('ESCALATED', null), null);
+  });
+
+  test('after a wipe, the previous guest never surfaces as this one', () => {
+    // Guest A reaches the pad; the session is wiped; guest B opens help from an overlay screen.
+    assert.deepEqual(
+      run(['SIGN', 'ESCALATED', 'OUT_OF_SERVICE'], { wipeAt: 2 }),
+      ['signature', 'signature', null],
+      "guest A's step reached guest B",
+    );
+  });
+});
+
+describe('the caller: what only the component can tell us', () => {
+  const page = readFileSync(new URL('../app/kiosk/page.js', import.meta.url), 'utf8');
+
+  test('the reported step is discarded everywhere the identity is', () => {
+    // Three sites today: the session wipe, the iframe reset, the iframe unmount. The third was
+    // missed on the first pass — it is the only one that does not go through a session wipe, so a
+    // stale step could ride into the NEXT conversation and be read as the new guest's position.
+    // Counted as a relationship so a fourth site tomorrow cannot land without its reset.
+    const identityWipes = page.match(/voziaIdentityRef\.current = \{ conversationId: null, secret: null \}/g) || [];
+    const stepResets = page.match(/lastVoziaStepRef\.current\s*=\s*null/g) || [];
+    assert.ok(identityWipes.length >= 3,
+      `expected 3+ identity wipes; found ${identityWipes.length} — the pattern moved, re-check this test`);
+    assert.equal(stepResets.length, identityWipes.length,
+      `the step ref is cleared ${stepResets.length}× but the identity ${identityWipes.length}× — a wipe site is missing its reset`);
+  });
+
+  test('the caller uses the shared rule instead of re-deriving one', () => {
+    // Not the SHAPE of the expression — just that the rule is not forked back into the component,
+    // which is what would put it beyond the reach of the tests above.
+    assert.match(page, /resolveCoPresenceStep\(/, 'the caller stopped using the shared rule');
+    assert.ok(!/voziaStepForScreen\(/.test(page), 'the caller re-derives the step — the rule is forked');
   });
 });

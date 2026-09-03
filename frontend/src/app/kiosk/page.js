@@ -53,7 +53,7 @@ import { NameUpdateFlow } from '../../components/kiosk/NameUpdateFlow';
 import { VoziaHelpOverlay } from '../../components/kiosk/VoziaHelpOverlay';
 import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
 import {
-  ackKioskCommand, decideFlowCompletedAck, noteFirstRefusal, postKioskState, voziaPendingStepKey, voziaStepForScreen,
+  ackKioskCommand, decideFlowCompletedAck, noteFirstRefusal, postKioskState, resolveCoPresenceStep, voziaPendingStepKey,
 } from '../../lib/voziaBridge';
 import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
 
@@ -305,7 +305,7 @@ export default function KioskPage() {
    */
   const postVoziaState = useCallback((screenName, errorCode = null) => {
     if (!vozia?.host || !voziaIdentityRef.current.conversationId) return;
-    const step = voziaStepForScreen(screenName) || lastVoziaStepRef.current;
+    const step = resolveCoPresenceStep(screenName, lastVoziaStepRef.current);
     if (!step) return;
     lastVoziaStepRef.current = step;
     postKioskState(vozia.host, voziaIdentityRef.current, {
