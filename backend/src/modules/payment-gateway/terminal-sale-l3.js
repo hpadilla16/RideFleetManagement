@@ -156,16 +156,41 @@ export function getTerminalL3Config(tenantConfig = {}) {
 const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
 
 /** ISO-8601 or '' — never a bare invalid Date, which SPIn's parser has choked on. */
-function isoOrEmpty(d) {
+/**
+ * AutoRental Pickup/Return DateTime.
+ *
+ * The spec is explicit that this is **yyyy-MM-dd** — a DATE, not a timestamp
+ * (docs.ipospays.com/spin-specification .../autorental/sale/post). The first
+ * dry run of the probe was sending a full ISO stamp with milliseconds and a Z,
+ * which is exactly the class of "unacceptable value for X" this gateway
+ * answers with 2201 — and 2201 arrives before the terminal, so it would have
+ * cost a trip to the counter to learn nothing.
+ *
+ * Date-only also sidesteps a timezone question we cannot answer yet: RFM has
+ * no per-location timezone column (the constant is America/Puerto_Rico) and a
+ * Los Angeles pickup near midnight would be stamped on the wrong day. Slicing
+ * the ISO string keeps that bug from reaching a financial record today; the
+ * real fix is the location timezone, tracked in the plan.
+ */
+function rentalDate(d) {
   if (!d) return '';
   const dt = d instanceof Date ? d : new Date(d);
-  return Number.isNaN(dt.getTime()) ? '' : dt.toISOString();
+  return Number.isNaN(dt.getTime()) ? '' : dt.toISOString().slice(0, 10);
 }
 
 const numOrNull = (v) => {
   const n = typeof v === 'object' && v !== null ? Number(String(v)) : Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+/**
+ * numOrNull is not enough on its own: `Number(null)` and `Number('')` are BOTH
+ * 0, and 0 is finite — so an absent value reads back as a real zero. That trap
+ * bit twice in one day (the tolls confidence bar painted every row green from
+ * the same mistake), and here it would put an AdjustmentAmount of 0 on the wire
+ * for every ordinary rental, asserting an adjustment that did not happen.
+ */
+const presentNumber = (v) => (v == null || v === '' ? null : numOrNull(v));
 
 /**
  * The nested AutoRental block, restored from commit 02af6407 — the shape SPIn's
@@ -194,6 +219,8 @@ export function buildAutoRentalBlock({
   pickupLocation = {},
   returnLocation = {},
   rentalDistance = null,
+  purchaseIdentifier = '',
+  adjustmentAmount = null,
 } = {}) {
   const loc = (l = {}) => ({
     Address: str(l.address, 80),
@@ -214,16 +241,25 @@ export function buildAutoRentalBlock({
   return {
     AutoRentalAgreement: {
       AgreementReferenceNumber: str(agreementNumber, 25),
-      PurchaseIdentifier: '',
-      RentalDuration: Number.isFinite(Number(rentalDays)) && Number(rentalDays) > 0
-        ? Number(rentalDays) : null,
+      // OMITTED, not sent empty. This parser has already rejected an empty
+      // string inside an array ("Unacceptable value for ExtraCharges[0]",
+      // commit ddd6d4b0) and 500'd on a shape it disliked. An absent optional
+      // field is a weaker claim than a present meaningless one, so anything we
+      // do not actually have is left out.
+      ...(str(purchaseIdentifier, 25) ? { PurchaseIdentifier: str(purchaseIdentifier, 25) } : {}),
+      ...(Number.isFinite(Number(rentalDays)) && Number(rentalDays) > 0
+        ? { RentalDuration: Number(rentalDays) } : {}),
       RentalPeriod: 'Daily',
-      AutoRentalAdjustment: {
-        AdjustmentAmount: null,
-        // 'X' = no adjustments. Carried forward; the indicator's full
-        // vocabulary is undocumented (plan D-4).
-        AdjustmentAuditIndicatorCode: 'X',
-      },
+      // Only sent when there IS an adjustment. 'X' = no adjustments, so the
+      // whole sub-object is noise on a normal rental — and AdjustmentAmount
+      // was going out as a literal null.
+      ...(presentNumber(adjustmentAmount) != null ? {
+        AutoRentalAdjustment: {
+          AdjustmentAmount: presentNumber(adjustmentAmount),
+          // The indicator's full vocabulary is undocumented (plan D-4).
+          AdjustmentAuditIndicatorCode: 'Y',
+        },
+      } : {}),
     },
     AutoRentalRenter: {
       RenterName: str(renterName, 80) || 'Customer',
@@ -249,8 +285,8 @@ export function buildAutoRentalBlock({
       // Not a placeholder and not tidy-able. This is the "no extras" marker.
       ExtraCharges: ['NoExtraCharge'],
     },
-    AutoRentalPickup: { DateTime: isoOrEmpty(pickupAt), ...loc(pickupLocation) },
-    AutoRentalReturn: { DateTime: isoOrEmpty(returnAt), ...loc(returnLocation) },
+    AutoRentalPickup: { DateTime: rentalDate(pickupAt), ...loc(pickupLocation) },
+    AutoRentalReturn: { DateTime: rentalDate(returnAt), ...loc(returnLocation) },
     AutoRentalDistance: {
       RentalDistance: numOrNull(rentalDistance),
       // Constant — RFM has no distance-unit column.
