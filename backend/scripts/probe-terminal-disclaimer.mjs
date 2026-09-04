@@ -235,6 +235,25 @@ async function main() {
     // land. That becomes the next thing to configure and retest.
     { n: 5, name: 'GetSignature alone - does a second call fetch the ink?', run: async () =>
       report('GetSignature', await spinClient.getSignature(cfg)) },
+    // Step 7 exists because of what step 6 exposes: GetSignature carries NO
+    // text, so after a Disclaimer the clause is off-screen and the renter is
+    // signing a blank box from memory. UserChoice shows the clause AND the
+    // buttons together, so the acceptance happens while the text is visible —
+    // one call per clause instead of two, and a stronger record. Hector's
+    // requirement (2026-09-04) is an initial or signature on all six clauses
+    // plus a contract signature, so the shapes to compare are:
+    //   A  Disclaimer + GetSignature per clause  (12 calls, ink, blank box)
+    //   B  UserChoice per clause + one GetSignature  (7 calls, tap, text shown)
+    { n: 7, name: 'UserChoice - clause text AND buttons on screen together', run: async () => {
+      const clause = longestClause();
+      console.log(`     clause "${clause.key}" - ${clause.body.length} chars, with Accept/Decline`);
+      const res = await spinClient.userChoice(
+        { title: clause.body, options: ['I agree / Acepto', 'Decline / No acepto'] }, cfg);
+      const out = report(`UserChoice (${clause.key})`, res);
+      const picked = res?.SelectedOption ?? res?.selectedOption;
+      console.log(`     SelectedOption  ${picked ?? '(none)'}`);
+      return out;
+    } },
     { n: 6, name: 'Disclaimer then GetSignature - does the clause ink come back?', run: async () => {
       const clause = longestClause();
       console.log(`     showing "${clause.key}" again - sign it, then watch for the fetch`);
