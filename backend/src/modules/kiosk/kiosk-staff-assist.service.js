@@ -497,9 +497,12 @@ async function confirmName(sessionId, device, { fields, licensePhoto } = {}, opt
  *      out in the audit row is honest; silently writing it as if RFM had checked
  *      it would not be.
  *
- * The session's assistUserId is set to the SERVICE ACCOUNT, because a Valet agent
- * is not an RFM user and inventing one would be worse. The human is named in the
- * audit metadata, where its provenance can travel with it.
+ * The session's assistUserId is WHOEVER AUTHENTICATED — the service account when
+ * Valet calls, a real person when an ADMIN or OPS user does (kiosk is on by
+ * default for both, so that path is reachable). Never a service account we go
+ * looking for: that named an arbitrary one and erased the only identity RFM can
+ * actually vouch for. The human Valet says is behind a shared account is named
+ * separately in the audit metadata, where its provenance travels with it.
  */
 
 /** The session a remote agent is entitled to act on, or the same 404 as always. */
@@ -570,13 +573,13 @@ async function remoteUnlock(scope, sessionId, body = {}, actor = null) {
   if (!actor?.id) {
     throw new KioskError('An authenticated caller is required', 401, 'ACTOR_REQUIRED');
   }
-  const svc = { id: actor.id };
+  const auditActor = { id: actor.id };
 
   const grantedAt = new Date();
   await prisma.kioskSession.update({
     where: { id: session.id },
     data: {
-      assistUserId: svc.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt,
+      assistUserId: auditActor.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt,
       // So a second agent picking up the case sees the grant is already held,
       // and by whom, instead of learning it by being refused.
       assistAgentRef: agent.ref, assistAgentName: agent.name,
@@ -586,7 +589,7 @@ async function remoteUnlock(scope, sessionId, body = {}, actor = null) {
     data: {
       tenantId: scope.tenantId,
       reservationId: session.reservationId || null,
-      actorUserId: svc.id,
+      actorUserId: auditActor.id,
       action: 'ADMIN_OVERRIDE',
       reason: `Remote kiosk assist unlock — ${reason}`,
       metadata: JSON.stringify({

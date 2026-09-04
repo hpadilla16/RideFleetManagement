@@ -16,7 +16,7 @@
  *      DATABASE_URL pointing at a database you do not mind seeding into.
  *   3. npm run test:e2e-kiosk-remote-assist
  *
- * It seeds its own disposable tenant on every run and asserts 24 properties.
+ * It seeds its own disposable tenant on every run and asserts 27 properties.
  * A NOTE THE RUN ITSELF TAUGHT US: the module grant is seeded BEFORE the first
  * request on purpose. Effective module access is cached per user inside the
  * backend process, so a grant written to the database after that user has been
@@ -198,7 +198,17 @@ async function run() {
     where: { tenantId: world.tenantId, action: 'ADMIN_OVERRIDE' }, orderBy: { createdAt: 'desc' },
   });
   const meta = JSON.parse(audit?.metadata || '{}');
-  check(meta.agentAssertedByValet?.name === 'Marta Ruiz', 'the human is named in the audit');
+  check(meta.agentAssertedByValet?.name === 'Marta Ruiz', 'the human Valet asserts is named in the audit');
+  // The central property of the actor fix, over real HTTP rather than a fake db:
+  // the row names WHO AUTHENTICATED, and the session agrees with it. Before this,
+  // an admin's override was filed under a service account nobody chose.
+  check(meta.actorUserId === world.svc.id,
+    'the audit names the caller RFM authenticated, not a robot it went looking for',
+    `got ${meta.actorUserId}`);
+  check(audit?.actorUserId === world.svc.id, 'and the AuditLog column agrees with the metadata');
+  const grantedRow = await prisma.kioskSession.findUnique({ where: { id: stuck.id } });
+  check(grantedRow.assistUserId === world.svc.id,
+    'and the SESSION holds the same actor — one human across the whole chain');
   check(/Glare/.test(audit?.reason || ''), 'the stated reason survives to the audit');
 
   console.log('\n8. Hard stops survive going remote');
