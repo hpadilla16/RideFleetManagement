@@ -14,6 +14,7 @@
  */
 import express from 'express';
 import { deviceGuards } from '../kiosk/kiosk.routes.js';
+import { attachPublicRequestMeta, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 import { kioskPaymentLinkService } from './kiosk-payment-link.service.js';
 
 export const kioskPaymentRouter = express.Router();
@@ -27,7 +28,7 @@ const send = (handler) => async (req, res, next) => {
     // broke" instead of "this tenant has no gateway set up". Map the ones that
     // are configuration or state, not faults. (QA NIT.)
     const CODE_STATUS = {
-      GATEWAY_NOT_CONFIGURED: 409, ALREADY_PAID: 409, VALIDATION: 400,
+      GATEWAY_NOT_CONFIGURED: 409, ALREADY_PAID: 409, VALIDATION: 400, AMOUNT_MISMATCH: 409,
       UNKNOWN_REFERENCE: 404, PAYMENT_NOT_COMPLETED: 409, GATEWAY_ERROR: 502,
     };
     if (!err?.status && err?.code && CODE_STATUS[err.code]) {
@@ -53,6 +54,13 @@ kioskPaymentRouter.post('/sessions/:id/payment-link', deviceGuards, send(
 // No device token: this is the GUEST's browser, not the tablet. The reference is
 // the only thing it carries and nothing is trusted from it — the amount and the
 // approval are re-read from the gateway before anything is recorded.
-kioskPaymentRouter.get('/payment-return', send(
+// Unauthenticated by nature — it is the GUEST's phone, not the tablet — so it
+// gets the same public guards every other unauthenticated route in this repo
+// carries. Each hit costs queries and, if it resolves, an outbound gateway call.
+const returnGuards = [
+  attachPublicRequestMeta('kiosk-payment-return'),
+  createPublicRateLimitGuard({ name: 'kiosk-payment-return', maxRequests: 30, windowMs: 60 * 1000 }),
+];
+kioskPaymentRouter.get('/payment-return', returnGuards, send(
   (req) => kioskPaymentLinkService.handlePaymentReturn(req.query?.ref),
 ));

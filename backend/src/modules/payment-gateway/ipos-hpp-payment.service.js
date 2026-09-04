@@ -171,6 +171,11 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
       reservationId: reservation.id,
       metadata: { contains: `"${AUDIT_MARKER}":"${ref}"` },
     },
+    // The kiosk reuses one reference across presses, so there can be several
+    // mint rows for it. Without an order this picked an arbitrary one, and if
+    // the balance had moved between presses a genuine payment failed as an
+    // amount mismatch. The latest mint is the one the guest actually paid.
+    orderBy: { createdAt: 'desc' },
     select: { id: true, metadata: true },
   });
   if (!minted) throw codedError('Unknown iPOS payment reference for this reservation', 'UNKNOWN_REFERENCE');

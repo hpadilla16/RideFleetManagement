@@ -1277,7 +1277,11 @@ export default function KioskPage() {
           onRequestLink={requestPaymentLink}
           onSimulate={simulatePayment}
           onHelp={() => escalate('PAYMENT_TROUBLE')}
-          onBack={() => { setErr(''); setScreen('OFFERS'); loadOffers(); }}
+          // Going back can change the balance (an upsell accepted or dropped), and
+          // a QR minted for the OLD amount would undercharge and record as a clean
+          // payment. Drop it; the next press asks the server, which compares the
+          // amount and supersedes the intent if it moved.
+          onBack={() => { setErr(''); setPayLink(null); setScreen('OFFERS'); loadOffers(); }}
         />
       ) : null}
       {screen === 'SIGN' ? (

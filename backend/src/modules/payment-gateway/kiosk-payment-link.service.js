@@ -16,6 +16,7 @@ import { loadCheckoutSessionFor, isTerminal } from '../kiosk/kiosk-checkout.serv
 import { withKioskPaymentGuard } from '../kiosk/kiosk-payment-guards.js';
 import { kioskPaymentIntentService } from '../kiosk/kiosk-payment-intent.service.js';
 import { mintHppSession, verifyAndRecordHppReturn } from './ipos-hpp-payment.service.js';
+import { maybeCreateAgreementPayment } from '../reservations/reservation-pricing.service.js';
 
 async function createPaymentLink(sessionId, device) {
   const session = await getSessionForDevice(sessionId, device);
@@ -50,7 +51,34 @@ async function createPaymentLink(sessionId, device) {
   // owns the kill switch, the production double key, the ceiling, the expiring
   // window AND the dry-run short-circuit — so nothing can reach iPOS except
   // through it. This is the shape payment-references.test.mjs R2 exists to force.
-  const intent = await kioskPaymentIntentService.ensureIntent(sessionId, device);
+  let intent = await kioskPaymentIntentService.ensureIntent(sessionId, device);
+
+  // THE LINK IS REUSED, NOT JUST THE REFERENCE. The first version reused the
+  // reference and then minted a fresh hosted-page session on every press — so a
+  // second live link went into the world each time, and a guest who paid both
+  // produced a second charge the reference-based dedupe could not see. The
+  // commit even claimed the opposite. Now: same amount → the stored link comes
+  // back and NOTHING is minted. `session` was read before ensureIntent, and a
+  // reused intent leaves the row untouched, so its stored link is current.
+  const storedUrl = intent.reused ? (session.paymentIntentUrl || null) : null;
+  const storedAmount = intent.reused && session.paymentIntentAmount != null
+    ? Number(session.paymentIntentAmount)
+    : null;
+  if (storedUrl && storedAmount === amount) {
+    await recordSessionTelemetry(session, { step: 'PAYMENT', event: 'PAYMENT_LINK_REUSED', data: null });
+    return { ok: true, url: storedUrl, reference: intent.paymentIntentRef, amount, reused: true, minted: false };
+  }
+  // A stored link for a DIFFERENT amount would undercharge — the guest went back
+  // and accepted or dropped an upsell. The old link stays payable at the gateway
+  // (there is no documented cancel), so the intent is SUPERSEDED: new reference,
+  // new link, old reference retained so a late payment on it still resolves.
+  if (storedUrl && storedAmount !== amount) {
+    logger.warn('[kiosk-checkout] balance moved since the link was minted — superseding', {
+      sessionId: session.id, was: storedAmount, now: amount,
+    });
+    intent = await kioskPaymentIntentService.supersedeIntent(sessionId, device);
+  }
+
   const base = (process.env.PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'http://localhost:4000').replace(/\/$/, '');
 
   const minted = await withKioskPaymentGuard(
@@ -78,6 +106,15 @@ async function createPaymentLink(sessionId, device) {
     { dryRunResult: { url: null, referenceId: intent.paymentIntentRef, dryRun: true } },
   );
   const { url, referenceId } = minted || {};
+  // Persist the link WITH the amount it was minted for, so the next press can
+  // tell "same link" from "stale link". Only a real URL is stored: a dry run
+  // hands back null, and null must never be remembered as "the link".
+  if (url) {
+    await prisma.kioskSession.update({
+      where: { id: session.id },
+      data: { paymentIntentUrl: url, paymentIntentAmount: amount },
+    }).catch((err) => logger.warn('[kiosk-checkout] could not persist payment link', { err: err?.message }));
+  }
 
   await recordSessionTelemetry(session, {
     step: 'PAYMENT',
@@ -90,7 +127,7 @@ async function createPaymentLink(sessionId, device) {
 
   // The URL is what the QR encodes. The kiosk renders it client-side; no image
   // is generated or stored server-side, so nothing card-adjacent is persisted.
-  return { ok: true, url: url || null, reference: referenceId, amount, reused: !!intent.reused };
+  return { ok: true, url: url || null, reference: referenceId, amount, reused: !!intent.reused, minted: !!url };
 }
 
 
@@ -107,7 +144,10 @@ export const kioskPaymentLinkService = { createPaymentLink, handlePaymentReturn 
  * recorded. The reference resolves back to its kiosk session even after the
  * session was wiped, which is the whole reason the binding lives on the row.
  */
-async function handlePaymentReturn(rawRef) {
+async function handlePaymentReturn(rawRef, deps = {}) {
+  const db = deps.prisma || prisma;
+  const verifyAndRecord = deps.verifyAndRecord || verifyAndRecordHppReturn;
+  const mirrorToAgreement = deps.mirrorToAgreement || maybeCreateAgreementPayment;
   const ref = String(rawRef || '').trim();
   if (!ref) throw new KioskError('Missing payment reference', 400, 'MISSING_REFERENCE');
 
@@ -121,15 +161,48 @@ async function handlePaymentReturn(rawRef) {
     throw new KioskError('This payment could not be matched — staff have been notified', 404, 'ORPHAN_PAYMENT');
   }
 
-  const reservation = await prisma.reservation.findUnique({
+  const reservation = await db.reservation.findUnique({
     where: { id: resolved.reservationId },
-    select: { id: true, tenantId: true, reservationNumber: true },
+    select: {
+      id: true, tenantId: true, reservationNumber: true,
+      // The agreement is what the kiosk quoted against, and what the counter reads.
+      rentalAgreement: { select: { id: true, status: true } },
+    },
   });
   if (!reservation) throw new KioskError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
 
-  const verdict = await verifyAndRecordHppReturn({ reservation, iposRef: ref });
+  const verdict = await verifyAndRecord({ reservation, iposRef: ref }, deps);
+
+  // THE MONEY MUST REACH THE AGREEMENT. The kiosk quoted RentalAgreement.balance,
+  // but the shared verifier only writes a ReservationPayment — and that balance is
+  // computed ONLY from RentalAgreementPayment. Without this mirror the counter kept
+  // seeing the full balance after the guest had paid, and charged them again.
+  // Guarded twice: only on a first-time (non-duplicate) verdict, and only if no
+  // agreement row already carries this reference — a second return for the same
+  // payment must not produce a second ledger line.
+  if (!verdict?.duplicate && reservation.rentalAgreement?.id) {
+    const payment = await db.reservationPayment.findFirst({
+      where: { reservationId: reservation.id, reference: verdict.reference },
+    });
+    const already = payment
+      ? await db.rentalAgreementPayment.findFirst({
+        where: { rentalAgreementId: reservation.rentalAgreement.id, reference: verdict.reference },
+        select: { id: true },
+      })
+      : null;
+    if (payment && !already) {
+      await mirrorToAgreement({ reservation, payment }).catch((err) => {
+        // Loud, not silent: a payment that reached the reservation but not the
+        // agreement is exactly the double-charge setup this block exists to end.
+        logger.error('[kiosk-payment] payment recorded on reservation but NOT mirrored to agreement — counter will overcharge', {
+          reservationId: reservation.id, reference: verdict.reference, err: err?.message,
+        });
+        throw err;
+      });
+    }
+  }
   if (resolved.kioskSessionId) {
-    await prisma.kioskSession.update({
+    await db.kioskSession.update({
       where: { id: resolved.kioskSessionId },
       data: { paymentIntentState: 'PAID', lastActivityAt: new Date() },
     }).catch((err) => logger.warn('[kiosk-payment] could not stamp session PAID', { err: err?.message }));

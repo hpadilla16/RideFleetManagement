@@ -309,6 +309,60 @@ async function run() {
     'the stored reference is gateway-legal — the colon-prefixed form is rejected by iPOS',
     `got ${raceRow.paymentIntentRef}`);
 
+  console.log('\n13. The link is reused at the same amount, and superseded when the amount moves');
+  // QA BLOCKER 2: reusing the REFERENCE while minting a fresh hosted-page session
+  // on every press still put a second live link into the world. Proven here over
+  // real HTTP with a real agreement: same amount → the stored link comes back and
+  // nothing is minted (the kill switch is never even consulted); different amount
+  // → the intent is superseded, old reference retained. No gateway needed for
+  // either: the first returns before the guard, the second is refused BY it.
+  const linkSession = await newSession({ outcome: 'IN_PROGRESS', step: 'PAYMENT' });
+  const agreement = await prisma.rentalAgreement.create({
+    data: {
+      id: id('ra'), tenantId: world.tenantId, agreementNumber: `A${Date.now() % 1000000}`,
+      reservationId: world.reservation.id, pickupAt: new Date(), returnAt: new Date(Date.now() + 86400e3),
+      pickupLocationId: world.loc.id, returnLocationId: world.loc.id,
+      customerFirstName: 'Roberto', customerLastName: 'Diaz', balance: 87.25, updatedAt: new Date(),
+    },
+  });
+  const cs = await prisma.checkoutSession.create({
+    data: {
+      id: id('cs'), tenantId: world.tenantId, reservationId: world.reservation.id,
+      agreementId: agreement.id, currentStep: 'PAYMENT_PENDING', events: '[]', updatedAt: new Date(),
+    },
+  });
+  await prisma.kioskSession.update({
+    where: { id: linkSession.id },
+    data: {
+      checkoutSessionId: cs.id, paymentIntentRef: 'E2EREUSE01', paymentIntentState: 'PENDING',
+      paymentIntentUrl: 'https://pay.example/stored', paymentIntentAmount: 87.25,
+    },
+  });
+  const same = await call(`/api/kiosk/sessions/${linkSession.id}/payment-link`, {
+    method: 'POST', deviceToken: world.deviceToken,
+  });
+  check(same.status === 200 && same.body?.url === 'https://pay.example/stored',
+    'same amount → the STORED link comes back, nothing minted', `got ${same.status} ${JSON.stringify(same.body).slice(0, 120)}`);
+  check(same.body?.minted === false && same.body?.reference === 'E2EREUSE01',
+    'and it says so — reference unchanged, minted:false');
+
+  // The guest went back and accepted an upsell: the balance moved.
+  await prisma.rentalAgreement.update({ where: { id: agreement.id }, data: { balance: 112.0 } });
+  const moved = await call(`/api/kiosk/sessions/${linkSession.id}/payment-link`, {
+    method: 'POST', deviceToken: world.deviceToken,
+  });
+  check(moved.status !== 200 || moved.body?.url !== 'https://pay.example/stored',
+    'a different amount must NOT hand back the old link — that would undercharge', `got ${moved.status}`);
+  const afterMove = await prisma.kioskSession.findUnique({ where: { id: linkSession.id } });
+  check(afterMove.paymentIntentRef !== 'E2EREUSE01',
+    'the intent was SUPERSEDED — a new reference for the new amount', `still ${afterMove.paymentIntentRef}`);
+  check(afterMove.paymentIntentPriorRefs.includes('E2EREUSE01'),
+    'and the old reference is retained so a late payment on it still resolves');
+  check(afterMove.paymentIntentUrl === null,
+    'the stale link did not survive the supersede');
+  check(moved.body?.code === 'KIOSK_PAYMENT_BLOCKED',
+    'and with the switch off, the fresh mint was refused BY THE GUARD — it got that far', `got ${moved.body?.code}`);
+
   console.log(`\n${'='.repeat(56)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(56)}`);
   await prisma.$disconnect();
   process.exit(fail ? 1 : 0);

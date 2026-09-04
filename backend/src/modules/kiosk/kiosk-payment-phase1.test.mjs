@@ -566,3 +566,45 @@ test('QA minor 1: a later NOT_ATTEMPTED raise NEVER downgrades a GATEWAY_FAILED 
   const resolved = await paymentOpsQueue.resolve(a.id, { actorUserId: 'u1' }, { tenantId: 't1' });
   assert.equal(resolved.status, 'RESOLVED');
 });
+
+/* ───────── B5 Phase 2 fixes, pinned exactly where QA found them ───────── */
+
+test('B1: a reference decorated the way iPOS actually returns it still resolves', async () => {
+  // Measured by QA against the real shape: iPOS glues `?TransactionId=…` onto the
+  // reference in the return URL (seen live twice, 2026-08-30). Stripping only the
+  // prefix sent EVERY real payment to "orphan" — unrecorded, and with nothing in
+  // the staff queue. The reference is alphanumeric by contract; the leading run
+  // is the reference and the rest is the gateway's decoration.
+  seedSession({ paymentIntentRef: 'Kmtn9zzQATEST01', paymentIntentState: 'PENDING', reservationId: 'res1' });
+  const clean = await kioskPaymentIntentService.resolveByReference('Kmtn9zzQATEST01');
+  const decorated = await kioskPaymentIntentService.resolveByReference('Kmtn9zzQATEST01?TransactionId=99887766');
+  const prefixedAndDecorated = await kioskPaymentIntentService.resolveByReference('IPOS:Kmtn9zzQATEST01?TransactionId=99887766');
+  assert.ok(clean, 'the clean form resolves (it always did)');
+  assert.ok(decorated, 'the form iPOS ACTUALLY sends must resolve — this was every real payment');
+  assert.ok(prefixedAndDecorated, 'prefix + decoration together must resolve too');
+  assert.equal(decorated.reservationId, 'res1');
+  assert.equal(prefixedAndDecorated.reservationId, 'res1');
+});
+
+test('B1: decoration alone, or garbage, resolves to nothing — not to the wrong session', async () => {
+  seedSession({ paymentIntentRef: 'Kmtn9zzQATEST01', paymentIntentState: 'PENDING', reservationId: 'res1' });
+  assert.equal(await kioskPaymentIntentService.resolveByReference('?TransactionId=99887766'), null);
+  assert.equal(await kioskPaymentIntentService.resolveByReference('IPOS:'), null);
+  assert.equal(await kioskPaymentIntentService.resolveByReference('   '), null);
+});
+
+test('B2 (intent half): a fresh mint never inherits the previous link or amount', async () => {
+  // A superseded intent gets a new reference; carrying the old URL forward would
+  // hand the guest a page minted for a different reference and amount.
+  const s = seedSession({
+    paymentIntentRef: 'OLDREF1', paymentIntentState: 'TERMINAL', reservationId: 'res1',
+    paymentIntentUrl: 'https://pay/old', paymentIntentAmount: 99.5,
+  });
+  const out = await kioskPaymentIntentService.ensureIntent(s.id, DEVICE);
+  assert.equal(out.reused, false, 'TERMINAL must mint fresh');
+  const row = db.sessions.find((r) => r.id === s.id);
+  assert.notEqual(row.paymentIntentRef, 'OLDREF1');
+  assert.equal(row.paymentIntentUrl, null, 'the old link must not survive a new reference');
+  assert.equal(row.paymentIntentAmount, null, 'nor the amount it was minted for');
+  assert.ok(row.paymentIntentPriorRefs.includes('OLDREF1'), 'but the old reference stays resolvable for a late payment');
+});

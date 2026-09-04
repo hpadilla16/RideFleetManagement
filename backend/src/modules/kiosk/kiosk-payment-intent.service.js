@@ -86,6 +86,10 @@ async function mintInto(session, device, { superseding = null } = {}) {
       paymentIntentState: 'PENDING',
       paymentIntentCreatedAt: new Date(),
       lastActivityAt: new Date(),
+      // A fresh reference gets a fresh link. Carrying the old URL forward would
+      // hand a guest a page minted for a different reference and amount.
+      paymentIntentUrl: null,
+      paymentIntentAmount: null,
     },
   });
   if (claimed.count === 0) {
@@ -210,7 +214,17 @@ async function setIntentState(sessionId, device, state) {
 async function resolveByReference(rawReference) {
   const raw = String(rawReference || '').trim();
   if (!raw) return null;
-  const bare = raw.includes(':') ? raw.slice(raw.indexOf(':') + 1) : raw;
+  const unprefixed = raw.includes(':') ? raw.slice(raw.indexOf(':') + 1) : raw;
+  // iPOS does not hand the reference back clean. The return URL carries it
+  // DECORATED — a second `?TransactionId=…` glued on, seen live twice
+  // (2026-08-30) — and this resolver only stripped the prefix, so EVERY real
+  // return fell through to "orphan", the payment went unrecorded, and the staff
+  // queue got nothing. The reference is strictly alphanumeric by contract, so
+  // the leading run IS the reference; anything after it is the gateway's
+  // decoration. Inlined rather than imported: this file lives in the kiosk
+  // module, which may not import a gateway client (payment-references R2).
+  const bare = (/^[A-Za-z0-9]{1,20}/.exec(unprefixed) || [''])[0];
+  if (!bare) return null;
 
   const select = {
     id: true, tenantId: true, deviceId: true, reservationId: true,
