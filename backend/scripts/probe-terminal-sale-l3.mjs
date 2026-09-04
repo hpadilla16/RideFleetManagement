@@ -107,6 +107,7 @@ import {
   resolveTenantTerminalConfig, toSpinClientConfig, maskTpn,
 } from '../src/modules/payment-gateway/tenant-terminal-config.js';
 import { extractValidationErrors, isAutoRentalAccepted } from '../src/modules/payment-gateway/autorental-validation.js';
+import { isBusyFailure, busyDelaySeconds } from '../src/modules/payment-gateway/terminal-state.js';
 import { L3_ENVELOPE } from '../src/modules/payment-gateway/terminal-sale-l3.js';
 import { buildLevel3LineItems } from '../src/modules/payment-gateway/autorental-l3.builder.js';
 import { prisma } from '../src/lib/prisma.js';
@@ -589,11 +590,18 @@ async function main() {
     console.log('  Look at the terminal and tap when it prompts.');
 
     let out;
+    let busyNotRefused = false;
     try {
-      const res = await spinClient.sale(callArgs, stage.cfg);
+      // A sale hits "Service Busy" (1000) for the same reason a void does: the
+      // terminal is still closing out the PREVIOUS stage. Learned at LAX
+      // 2026-09-04, where stage 2 came back busy while the stage-1 void was
+      // still settling - and this probe then announced that stage 2's FIELDS
+      // had been rejected. They never reached the device.
+      const res = await withBusyRetry(() => spinClient.sale(callArgs, stage.cfg));
       out = report(`stage ${stage.n}`, res);
     } catch (e) {
       out = explainThrow(e);
+      busyNotRefused = isBusyFailure(e);
     }
 
     if (out.approved) {
@@ -610,10 +618,19 @@ async function main() {
       }
       console.log(`  ✔ Stage ${stage.n} APPROVED${out.validationOk === false ? ' — but with L2/L3 validation errors inside the 200 (see above)' : ''}${out.hasToken ? '' : ' — and NO TOKEN came back'}`);
     } else {
-      console.log(`\n  ✖ Stage ${stage.n} was REFUSED. No money moved.`);
-      console.log('    Everything in stages below this one already passed, so the fields THIS');
-      console.log('    stage adds are what the gateway rejected. That is the finding.');
-      stopped = `stage ${stage.n} refused`;
+      if (busyNotRefused) {
+        console.log(`
+  ⏳ Stage ${stage.n} never reached the terminal — it answered BUSY, even`);
+        console.log('    after waiting. This says NOTHING about the fields this stage adds; the');
+        console.log('    device was still finishing the previous one. Give it a minute, then');
+        console.log(`    re-run with --stage ${stage.n} to test this rung on its own.`);
+        stopped = `stage ${stage.n} could not be tested — terminal busy`;
+      } else {
+        console.log(`\n  ✖ Stage ${stage.n} was REFUSED. No money moved.`);
+        console.log('    Everything in stages below this one already passed, so the fields THIS');
+        console.log('    stage adds are what the gateway rejected. That is the finding.');
+        stopped = `stage ${stage.n} refused`;
+      }
       break;
     }
   }
@@ -650,6 +667,27 @@ async function main() {
  * real person's card, so a failure here stops the ladder rather than letting a
  * second one accumulate behind it.
  */
+/**
+ * Wait out a busy terminal for ANY call, honouring the gateway's own delay.
+ * Only busy failures: a 2201 is a refusal, and retrying a money call on a
+ * guess is how somebody gets charged twice.
+ */
+async function withBusyRetry(fn, attempts = 3) {
+  let last = null;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (!isBusyFailure(e) || i === attempts - 1) throw e;
+      const secs = busyDelaySeconds(e);
+      console.log(`     terminal busy - waiting ${secs}s, attempt ${i + 2}/${attempts}`);
+      await new Promise((r) => setTimeout(r, secs * 1000));
+    }
+  }
+  throw last;
+}
+
 async function voidStage(referenceId, cfg, amount) {
   console.log(`\n  … voiding ${referenceId}`);
   try {
