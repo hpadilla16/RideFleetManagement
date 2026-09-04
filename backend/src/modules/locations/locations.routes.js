@@ -2,8 +2,18 @@
 import { locationsService } from './locations.service.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { locationDocumentsService } from './location-documents.service.js';
+import { locationClausesRouter } from './location-clauses.routes.js';
 
 export const locationsRouter = Router();
+
+// ---------------------------------------------------------------------------
+// Contract clause overrides (2026-09-04). Declared FIRST: Express matches in
+// order, and this path must never be swallowed by the generic PATCH /:id, which
+// validates nothing and audits nothing. The ADMIN-only gate lives inside the
+// sub-router — narrower than this router's ADMIN+OPS, because these clauses are
+// what a renter legally agrees to.
+// ---------------------------------------------------------------------------
+locationsRouter.use('/:id/clauses', locationClausesRouter);
 
 locationsRouter.get('/', async (_req, res, next) => {
   try { res.json(await locationsService.list(scopeFor(_req))); } catch (e) { next(e); }
@@ -34,6 +44,12 @@ locationsRouter.patch('/:id', async (req, res, next) => {
   try { res.json(await locationsService.update(req.params.id, req.body || {}, scopeFor(req))); }
   catch (e) {
     if (e?.code === 'P2002') return res.status(409).json({ error: 'A location with that code already exists in this tenant' });
+    // Ordered BEFORE the /not found/ test: the clause message is a 400 about
+    // the caller's field, not a missing branch, and "found" is not in it — but
+    // an ordering accident here would turn a precise message into a 404.
+    if (/termsSectionsJson cannot be set here/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Location not found' });
     next(e);
   }

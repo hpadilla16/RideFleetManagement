@@ -126,6 +126,18 @@ export const AUDIT_ACTIONS = Object.freeze({
   // when" has to be answerable. Metadata carries the modes + location ids ONLY.
   CHECKOUT_CONTRACT_MODE_CHANGE: 'CHECKOUT_CONTRACT_MODE_CHANGE',
 
+  // ── Per-location contract clause overrides (2026-09-04) ──
+  // The text a renter initials and legally agrees to, per branch
+  // (Location.termsSectionsJson). "Who changed which clause at which branch,
+  // and when" has to be answerable, and so does "did that change knock this
+  // branch off terminal signing" — a clause over 250 characters sends every
+  // checkout there to the renter's phone. Metadata carries section KEYS,
+  // LENGTHS and the terminal verdict ONLY. NEVER the clause wording: it is a
+  // legal instrument that already lives in the column and in the acceptance
+  // rows of everyone who signed it, and an audit table is not where anyone
+  // would look for it.
+  LOCATION_CLAUSE_OVERRIDE_CHANGE: 'LOCATION_CLAUSE_OVERRIDE_CHANGE',
+
   // ── Payment terminal / gateway configuration (2026-08-26) ──
   // Editing this row decides WHICH merchant account a tenant's card charges
   // settle into. "Who repointed the terminal, and when" has to be answerable
