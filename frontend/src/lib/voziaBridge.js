@@ -37,6 +37,10 @@ export const VOZIA_ERROR_CODES = Object.freeze([
 const SCREEN_TO_STEP = {
   BOOT: 'find_reservation',
   WELCOME: 'find_reservation',
+  // Su UNICO predecesor es WELCOME (un solo call site), asi que decir
+  // find_reservation aqui es verdad, no una invencion. Un walk-up parado en esta
+  // pantalla que pide ayuda dejaba al agente sin nada. (QA MINOR-2)
+  WALKUP_SOON: 'find_reservation',
   LOOKUP: 'find_reservation',
   SUMMARY: 'find_reservation',
   ID: 'license_scan',
@@ -61,12 +65,35 @@ export function voziaStepForScreen(screen) {
  * be tested by matching the text of page.js — a test that snaps on a reformat and, worse, can go
  * green because its pattern stopped applying. Here the behaviour tests call the SHIPPED function.
  *
- * An overlay screen (ESCALATED, PAIRING, OUT_OF_SERVICE, WALKUP_SOON) is not a position in the
+ * An overlay screen (ESCALATED, PAIRING, OUT_OF_SERVICE) is not a position in the
  * funnel, so it repeats the last real step rather than inventing one — and with no last step it
  * returns null, because a kiosk that never got anywhere has nothing true to say.
  */
 export function resolveCoPresenceStep(screenName, lastStep = null) {
   return voziaStepForScreen(screenName) || lastStep || null;
+}
+
+/**
+ * Progress number for the five-step bar the agent sees. Lives HERE, beside the
+ * step table, because the two must never disagree: deriving the number from the
+ * SCREEN while the step came from the last real one made the console read
+ * "4/5 · Payment" and then "0/5 · Payment" for the same guest — the label right,
+ * the number walking backwards. (QA MINOR-1.)
+ */
+const SCREEN_PROGRESS = {
+  LOOKUP: 1, SUMMARY: 1, ID: 2, SELFIE: 2, OFFERS: 3, PAYMENT: 4, SIGN: 5, DONE: 5,
+};
+
+/**
+ * The whole co-presence position: step AND its number, resolved together so an
+ * overlay repeats both or neither. `last` is the previous return value (or null).
+ * Returns null when there is nothing true to say.
+ */
+export function resolveCoPresence(screenName, last = null) {
+  const mapped = voziaStepForScreen(screenName);
+  if (mapped) return { step: mapped, stepNumber: SCREEN_PROGRESS[screenName] || 0 };
+  if (last?.step) return { step: last.step, stepNumber: last.stepNumber || 0 };
+  return null;
 }
 
 export function voziaOrigin(host) {

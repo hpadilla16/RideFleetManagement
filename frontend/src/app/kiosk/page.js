@@ -53,7 +53,7 @@ import { NameUpdateFlow } from '../../components/kiosk/NameUpdateFlow';
 import { VoziaHelpOverlay } from '../../components/kiosk/VoziaHelpOverlay';
 import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
 import {
-  ackKioskCommand, decideFlowCompletedAck, noteFirstRefusal, postKioskState, resolveCoPresenceStep, voziaPendingStepKey,
+  ackKioskCommand, decideFlowCompletedAck, noteFirstRefusal, postKioskState, resolveCoPresence, voziaPendingStepKey,
 } from '../../lib/voziaBridge';
 import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
 
@@ -305,12 +305,18 @@ export default function KioskPage() {
    */
   const postVoziaState = useCallback((screenName, errorCode = null) => {
     if (!vozia?.host || !voziaIdentityRef.current.conversationId) return;
-    const step = resolveCoPresenceStep(screenName, lastVoziaStepRef.current);
-    if (!step) return;
-    lastVoziaStepRef.current = step;
+    // step and stepNumber travel TOGETHER: an overlay repeats the last real
+    // step, so it must repeat that step's number too. Deriving the number from
+    // the SCREEN made the agent read "4/5 · Payment" and then "0/5 · Payment"
+    // for the same guest — the label right, the number walking backwards.
+    // (QA MINOR-1.)
+    const here = resolveCoPresence(screenName, lastVoziaStepRef.current);
+    if (!here) return;
+    const { step, stepNumber } = here;
+    lastVoziaStepRef.current = here;
     postKioskState(vozia.host, voziaIdentityRef.current, {
       step,
-      stepNumber: screenName === 'DONE' ? 5 : (PROGRESS_OF[screenName] || 0),
+      stepNumber,
       totalSteps: 5,
       attempts: Math.max(1, verifyAttemptsRef.current || 1),
       errorCode: errorCode || voziaErrorRef.current || undefined,
