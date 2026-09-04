@@ -331,15 +331,31 @@ jobs:
       - name: Start stack
         run: docker compose -f docker-compose.yml up -d --build
       - name: Wait for backend
+        # SIZED TO THE WORK, not to a guess. The dev container's command is
+        # `npm install && npx prisma generate && npx prisma db push && npm run dev`
+        # — it does real work before it can answer, and 90s was simply less than
+        # that work takes on a loaded runner.
+        #
+        # Measured 2026-09-04, same tree, same image: 18s on a warm runner, 68s on
+        # a cold one, >90s often enough to fail three runs in a row, go green, and
+        # fail again. That is not flakiness in the suite; it is a stopwatch set
+        # shorter than the race. The job is named tenant-isolation-suite, so every
+        # one of those reds read as an isolation failure and never was — nobody
+        # even reached a test.
+        #
+        # 300s is not "more slack until it stops hurting": it is ~4x the measured
+        # cold boot, which is the margin a boot that installs dependencies needs.
+        # The real fix is for the container to stop doing that work at startup;
+        # until someone does that, the window has to match reality.
         run: |
-          for i in {1..45}; do
+          for i in {1..150}; do
             if curl -fsS http://localhost:4000/health >/dev/null; then
-              echo "backend ready"
+              echo "backend ready after ~$((i * 2))s"
               exit 0
             fi
             sleep 2
           done
-          echo "backend not ready after 90s"
+          echo "backend not ready after 300s"
           # WHY the container is not answering, not just THAT it is not. A container
           # still running `npm install` is Up with an empty log and looks identical to
           # one that crashed before flushing stdout — and on 2026-09-03 that ambiguity
