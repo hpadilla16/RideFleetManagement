@@ -520,7 +520,7 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   // worth asserting, because that is what gets charged.
   const { buildStages, stagePayload } = await import('../../../scripts/probe-terminal-sale-l3.mjs');
   const stages = buildStages({ amount: 1.00, agreementNumber: 'PROBE-T', taxRate: 11.5 });
-  assert.equal(stages.length, 6);
+  assert.equal(stages.length, 7);
   const p = stages.map((s) => stagePayload(s, 'REF').body);
 
   // 1 — the control is today's payload and nothing else.
@@ -538,6 +538,15 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   // 3 — same envelope, now with exactly one line.
   assert.equal(p[2].L3Data.items.length, 1);
   assert.equal(p[2].L3Data.Header.LineItemCount, 1);
+
+  // 7 — the SAME body as rung 5, but aimed at the rental endpoint. Added
+  // after the 2026-09-04 LAX run, where all five rungs approved on the generic
+  // v2/Payment/Sale and ARLFlag never came back once: the generic endpoint
+  // takes these fields and shows no sign of using them.
+  assert.equal(stages[6].endpoint, 'AutoRental', 'rung 7 is the endpoint experiment');
+  assert.ok(p[6].AutoRental, 'and it still carries the rental block');
+  assert.deepEqual(Object.keys(p[6]).sort(), Object.keys(p[4]).sort(),
+    'the BODY must match rung 5 exactly — the endpoint is the only variable');
 
   // 4 — the full itemization; deposit and tax rows are NOT lines.
   assert.equal(p[3].L3Data.items.length, 4);

@@ -339,6 +339,39 @@ export const spinClient = {
   },
 
   /**
+   * The SAME payload, sent to the AUTO RENTAL endpoint.
+   *
+   * Why this exists (LAX, 2026-09-04): all five probe rungs approved on
+   * `v2/Payment/Sale` — the Level 2 header, real line items, and the whole
+   * nested AutoRental block — and `ARLFlag` never came back on ANY of them.
+   * The generic sale endpoint takes these fields without complaint and gives
+   * no sign it does anything with them, which is what you would expect: the
+   * rental data belongs to the rental endpoint.
+   *
+   * `v2/AutoRental/Sale` is where the May 2026 work was aimed, and where its
+   * four StatusCode 2201s were learned. Every one of those lessons is now in
+   * the payload builder — `AutoRental` not `RentalData` (cc4efdd8), nested not
+   * flat (02af6407, which returned HTTP 500), `ExtraCharges: ['NoExtraCharge']`
+   * rather than empty or [''] (bc29c096, ddd6d4b0), a numeric RentalClassId,
+   * and yyyy-MM-dd dates. So this is the same body those attempts were
+   * converging on, finished.
+   *
+   * Deliberately identical to sale() apart from the path: if the two behave
+   * differently, the endpoint is the only variable, and that is the whole
+   * point of asking.
+   */
+  async autoRentalSale({
+    amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber,
+    cart, customFields, level3 = null,
+  }, tenantConfig) {
+    const { body, l3Decision } = buildSalePayload({
+      amount, referenceId, paymentType, tipAmount, invoiceNumber, cart, customFields, level3,
+    }, tenantConfig);
+    logL3Decision(l3Decision, { referenceId: String(referenceId).slice(0, 50), endpoint: 'AutoRental/Sale' });
+    return spinRequest('POST', 'v2/AutoRental/Sale', body, tenantConfig);
+  },
+
+  /**
    * Authorize only (hold funds, capture later). Same minimal-payload
    * rule as sale() — added optional flags broke this merchant's Spin
    * proxy, so we keep only the proven-working set.
