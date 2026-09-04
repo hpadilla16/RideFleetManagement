@@ -93,6 +93,11 @@ kioskAdminRouter.get('/admin/sessions/:kioskSessionId/assist-view', ok(
 // expired licence stays a hard stop, both licence photos stay required, and the
 // grant is still 10 minutes, one session, single use.
 //
+// The AUDITED ACTOR is req.user — whoever actually authenticated. These routes
+// are reachable by more than the Valet service account: `kiosk` is ON by default
+// for ADMIN and OPS, so a tenant's own admin can call them, and recording that as
+// the robot would have erased the only identity RFM can actually vouch for.
+//
 // agentRef/agentName are asserted by Valet and audited AS asserted — RFM cannot
 // see which human is behind the shared service account, and the audit row says
 // so rather than implying a check that did not happen.
@@ -100,21 +105,21 @@ kioskAdminRouter.get('/admin/sessions/:kioskSessionId/assist-view', ok(
 // POST /api/kiosk/admin/sessions/:id/remote-assist/unlock
 // { conversationId, agentRef, agentName, reason } → mints the grant.
 kioskAdminRouter.post('/admin/sessions/:kioskSessionId/remote-assist/unlock', ok(
-  (req) => kioskStaffAssistService.remoteUnlock(scopeFor(req), req.params.kioskSessionId, req.body || {}),
+  (req) => kioskStaffAssistService.remoteUnlock(scopeFor(req), req.params.kioskSessionId, req.body || {}, req.user),
 ));
 
 // POST /api/kiosk/admin/sessions/:id/remote-assist/verify-id
 // { conversationId, agentRef, agentName, fields, licenseFrontPhoto, licenseBackPhoto }
 // The manual entry itself: the agent types what the scanner could not read.
 kioskAdminRouter.post('/admin/sessions/:kioskSessionId/remote-assist/verify-id', ok(
-  (req) => kioskStaffAssistService.remoteVerifyId(scopeFor(req), req.params.kioskSessionId, req.body || {}),
+  (req) => kioskStaffAssistService.remoteVerifyId(scopeFor(req), req.params.kioskSessionId, req.body || {}, req.user),
 ));
 
 // POST /api/kiosk/admin/sessions/:id/remote-assist/confirm-name
 // { conversationId, agentRef, agentName } — vouches for the NAME only; the
 // reservation is not rewritten and the other rules stay hard stops.
 kioskAdminRouter.post('/admin/sessions/:kioskSessionId/remote-assist/confirm-name', ok(
-  (req) => kioskStaffAssistService.remoteConfirmName(scopeFor(req), req.params.kioskSessionId, req.body || {}),
+  (req) => kioskStaffAssistService.remoteConfirmName(scopeFor(req), req.params.kioskSessionId, req.body || {}, req.user),
 ));
 
 // GET /api/kiosk/sessions?outcome=&deviceId=&locationId=&take= — list + per-outcome counts

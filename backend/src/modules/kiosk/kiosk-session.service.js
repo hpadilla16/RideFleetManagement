@@ -173,6 +173,17 @@ export async function recordSessionTelemetry(session, { step = null, event, data
 }
 
 async function createSession({ kind } = {}, device) {
+  const cleanKind = String(kind || '').toUpperCase();
+  if (!SESSION_KINDS.includes(cleanKind)) {
+    throw new KioskError(`kind must be one of ${SESSION_KINDS.join(', ')}`, 400);
+  }
+  if (cleanKind === 'WALKUP' && !device.walkupEnabled) {
+    throw new KioskError('Walk-up rentals are disabled on this kiosk', 403, 'WALKUP_DISABLED');
+  }
+  // AFTER validation on purpose: a rejected request (a bad `kind`, a walk-up on a
+  // kiosk with walk-ups off) used to wipe the live binding on its way to the
+  // error, so a malformed call cost the guest their open chat for nothing.
+  // (QA m2.)
   // A new guest is sitting down, so no OTHER live session on this tablet may
   // keep a conversation bound. The client releases its own binding on the X, on
   // reset and on unmount, but all three are lost if the tablet was offline — and
@@ -189,13 +200,6 @@ async function createSession({ kind } = {}, device) {
     data: { voziaConversationId: null, voziaBoundAt: null },
   }).catch((err) => logger.warn('[kiosk] could not release prior bindings', { err: err?.message }));
 
-  const cleanKind = String(kind || '').toUpperCase();
-  if (!SESSION_KINDS.includes(cleanKind)) {
-    throw new KioskError(`kind must be one of ${SESSION_KINDS.join(', ')}`, 400);
-  }
-  if (cleanKind === 'WALKUP' && !device.walkupEnabled) {
-    throw new KioskError('Walk-up rentals are disabled on this kiosk', 403, 'WALKUP_DISABLED');
-  }
   const session = await prisma.kioskSession.create({
     data: {
       tenantId: device.tenantId,

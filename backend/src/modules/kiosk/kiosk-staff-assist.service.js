@@ -542,7 +542,7 @@ function assertAgentIdentity({ agentRef, agentName } = {}) {
  * { conversationId, agentRef, agentName, reason } → the same 10-minute,
  * session-bound, single-use grant `unlock` mints for someone standing there.
  */
-async function remoteUnlock(scope, sessionId, body = {}) {
+async function remoteUnlock(scope, sessionId, body = {}, actor = null) {
   const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
   assertAssistable(session);
   const agent = assertAgentIdentity(body);
@@ -553,11 +553,24 @@ async function remoteUnlock(scope, sessionId, body = {}) {
     throw new KioskError('A reason is required', 400, 'REASON_REQUIRED');
   }
 
-  const svc = await prisma.user.findFirst({
-    where: { tenantId: scope.tenantId, isServiceAccount: true, isActive: true, role: { in: ASSIST_ROLES } },
-    select: { id: true },
-  });
-  if (!svc) throw new KioskError('No service account is configured for remote assist', 409, 'NO_SERVICE_ACCOUNT');
+  // THE ACTOR IS WHOEVER AUTHENTICATED, not a service account we go looking for.
+  //
+  // The first version resolved `findFirst({ isServiceAccount: true })` with no
+  // ordering, so with more than one service account in a tenant the audit named
+  // an arbitrary one. Worse, these routes carry no role assert and `kiosk` is ON
+  // by default for ADMIN and OPS — so a tenant's own admin could override a
+  // guest's identity today and have it recorded as the robot, with the agentRef
+  // and agentName they typed themselves. The real human appeared nowhere, while
+  // the in-person path has always recorded user.id.
+  //
+  // That contradicted the whole point of the remote/in-person distinction this
+  // change exists to make, so the caller's identity is now required and used.
+  // agentRef/agentName stay what they always were: Valet's assertion about WHICH
+  // human sits behind a shared account — never a substitute for an actor.
+  if (!actor?.id) {
+    throw new KioskError('An authenticated caller is required', 401, 'ACTOR_REQUIRED');
+  }
+  const svc = { id: actor.id };
 
   const grantedAt = new Date();
   await prisma.kioskSession.update({
@@ -583,6 +596,9 @@ async function remoteUnlock(scope, sessionId, body = {}) {
         conversationId: String(body.conversationId).trim(),
         // Asserted by Valet, NOT verified by RFM. Named so nobody reading this
         // row later mistakes it for an identity this system checked.
+        // WHO authenticated (verified by RFM) vs WHO Valet says is acting
+        // (asserted, unverifiable here). Both, never one standing in for the other.
+        actorUserId: actor.id,
         agentAssertedByValet: { ref: agent.ref, name: agent.name },
         grantExpiresAt: new Date(grantedAt.getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000).toISOString(),
       }),
@@ -607,8 +623,9 @@ async function remoteUnlock(scope, sessionId, body = {}) {
  * required, live grant) are enforced by exactly one implementation and cannot
  * drift apart between the counter and the console.
  */
-async function remoteVerifyId(scope, sessionId, body = {}) {
+async function remoteVerifyId(scope, sessionId, body = {}, actor = null) {
   const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  if (!actor?.id) throw new KioskError('An authenticated caller is required', 401, 'ACTOR_REQUIRED');
   assertAgentIdentity(body);
   // The remote agent may supply photos (rare — they would have to have been sent
   // one), but normally the guest already photographed the licence into this
@@ -620,8 +637,9 @@ async function remoteVerifyId(scope, sessionId, body = {}) {
   return staffVerifyId(session.id, device, body, { allowPhotosOnFile: true, remote: true });
 }
 
-async function remoteConfirmName(scope, sessionId, body = {}) {
+async function remoteConfirmName(scope, sessionId, body = {}, actor = null) {
   const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  if (!actor?.id) throw new KioskError('An authenticated caller is required', 401, 'ACTOR_REQUIRED');
   assertAgentIdentity(body);
   return confirmName(session.id, device, body, { remote: true });
 }

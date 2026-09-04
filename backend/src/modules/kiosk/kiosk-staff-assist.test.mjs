@@ -630,6 +630,9 @@ test('R1: staff verify-id clears the name-mismatch marker + outstanding possessi
 
 const SCOPE = { tenantId: 't1' };
 const AGENT = { agentRef: 'valet-agent-77', agentName: 'Marta Ruiz' };
+// Whoever authenticated. NOT the same thing as AGENT: this is the identity RFM
+// verified, and AGENT is what Valet asserts about which human sits behind it.
+const ACTOR = { id: 'u-svc', tenantId: 't1', role: 'AGENT', isServiceAccount: true };
 const CONV = 'conv-remote-1';
 
 /** A session a remote agent is legitimately entitled to act on. */
@@ -644,7 +647,7 @@ test('F3 remote unlock: mints the SAME grant a PIN would, and records who Valet 
   const before = Date.now();
   const out = await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV, reason: 'Scanner glare, third attempt',
-  });
+  }, ACTOR);
   assert.equal(out.ttlMinutes, ASSIST_GRANT_TTL_MIN, 'remote and in-person grants must not drift apart');
 
   const session = db.sessions.find((s) => s.id === 'ks1');
@@ -669,7 +672,7 @@ test('F3 remote unlock: no binding, wrong conversation, or a FINISHED session �
 
   for (const id of ['unbound', 'other', 'stale', 'gone', 'no-such-session']) {
     await assert.rejects(
-      () => kioskStaffAssistService.remoteUnlock(SCOPE, id, { ...AGENT, conversationId: CONV, reason: 'x' }),
+      () => kioskStaffAssistService.remoteUnlock(SCOPE, id, { ...AGENT, conversationId: CONV, reason: 'x' }, ACTOR),
       (e) => e.status === 404 && e.code === 'SESSION_NOT_FOUND',
       `${id} must be indistinguishable from a session that never existed`,
     );
@@ -684,12 +687,12 @@ test('F3 remote unlock: refuses to act anonymously or without a stated reason', 
     (e) => e.status === 400 && e.code === 'AGENT_REF_REQUIRED',
   );
   await assert.rejects(
-    () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', { ...base, agentRef: 'a' }),
+    () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', { ...base, agentRef: 'a' }, ACTOR),
     (e) => e.status === 400 && e.code === 'AGENT_NAME_REQUIRED',
   );
   // Standing at a kiosk the context is the room. Remotely, the reason IS the context.
   await assert.rejects(
-    () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', { ...AGENT, conversationId: CONV }),
+    () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', { ...AGENT, conversationId: CONV }, ACTOR),
     (e) => e.status === 400 && e.code === 'REASON_REQUIRED',
   );
   assert.equal(db.auditLogs.length, 0, 'a refused override leaves no grant and no audit noise');
@@ -710,21 +713,21 @@ test('F3 remote override: the hard stops are the SAME ones, because it is the sa
   await assert.rejects(
     () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
       ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' },
-    }),
+    }, ACTOR),
     (e) => e.status === 403 && e.code === 'ASSIST_GRANT_REQUIRED',
     'a remote agent cannot skip the grant any more than a staff member can',
   );
 
   await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV, reason: 'Scanner glare',
-  });
+  }, ACTOR);
   // Photos are still mandatory — but a REMOTE agent has no camera, and the guest
   // already photographed the licence into this session. Without photos on file
   // the remote path is refused exactly like the counter's.
   await assert.rejects(
     () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
       ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' },
-    }),
+    }, ACTOR),
     (e) => e.status === 422 && e.code === 'MISSING_PHOTO',
     'with nothing on file, a remote verify is refused like any other',
   );
@@ -737,12 +740,12 @@ test('F3 remote override: with photos ALREADY on file the agent types only the f
   seedWorld();
   await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV, reason: 'Glare on the barcode, two failed scans',
-  });
+  }, ACTOR);
   const out = await kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
     ...AGENT,
     conversationId: CONV,
     fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
-  });
+  }, ACTOR);
   // A verdict, not a 422: the remote path is reachable at all, which it was not.
   assert.ok(out && typeof out.verified === 'boolean', 'a remote verify must return a verdict');
 });
@@ -753,7 +756,7 @@ test('F3 remote override: the waiver comes from the SERVER column, never from th
   seedWorld();
   await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV, reason: 'x',
-  });
+  }, ACTOR);
   // Every shape a caller might use to claim the photos exist must be ignored.
   for (const forged of [
     { idPhotosStoredAt: new Date() },
@@ -763,7 +766,7 @@ test('F3 remote override: the waiver comes from the SERVER column, never from th
     await assert.rejects(
       () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
         ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' }, ...forged,
-      }),
+      }, ACTOR),
       (e) => e.status === 422 && e.code === 'MISSING_PHOTO',
       `a caller must not be able to assert photos exist (${Object.keys(forged)[0]})`,
     );
@@ -789,7 +792,7 @@ test('F3 contract: the assist block reports an ABSOLUTE expiry and who Valet say
 
   await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV, reason: 'Glare on the barcode',
-  });
+  }, ACTOR);
   const after = await sessionService.kioskSessionService.assistView(SCOPE, 'ks1', { conversationId: CONV });
   assert.equal(after.assist.open, true);
   // An instant, never a duration: a locally counted duration drifts against the
@@ -819,11 +822,11 @@ test('F3 audit: a remote override is NOT recorded as a staff-at-the-kiosk overri
   seedWorld();
   await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV, reason: 'Glare, two failed scans',
-  });
+  }, ACTOR);
   await kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV,
     fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
-  });
+  }, ACTOR);
   const session = db.sessions.find((s) => s.id === 'ks1');
   // The two are not the same event and the permanent record must not say they
   // are: in person a human saw the licence AND the person holding it. With three
@@ -844,4 +847,36 @@ test('F3 audit: an IN-PERSON override keeps saying in-person', async () => {
   });
   const session = db.sessions.find((s) => s.id === 'ks1');
   assert.equal(session.idVerifyMethod, 'STAFF_OVERRIDE', 'the in-person path must be unchanged');
+});
+
+test('F3 audit: an override with no authenticated caller is refused — the actor is not optional', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  // The audit records WHO authenticated. Letting that be null would have put the
+  // robot's name on a human's decision — which is what it did before: `kiosk` is
+  // ON by default for ADMIN and OPS, so a tenant's own admin could override a
+  // guest's identity and have it filed under the service account.
+  for (const noActor of [null, undefined, {}, { id: '' }]) {
+    await assert.rejects(
+      () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+        ...AGENT, conversationId: CONV, reason: 'x',
+      }, noActor),
+      (e) => e.status === 401 && e.code === 'ACTOR_REQUIRED',
+    );
+  }
+});
+
+test('F3 audit: the audited actor is the CALLER, not a service account we went looking for', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  // An ADMIN of the tenant calling directly must be filed as themselves.
+  const admin = { id: 'u-admin', tenantId: 't1', role: 'ADMIN', isServiceAccount: false };
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Helping from the office',
+  }, admin);
+  const audit = db.auditLogs.at(-1);
+  assert.equal(audit.actorUserId, 'u-admin', 'the human who authenticated owns the row');
+  const meta = JSON.parse(audit.metadata);
+  assert.equal(meta.actorUserId, 'u-admin');
+  // Both are kept: one verified by RFM, one asserted by Valet. Neither replaces the other.
+  assert.deepEqual(meta.agentAssertedByValet, { ref: 'valet-agent-77', name: 'Marta Ruiz' });
+  assert.equal(db.sessions.find((x) => x.id === 'ks1').assistUserId, 'u-admin');
 });
