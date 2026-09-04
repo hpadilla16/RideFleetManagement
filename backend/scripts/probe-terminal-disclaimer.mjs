@@ -199,6 +199,16 @@ async function main() {
         console.log('    so a blank screen here is expected and means nothing about Disclaimer.');
         console.log('    Read the DETAIL line: it names the field it did not like.');
       }
+      if (String(e?.spinStatusCode || '') === '2001') {
+        console.log('\n    2001 is GOOD NEWS wearing a bad hat: the gateway ACCEPTED the request');
+        console.log('    and our credentials, went looking for the terminal, and did not find it.');
+        console.log('    Everything from RFM to Dejavoo works. What is left is the device:');
+        console.log('      · powered on, on Wi-Fi or data;');
+        console.log('      · SPIn enabled for this TPN in "Cloud" mode (portal, S.T.E.A.M);');
+        console.log('      · a parameter download (or a restart) so it picks that up and');
+        console.log('        registers with the proxy.');
+        console.log('    Step 1 will say "Online" when it has. Re-run then.');
+      }
       break;
     }
     if (!out.ok) {
