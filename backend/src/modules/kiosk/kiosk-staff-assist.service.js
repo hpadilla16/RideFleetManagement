@@ -312,7 +312,13 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
     where: { id: session.id },
     data: {
       idVerifiedAt: now,
-      idVerifyMethod: 'STAFF_OVERRIDE',
+      // A REMOTE override is not the same event as a staff member standing at the
+      // kiosk, and the permanent record must not say it is. In person there is a
+      // human beside the guest who saw the licence; remotely there is nobody, and
+      // since this is now open to three roles the difference is exactly what an
+      // auditor would need. The audit log always knew; this is the durable,
+      // queryable field that did not.
+      idVerifyMethod: opts.remote === true ? 'REMOTE_AGENT_OVERRIDE' : 'STAFF_OVERRIDE',
       // grant consumed; assistUserId stays as the audit trail
       assistGrantedAt: null,
       // R1: a verified session must not stay name-update eligible — clear
@@ -369,7 +375,7 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
  * evidence. Stamps idVerifyMethod 'STAFF_NAME_OVERRIDE', audits, un-escalates
  * and consumes the grant.
  */
-async function confirmName(sessionId, device, { fields, licensePhoto } = {}) {
+async function confirmName(sessionId, device, { fields, licensePhoto } = {}, opts = {}) {
   const session = await getSessionForDevice(sessionId, device);
   if (!grantIsLive(session)) {
     throw new KioskError('A staff unlock is required (or the grant expired)', 403, 'ASSIST_GRANT_REQUIRED');
@@ -426,7 +432,7 @@ async function confirmName(sessionId, device, { fields, licensePhoto } = {}) {
     where: { id: session.id },
     data: {
       idVerifiedAt: now,
-      idVerifyMethod: 'STAFF_NAME_OVERRIDE',
+      idVerifyMethod: opts.remote === true ? 'REMOTE_AGENT_NAME_OVERRIDE' : 'STAFF_NAME_OVERRIDE',
       nameMismatchAt: null,
       // R1 hygiene: any outstanding possession code dies with the approval.
       nameUpdateCodeHash: null,
@@ -611,13 +617,13 @@ async function remoteVerifyId(scope, sessionId, body = {}) {
   // carries no photo URLs, so there was nowhere for an agent to get them, and
   // every remote verify answered 422. Caught by a third session reading the
   // contract against the code — my own test had pinned the 422 as correct.
-  return staffVerifyId(session.id, device, body, { allowPhotosOnFile: true });
+  return staffVerifyId(session.id, device, body, { allowPhotosOnFile: true, remote: true });
 }
 
 async function remoteConfirmName(scope, sessionId, body = {}) {
   const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
   assertAgentIdentity(body);
-  return confirmName(session.id, device, body);
+  return confirmName(session.id, device, body, { remote: true });
 }
 
 export const kioskStaffAssistService = {

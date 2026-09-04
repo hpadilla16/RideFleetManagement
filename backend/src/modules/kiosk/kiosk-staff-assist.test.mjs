@@ -812,3 +812,36 @@ test('F3 contract: an EXPIRED grant reads as closed, so the panel never shows a 
   assert.equal(view.assist.open, false, 'past its expiry the grant is closed');
   assert.ok(view.assist.heldBy, 'but who held it is still visible — useful context, not authority');
 });
+
+test('F3 audit: a remote override is NOT recorded as a staff-at-the-kiosk override', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({ outcome: 'ESCALATED', idPhotosStoredAt: new Date() });
+  seedWorld();
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare, two failed scans',
+  });
+  await kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV,
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+  });
+  const session = db.sessions.find((s) => s.id === 'ks1');
+  // The two are not the same event and the permanent record must not say they
+  // are: in person a human saw the licence AND the person holding it. With three
+  // roles able to do this remotely, that distinction is the whole audit.
+  assert.notEqual(session.idVerifyMethod, 'STAFF_OVERRIDE',
+    'a remote override recorded as an in-person one erases the only difference that matters');
+  assert.equal(session.idVerifyMethod, 'REMOTE_AGENT_OVERRIDE');
+});
+
+test('F3 audit: an IN-PERSON override keeps saying in-person', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED', idPhotosStoredAt: new Date() });
+  seedWorld();
+  await unlockAsAdmin();
+  await kioskStaffAssistService.staffVerifyId('ks1', DEVICE, {
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+    licenseFrontPhoto: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    licenseBackPhoto: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+  });
+  const session = db.sessions.find((s) => s.id === 'ks1');
+  assert.equal(session.idVerifyMethod, 'STAFF_OVERRIDE', 'the in-person path must be unchanged');
+});
