@@ -17,6 +17,7 @@ import { withKioskPaymentGuard } from '../kiosk/kiosk-payment-guards.js';
 import { kioskPaymentIntentService } from '../kiosk/kiosk-payment-intent.service.js';
 import { mintHppSession, verifyAndRecordHppReturn } from './ipos-hpp-payment.service.js';
 import { maybeCreateAgreementPayment } from '../reservations/reservation-pricing.service.js';
+import { checkoutSessionService } from '../checkout-session/checkout-session.service.js';
 
 async function createPaymentLink(sessionId, device) {
   const session = await getSessionForDevice(sessionId, device);
@@ -148,6 +149,8 @@ async function handlePaymentReturn(rawRef, deps = {}) {
   const db = deps.prisma || prisma;
   const verifyAndRecord = deps.verifyAndRecord || verifyAndRecordHppReturn;
   const mirrorToAgreement = deps.mirrorToAgreement || maybeCreateAgreementPayment;
+  const flagOrphan = deps.flagOrphan || kioskPaymentIntentService.flagOrphanPayment;
+  const stampCheckout = deps.stampCheckout || ((args) => checkoutSessionService.stampSideEffect(args));
   const ref = String(rawRef || '').trim();
   if (!ref) throw new KioskError('Missing payment reference', 400, 'MISSING_REFERENCE');
 
@@ -171,16 +174,29 @@ async function handlePaymentReturn(rawRef, deps = {}) {
   });
   if (!reservation) throw new KioskError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
 
-  const verdict = await verifyAndRecord({ reservation, iposRef: ref }, deps);
+  const verdict = await verifyAndRecord({
+    reservation, iposRef: ref,
+    // This is a KIOSK payment, but ReservationPaymentOrigin has no KIOSK member
+    // (OTC | PORTAL | IMPORTED | MIGRATED_NOTE) — passing one would make Prisma
+    // reject EVERY kiosk payment insert, and the unit tests would not have caught
+    // it because they inject the verifier. PORTAL is the honest existing bucket
+    // ("the guest paid on their own device"); the note is what tells them apart.
+    // Adding a KIOSK origin is a migration plus a reporting change — its own PR.
+    origin: 'PORTAL', notes: 'Paid via iPOSpays hosted payment page (kiosk check-in)',
+  }, deps);
 
   // THE MONEY MUST REACH THE AGREEMENT. The kiosk quoted RentalAgreement.balance,
   // but the shared verifier only writes a ReservationPayment — and that balance is
   // computed ONLY from RentalAgreementPayment. Without this mirror the counter kept
   // seeing the full balance after the guest had paid, and charged them again.
-  // Guarded twice: only on a first-time (non-duplicate) verdict, and only if no
-  // agreement row already carries this reference — a second return for the same
-  // payment must not produce a second ledger line.
-  if (!verdict?.duplicate && reservation.rentalAgreement?.id) {
+  //
+  // Gated on the LEDGER, not on the verdict. The first version skipped the mirror
+  // whenever the verifier said `duplicate` — so if the mirror threw once (the guest
+  // saw a 500 after paying), every retry was a "duplicate" and the agreement stayed
+  // unpaid forever, with no flag. Now: a reservation row exists for this reference
+  // and no agreement row does → mirror, whatever the verdict says. That makes the
+  // retry the cure instead of the trap. (QA re-review, MAJOR A.)
+  if (reservation.rentalAgreement?.id) {
     const payment = await db.reservationPayment.findFirst({
       where: { reservationId: reservation.id, reference: verdict.reference },
     });
@@ -191,16 +207,54 @@ async function handlePaymentReturn(rawRef, deps = {}) {
       })
       : null;
     if (payment && !already) {
-      await mirrorToAgreement({ reservation, payment }).catch((err) => {
-        // Loud, not silent: a payment that reached the reservation but not the
-        // agreement is exactly the double-charge setup this block exists to end.
+      try {
+        await mirrorToAgreement({ reservation, payment });
+      } catch (err) {
+        // Loud AND flagged. A payment on the reservation but not the agreement is
+        // exactly the overcharge this block exists to end; staff must see it even
+        // if the guest's next refresh happens to heal it.
         logger.error('[kiosk-payment] payment recorded on reservation but NOT mirrored to agreement — counter will overcharge', {
           reservationId: reservation.id, reference: verdict.reference, err: err?.message,
         });
+        await flagOrphan({
+          reference: ref, amount: verdict.amount ?? null, tenantId: reservation.tenantId,
+          note: `Payment recorded on the reservation but the agreement ledger write failed (${err?.message || 'unknown'}). Balance is stale until it is mirrored — refresh the return URL or post it manually.`,
+        }).catch(() => {});
         throw err;
-      });
+      }
     }
   }
+
+  // A payment on a SUPERSEDED link, or on a session that already ended, is
+  // recorded (the money is real) but it is staff-queue material: the guest paid
+  // an old QR that iPOS cannot cancel, so if they also paid the new one this is
+  // an overpayment that only shows up as paidAmount > total. The intent service
+  // promised this would be flagged; the first version dropped it. (QA MAJOR C.)
+  if (resolved.superseded || !resolved.sessionLive) {
+    await flagOrphan({
+      reference: ref, amount: verdict.amount ?? null, tenantId: reservation.tenantId,
+    }).catch(() => {});
+  }
+
+  // LET THE GUEST FINISH. The signature step refuses until the checkout carries
+  // paymentCompletedAt, and the tablet polls nothing — so after a real payment
+  // the kiosk was simply dead until staff intervened. Stamp it only when the
+  // agreement is actually settled: a partial payment must not unlock signing.
+  // (QA MAJOR B.)
+  if (reservation.rentalAgreement?.id && resolved.kioskSessionId) {
+    const [agreementNow, kioskSession] = await Promise.all([
+      db.rentalAgreement.findUnique({ where: { id: reservation.rentalAgreement.id }, select: { balance: true } }),
+      db.kioskSession.findUnique({ where: { id: resolved.kioskSessionId }, select: { checkoutSessionId: true } }),
+    ]);
+    const settled = agreementNow && Number(agreementNow.balance || 0) <= 0;
+    if (settled && kioskSession?.checkoutSessionId) {
+      await stampCheckout({ id: kioskSession.checkoutSessionId, field: 'paymentCompletedAt' })
+        .catch((err) => logger.warn('[kiosk-payment] could not stamp paymentCompletedAt — guest may need staff to proceed', {
+          checkoutSessionId: kioskSession.checkoutSessionId, err: err?.message,
+        }));
+    }
+  }
+
   if (resolved.kioskSessionId) {
     await db.kioskSession.update({
       where: { id: resolved.kioskSessionId },
@@ -212,4 +266,3 @@ async function handlePaymentReturn(rawRef, deps = {}) {
   });
   return { ok: true, paid: true, duplicate: !!verdict?.duplicate };
 }
-

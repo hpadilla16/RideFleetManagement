@@ -244,7 +244,16 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
  *
  * @returns {Promise<{ ok: true, duplicate: boolean, amount: number, reference: string }>}
  */
-export async function verifyAndRecordHppReturn({ reservation, iposRef }, deps = {}) {
+export async function verifyAndRecordHppReturn({
+  reservation,
+  iposRef,
+  // Optional labels. The defaults are the exact literals every existing caller
+  // (customer-portal, public-booking) has always produced — byte-identical for
+  // them. The kiosk passes its own so reports by origin stop attributing kiosk
+  // money to the website.
+  origin = 'PORTAL',
+  notes = 'Paid via iPOSpays hosted payment page (website checkout)',
+} = {}, deps = {}) {
   const db = deps.prisma || prisma;
   const verdict = await verifyHppPayment({ reservation, iposRef }, deps);
 
@@ -256,8 +265,8 @@ export async function verifyAndRecordHppReturn({ reservation, iposRef }, deps = 
         method: 'CARD',
         status: 'PAID',
         reference: verdict.reference,
-        notes: 'Paid via iPOSpays hosted payment page (website checkout)',
-        origin: 'PORTAL', // guest-paid; matches the PayArc precedent
+        notes,
+        origin, // guest-paid; matches the PayArc precedent
         paidAt: new Date(),
       },
     }).catch((e) => {
