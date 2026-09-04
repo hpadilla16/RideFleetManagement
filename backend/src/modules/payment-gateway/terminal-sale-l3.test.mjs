@@ -520,7 +520,7 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   // worth asserting, because that is what gets charged.
   const { buildStages, stagePayload } = await import('../../../scripts/probe-terminal-sale-l3.mjs');
   const stages = buildStages({ amount: 1.00, agreementNumber: 'PROBE-T', taxRate: 11.5 });
-  assert.equal(stages.length, 8);
+  assert.equal(stages.length, 9);
   const p = stages.map((s) => stagePayload(s, 'REF').body);
 
   // 1 — the control is today's payload and nothing else.
