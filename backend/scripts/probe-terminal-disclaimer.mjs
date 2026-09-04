@@ -268,6 +268,23 @@ async function main() {
         console.log('    so a blank screen here is expected and means nothing about Disclaimer.');
         console.log('    Read the DETAIL line: it names the field it did not like.');
       }
+      if (String(e?.spinStatusCode || '') === '2008') {
+        // Learned live 2026-09-04: killing the probe mid-prompt (Ctrl+C) aborts
+        // OUR request but leaves the terminal holding the session, so the next
+        // call is refused. The gateway helpfully says for how long.
+        const wait = Number(e?.spinResponse?.GeneralResponse?.DelayBeforeNextRequest || 31);
+        console.log(`
+    2008 = the terminal is still busy with an earlier request — usually one`);
+        console.log(`    that was interrupted (Ctrl+C aborts us, not the device). The gateway says`);
+        console.log(`    to wait ${wait}s. Waiting, then retrying this step once…`);
+        await new Promise((r) => setTimeout(r, (wait + 1) * 1000));
+        try {
+          out = await step.run();
+          if (out.ok) { console.log(`  ✔ Step ${step.n} OK (after the busy wait)`); continue; }
+        } catch (e2) {
+          console.log(`    retry also failed: ${e2?.spinResponse?.GeneralResponse?.DetailedMessage || e2?.message || e2}`);
+        }
+      }
       if (String(e?.spinStatusCode || '') === '2001') {
         console.log('\n    2001 is GOOD NEWS wearing a bad hat: the gateway ACCEPTED the request');
         console.log('    and our credentials, went looking for the terminal, and did not find it.');
