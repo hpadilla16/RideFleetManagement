@@ -1039,6 +1039,36 @@ export default function KioskPage() {
     }
   }, []);
 
+  // LET THE GUEST ARRIVE AT THE PEN. The backend stamps paymentCompletedAt when a
+  // real payment settles the agreement, but the tablet polls nothing and the only
+  // path to SIGN was the sandbox button — so a guest who paid on their phone was
+  // left staring at the QR. While a payment link is on screen, ask the server
+  // every 4s whether the payment landed; the moment it has, move on exactly the
+  // way the sandbox path always did. Server truth: we never advance on a client
+  // guess about payment, only on the stamp the return path wrote. (QA M2.)
+  useEffect(() => {
+    if (screen !== 'PAYMENT' || !payLink?.url || !session?.id) return undefined;
+    const sid = session.id;
+    const gen = genRef.current;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const out = await getAgreement(sid);
+        if (stop || gen !== genRef.current) return;
+        if (out?.agreement?.stamps?.paymentCompletedAt) {
+          stop = true;
+          setAgreement(out);
+          setPayState('PAID');
+          setScreen('SIGN');
+        }
+      } catch {
+        // A failed poll means "not yet" — never an error in front of the guest.
+      }
+    };
+    const id = setInterval(tick, 4000);
+    return () => { stop = true; clearInterval(id); };
+  }, [screen, payLink?.url, session?.id]);
+
   const simulatePayment = async () => {
     const gen = genRef.current;
     setBusy(true); setErr('');

@@ -11,7 +11,7 @@ import { kioskPaymentLinkService } from './kiosk-payment-link.service.js';
 
 function fakes({
   agreement = { id: 'ra1', status: 'OPEN' }, existingAgreementRow = null, duplicate = false,
-  balanceAfter = 0, checkoutSessionId = 'cs1', resolvedExtra = {},
+  balanceAfter = 0, checkoutSessionId = 'cs1', resolvedExtra = {}, alreadyStampedAt = null,
 } = {}) {
   const calls = { mirrored: [], sessionUpdates: [], flags: [], stamps: [] };
   // resolveByReference is stubbed per-test below; extras let a test mark the
@@ -35,6 +35,7 @@ function fakes({
       update: async (args) => { calls.sessionUpdates.push(args); return {}; },
       findUnique: async () => ({ checkoutSessionId }),
     },
+    checkoutSession: { findUnique: async () => ({ paymentCompletedAt: alreadyStampedAt }) },
   };
   const deps = {
     prisma,
@@ -149,4 +150,30 @@ test('B3: a failed mirror is LOUD — the double-charge setup must not pass as s
     /ledger down/,
     'a payment on the reservation but not the agreement is exactly the overcharge this exists to end',
   );
+});
+
+test('M1: a P2002 from the mirror means a concurrent return already wrote it — no flag, no throw', async () => {
+  // Two returns pass the "no agreement row yet" read together; the partial unique
+  // index makes the loser's insert fail. That is the floor working, not a failure.
+  const { deps, calls } = fakes();
+  deps.mirrorToAgreement = async () => { const e = new Error('unique'); e.code = 'P2002'; throw e; };
+  const out = await kioskPaymentLinkService.handlePaymentReturn('Kmtn9zzQATEST01', deps);
+  assert.equal(out.paid, true);
+  assert.equal(calls.flags.length, 0, 'the row exists; staff must not be told the ledger failed');
+});
+
+test('stamp is idempotent: a refreshed return does not move the recorded payment time', async () => {
+  const { deps, calls } = fakes({ balanceAfter: 0, alreadyStampedAt: new Date('2026-09-04T10:00:00Z') });
+  await kioskPaymentLinkService.handlePaymentReturn('Kmtn9zzQATEST01', deps);
+  assert.equal(calls.stamps.length, 0, 'already stamped — a refresh must not restamp');
+});
+
+test('an unresolvable reference is flagged through the injectable seam', async () => {
+  const { deps, calls } = fakes();
+  const real = kioskPaymentIntentService.resolveByReference;
+  kioskPaymentIntentService.resolveByReference = async () => null;
+  try {
+    await assert.rejects(() => kioskPaymentLinkService.handlePaymentReturn('NOPE12345', deps), (e) => e.code === 'ORPHAN_PAYMENT');
+    assert.equal(calls.flags.length, 1, 'the orphan path must reach the same seam the tests can see');
+  } finally { kioskPaymentIntentService.resolveByReference = real; }
 });

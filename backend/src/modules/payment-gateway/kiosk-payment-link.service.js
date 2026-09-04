@@ -157,7 +157,7 @@ async function handlePaymentReturn(rawRef, deps = {}) {
   const resolved = await kioskPaymentIntentService.resolveByReference(ref);
   if (!resolved?.reservationId) {
     // Cannot be tied to a reservation → the staff queue, never a silent drop.
-    await kioskPaymentIntentService.flagOrphanPayment({
+    await flagOrphan({
       reference: ref, tenantId: resolved?.tenantId || null,
       note: 'HPP return could not be resolved to a kiosk session',
     }).catch(() => {});
@@ -210,6 +210,15 @@ async function handlePaymentReturn(rawRef, deps = {}) {
       try {
         await mirrorToAgreement({ reservation, payment });
       } catch (err) {
+        // Two concurrent returns can both pass the "no agreement row yet" read;
+        // the partial unique index on (rentalAgreementId, reference) now makes
+        // the loser's insert fail with P2002. That is the idempotency floor doing
+        // its job — the row EXISTS — so it is neither a failure nor a flag.
+        if (String(err?.code) === 'P2002') {
+          logger.info('[kiosk-payment] agreement mirror already written by a concurrent return', {
+            reservationId: reservation.id, reference: verdict.reference,
+          });
+        } else {
         // Loud AND flagged. A payment on the reservation but not the agreement is
         // exactly the overcharge this block exists to end; staff must see it even
         // if the guest's next refresh happens to heal it.
@@ -221,6 +230,7 @@ async function handlePaymentReturn(rawRef, deps = {}) {
           note: `Payment recorded on the reservation but the agreement ledger write failed (${err?.message || 'unknown'}). Balance is stale until it is mirrored — refresh the return URL or post it manually.`,
         }).catch(() => {});
         throw err;
+        }
       }
     }
   }
@@ -247,7 +257,14 @@ async function handlePaymentReturn(rawRef, deps = {}) {
       db.kioskSession.findUnique({ where: { id: resolved.kioskSessionId }, select: { checkoutSessionId: true } }),
     ]);
     const settled = agreementNow && Number(agreementNow.balance || 0) <= 0;
-    if (settled && kioskSession?.checkoutSessionId) {
+    // Stamp once. A guest refreshing the return URL must not move the recorded
+    // payment time or append a fresh SIDE_EFFECT event on every refresh.
+    const alreadyStamped = settled && kioskSession?.checkoutSessionId
+      ? !!(await db.checkoutSession.findUnique({
+        where: { id: kioskSession.checkoutSessionId }, select: { paymentCompletedAt: true },
+      }))?.paymentCompletedAt
+      : true;
+    if (settled && kioskSession?.checkoutSessionId && !alreadyStamped) {
       await stampCheckout({ id: kioskSession.checkoutSessionId, field: 'paymentCompletedAt' })
         .catch((err) => logger.warn('[kiosk-payment] could not stamp paymentCompletedAt — guest may need staff to proceed', {
           checkoutSessionId: kioskSession.checkoutSessionId, err: err?.message,
