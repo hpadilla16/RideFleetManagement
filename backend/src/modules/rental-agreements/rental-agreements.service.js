@@ -38,25 +38,37 @@ import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
 import { isSoldItemCharge, SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
 import { normalizeReviewTiers, tierPercentFor } from '../../lib/review-tiers.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
+import { resolveTenantTerminalConfig, toSpinClientConfig } from '../payment-gateway/tenant-terminal-config.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
 import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
 import logger from '../../lib/logger.js';
 import { autoCompleteShuttleRequestsOnCheckout } from '../shuttle/shuttle-requests.service.js';
 import { pickInkedSignature } from '../../lib/signature-ink.js';
 
-// Tenant Spin config loader — mirrors the helper in spin-charge.service.js.
-// Tenant.spin* columns don't exist on the Tenant model today; the Spin
-// client falls back to env vars when tenantConfig is empty. Returning an
-// empty object keeps both paths working (multi-tenant + single-tenant).
+/**
+ * Tenant SPIn config for this module's three money paths
+ * (spinChargeCardOnFile, spinReleaseDepositHold, spinReauthDepositHold).
+ *
+ * FIXED 2026-09-04. This used to be a stub that read a Tenant row and then
+ * returned an empty object on both branches of the ternary, dating from when
+ * Tenant.spin* columns did not exist. An empty object makes spin-client fall
+ * back to the PLATFORM env terminal, so a tenant with a terminal of their own
+ * was charged through somebody else's. It only ever looked fine because IRC
+ * was the single live merchant and the env terminal was theirs; LAX is exactly
+ * the second tenant that would have found it.
+ *
+ * Now it delegates to the one resolver — the same call
+ * payment-gateway.service.js and checkout-session/spin-charge.service.js make.
+ * `toSpinClientConfig` still returns `{}` when the resolver reports a
+ * non-TENANT source, so the deliberate, logged env fallback is unchanged; what
+ * disappears is the silent one.
+ */
 async function loadTenantSpinConfig(tenantId) {
   if (!tenantId) return {};
   try {
-    const row = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { id: true }
-    });
-    return row ? {} : {};
-  } catch {
+    return toSpinClientConfig(await resolveTenantTerminalConfig(tenantId));
+  } catch (e) {
+    logger.warn?.({ tenantId, err: e?.message }, 'spin tenant config resolve failed; falling back');
     return {};
   }
 }
