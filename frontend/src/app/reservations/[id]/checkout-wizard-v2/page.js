@@ -37,6 +37,8 @@ import {
   shouldSwallowTransitionConflict, resolveFinalizeFailureCopy,
   isFinalizeComplete, closedCardState,
   paymentStepMode, PAYMENT_STEP_MODES,
+  getTerminalContract, runTerminalClause, captureTerminalSignature,
+  fallbackTerminalContract, terminalActionsFor,
 } from '../../../../lib/checkout-session';
 import QRCode from 'qrcode';
 
@@ -1150,7 +1152,57 @@ function Step1Confirm({ reservation, session, token, onNext }) {
   );
 }
 
+/**
+ * Step 2 — the renderer switch (design decision D2).
+ *
+ * The SERVER decides which surface signs: GET /terminal-contract answers with
+ * `mode`. Deciding here would mean the client could draw a terminal ladder for
+ * a counter whose QD2 is not configured, and the agent would sit watching a
+ * device that was never sent anything.
+ *
+ * Both branches end the same way — `tcCompletedAt` on the session — so the
+ * fallback below is a change of surface, not a change of state. That is the
+ * whole reason it is safe to offer mid-contract.
+ */
 function Step2TermsPending({ session, reservation, token, onSigned }) {
+  const [mode, setMode] = useState(null); // null = still asking the server
+  const [forcedPhone, setForcedPhone] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const state = await getTerminalContract({ id: session.id, token });
+        if (!cancelled) setMode(state?.mode === 'TERMINAL' ? 'TERMINAL' : 'PHONE');
+      } catch {
+        // A read that fails must not strand the agent: PHONE is the flow every
+        // tenant has always had, and it needs no device to work.
+        if (!cancelled) setMode('PHONE');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session.id, token]);
+
+  if (mode === null) {
+    return (
+      <div style={cardStyle}>
+        <div style={{ color: '#6B7280' }}>…</div>
+      </div>
+    );
+  }
+  if (mode === 'TERMINAL' && !forcedPhone) {
+    return (
+      <Step2TerminalContract
+        session={session} reservation={reservation} token={token}
+        onSigned={onSigned}
+        onFellBack={() => setForcedPhone(true)}
+      />
+    );
+  }
+  return <Step2PhoneTerms session={session} reservation={reservation} token={token} onSigned={onSigned} />;
+}
+
+function Step2PhoneTerms({ session, reservation, token, onSigned }) {
   const [tokenInfo, setTokenInfo] = useState(null);
   const [minting, setMinting] = useState(false);
 
@@ -1204,6 +1256,255 @@ function Step2TermsPending({ session, reservation, token, onSigned }) {
         field="tcCompletedAt"
         onDone={onSigned}
       />
+    </div>
+  );
+}
+
+/**
+ * Step 2 on the Dejavoo QD2 — the agent's ladder.
+ *
+ * The mockup's rule, kept: THIS LADDER IS DRIVEN BY THE TERMINAL'S OWN
+ * RESPONSES, NOT BY A TIMER. Every row moves because a call came back, so what
+ * the agent sees is what the device did. The only countdown on screen is the
+ * one the gateway itself asked for (2008's DelayBeforeNextRequest), and it is
+ * labelled as such.
+ *
+ * The clause is sent ONE AT A TIME rather than as a server-side loop. Six calls
+ * inside one request would hold the connection for up to twelve minutes and
+ * give the agent nothing to look at while the renter is on clause 4.
+ *
+ * EN/ES on every string, laid out at Spanish length (~30% longer) per the
+ * mockup, because LAX is US but PR tenants share this codebase.
+ */
+function Step2TerminalContract({ session, reservation, token, onSigned, onFellBack }) {
+  const { t } = useTranslation();
+  const [state, setState] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState(null); // { message, terminal }
+  const [countdown, setCountdown] = useState(0);
+  const [qr, setQr] = useState(null);
+
+  const load = async () => {
+    try {
+      setState(await getTerminalContract({ id: session.id, token }));
+    } catch (err) {
+      setFailure({ message: err?.message || String(err), terminal: err?.terminal || null });
+    }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session.id]);
+
+  // The gateway's own countdown. A real number it told us to wait, ticked down
+  // so the agent can see it move — an agent told "wait 30" with a frozen number
+  // reloads the page, which is how a second 2008 happens.
+  useEffect(() => {
+    if (countdown <= 0) return undefined;
+    const id = setTimeout(() => setCountdown((n) => n - 1), 1000);
+    return () => clearTimeout(id);
+  }, [countdown]);
+
+  const runFailure = (err) => {
+    const terminal = err?.terminal || null;
+    setFailure({ message: err?.message || String(err), terminal });
+    if (terminal?.retryAfterSeconds) setCountdown(terminal.retryAfterSeconds);
+  };
+
+  const sendClause = async (sectionKey) => {
+    setBusy(true); setFailure(null);
+    try {
+      setState(await runTerminalClause({ id: session.id, sectionKey, token }));
+    } catch (err) {
+      runFailure(err);
+      await load();
+    } finally { setBusy(false); }
+  };
+
+  const sign = async () => {
+    setBusy(true); setFailure(null);
+    try {
+      await captureTerminalSignature({ id: session.id, token });
+      onSigned();
+    } catch (err) {
+      runFailure(err);
+      await load();
+    } finally { setBusy(false); }
+  };
+
+  // ONE control moves the contract to the phone. D5: three independent
+  // fallbacks produce a checkout signed on the terminal, paid by link, holding
+  // no deposit, with nobody noticing until the car comes back damaged.
+  const fallBack = async () => {
+    setBusy(true);
+    try {
+      const out = await fallbackTerminalContract({
+        id: session.id, reason: failure?.terminal?.state || null, token,
+      });
+      setQr(out?.token || null);
+      onFellBack();
+    } catch (err) {
+      runFailure(err);
+    } finally { setBusy(false); }
+  };
+
+  if (!state) {
+    return (
+      <div style={cardStyle}>
+        <h3 style={h3Style}>{t('terminalContract.title', 'Step 2 · Contract on the terminal')}</h3>
+        <div style={{ color: '#6B7280' }}>{t('terminalContract.loading', 'Reading the counter\'s terminal…')}</div>
+        {failure ? <div style={{ ...modalError, marginTop: 12 }}>{failure.message}</div> : null}
+      </div>
+    );
+  }
+
+  const actions = terminalActionsFor(failure?.terminal?.verdict);
+  const declined = state.clauses.find((c) => c.key === state.declinedSectionKey) || null;
+  const next = state.clauses.find((c) => c.key === state.nextSectionKey) || null;
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+        <h3 style={{ ...h3Style, margin: 0 }}>
+          {t('terminalContract.title', 'Step 2 · Contract on the terminal')}
+        </h3>
+        <span style={{ fontSize: 12, color: '#6B7280', fontVariantNumeric: 'tabular-nums' }}>
+          {t('terminalContract.progress', '{{done}} of {{total}} clauses accepted', {
+            done: state.acceptedCount, total: state.total,
+          })}
+        </span>
+      </div>
+      <p style={{ fontSize: 12.5, color: '#6B7280', margin: '0 0 14px', lineHeight: 1.5 }}>
+        {t('terminalContract.hint',
+          'Hand the QD2 to the renter. This list is driven by the terminal\'s own answers — it is not a timer.')}
+      </p>
+
+      {state.clauseLengthError ? (
+        <div style={{ ...modalError, marginBottom: 14 }}>{state.clauseLengthError}</div>
+      ) : null}
+
+      {/* The ladder */}
+      <div style={{ border: '0.5px solid #E5E7EB', borderRadius: 8, overflow: 'hidden', marginBottom: 14 }}>
+        {state.clauses.map((c) => {
+          const isNext = c.key === state.nextSectionKey;
+          return (
+            <div
+              key={c.key}
+              style={{
+                display: 'grid', gridTemplateColumns: '26px 1fr auto', gap: 11,
+                alignItems: 'center', padding: '9px 13px', minHeight: 44,
+                borderBottom: '0.5px solid #F3F4F6', fontSize: 12.5,
+                background: c.declined ? ALERT.bg : (isNext ? '#F5F3FF' : '#FFFFFF'),
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 18, height: 18, borderRadius: '50%', display: 'grid',
+                  placeItems: 'center', fontSize: 10, fontWeight: 700,
+                  background: c.accepted ? '#E6F7F1' : (c.declined ? ALERT.bg : '#F3F4F6'),
+                  color: c.accepted ? '#08674E' : (c.declined ? ALERT.tx : '#6B7280'),
+                  border: '0.5px solid #E5E7EB',
+                }}
+              >
+                {c.accepted ? '✓' : c.index}
+              </span>
+              <span>
+                <b style={{ display: 'block', fontWeight: 600, color: '#111827' }}>{c.label}</b>
+                <small style={{ fontSize: 11, color: '#6B7280' }}>
+                  {c.accepted || c.declined
+                    // The VERBATIM option the renter pressed. Not "accepted" —
+                    // the exact button text, which is what the audit trail keeps
+                    // and what the printed agreement shows beside this clause.
+                    ? `${c.choiceOption} · ${new Date(c.acceptedAt).toLocaleTimeString()}`
+                    : (isNext
+                      ? t('terminalContract.onScreen', 'Next on the terminal')
+                      : t('terminalContract.waiting', 'Waiting'))}
+                </small>
+              </span>
+              {c.accepted && !isNext ? (
+                <button
+                  style={{ ...ghostBtn, fontSize: 11 }}
+                  disabled={busy}
+                  onClick={() => sendClause(c.key)}
+                >
+                  {t('terminalContract.resendClause', 'Re-send')}
+                </button>
+              ) : <span />}
+            </div>
+          );
+        })}
+      </div>
+
+      {failure ? (
+        <div style={{ ...modalError, marginBottom: 14 }}>
+          <div style={{ fontWeight: 600 }}>
+            {failure.terminal?.state
+              ? t(`terminalContract.state.${failure.terminal.state}`, failure.terminal.state)
+              : t('terminalContract.state.UNKNOWN', 'The terminal did not answer')}
+          </div>
+          <div>{failure.message}</div>
+          {actions.wait && countdown > 0 ? (
+            <div style={{ marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
+              {t('terminalContract.busyCountdown',
+                'The gateway asked us to wait {{seconds}}s before sending again.',
+                { seconds: countdown })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {declined ? (
+        <div style={{ background: WARN.bg, border: `0.5px solid ${WARN.bd}`, color: WARN.tx, borderRadius: 6, padding: '10px 12px', fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>
+          {t('terminalContract.declined',
+            'The renter declined “{{label}}”. This is a conversation, not a retry — resolve it with them, then re-send that clause or go back to step 1 to change their coverage.',
+            { label: declined.label })}
+        </div>
+      ) : null}
+
+      {qr ? (
+        <div style={{ background: '#F9FAFB', padding: 20, borderRadius: 8, textAlign: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+            {t('terminalContract.qrHint',
+              'The renter scans this and continues on their phone. The clauses they already accepted on the terminal are carried over.')}
+          </div>
+          <QrCode
+            size={200}
+            url={`${typeof window !== 'undefined' ? window.location.origin : ''}/sign/${qr}`}
+          />
+        </div>
+      ) : null}
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {state.allAccepted ? (
+          <button style={primaryBtn} disabled={busy || !!state.clauseLengthError} onClick={sign}>
+            {t('terminalContract.capture', 'Capture signature on the terminal')}
+          </button>
+        ) : (
+          <button
+            style={primaryBtn}
+            disabled={busy || !next || !!state.declinedSectionKey || !!state.clauseLengthError
+              || (actions.wait && countdown > 0)}
+            onClick={() => sendClause(null)}
+          >
+            {next
+              ? t('terminalContract.send', 'Send “{{label}}” to the terminal', { label: next.label })
+              : t('terminalContract.send_none', 'Send to the terminal')}
+          </button>
+        )}
+        {actions.resend && next ? (
+          <button style={ghostBtn} disabled={busy} onClick={() => sendClause(next.key)}>
+            {t('terminalContract.resend', 'Re-send this clause')}
+          </button>
+        ) : null}
+        <span style={{ flex: 1 }} />
+        {/* Always available, not only after a failure: the agent may simply see
+            the renter is struggling with the device. */}
+        <button style={ghostBtn} disabled={busy} onClick={fallBack}>
+          {t('terminalContract.fallback', 'Switch this checkout to the renter\'s phone')}
+        </button>
+      </div>
+      <p style={{ fontSize: 11.5, color: '#6B7280', margin: '10px 0 0', lineHeight: 1.5 }}>
+        {t('terminalContract.fallbackCost',
+          'Falling back moves the contract to the phone. Payment and the deposit move with it — they do not stay on the terminal.')}
+      </p>
     </div>
   );
 }

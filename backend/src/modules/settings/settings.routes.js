@@ -310,6 +310,52 @@ settingsRouter.put('/checkout-payment', requireRole('ADMIN'), async (req, res, n
   }
 });
 
+// Checkout contract mode (2026-09-04): which surface the renter signs the
+// rental agreement on — PHONE (today's QR to /sign/:token, the default for
+// every tenant) or TERMINAL (six UserChoice prompts + one GetSignature on the
+// Dejavoo QD2). Per tenant, with a per-location override in either direction,
+// because the rollout unit is a counter and not a company.
+//
+// ADMIN-gated and tenant-scoped exactly like /checkout-payment. FAIL-CLOSED:
+// no tenantId → 400, never a global write. Reading is open to any signed-in
+// staff member — the checkout wizard has to know which renderer to draw, and
+// the answer is not a secret.
+settingsRouter.get('/checkout-contract', async (req, res, next) => {
+  try {
+    res.json(await settingsService.getCheckoutContractPolicy(scopeFor(req)));
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for checkout contract settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.put('/checkout-contract', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const out = await settingsService.updateCheckoutContractPolicy(req.body || {}, scope);
+    // Audited: this decides where a legal signature is captured, so "who turned
+    // this on, for which branch, and when" has to be answerable. Metadata is
+    // the modes and the location ids — no PII, no credentials.
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.CHECKOUT_CONTRACT_MODE_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: { mode: out.mode, locations: out.locations, tenantId: scope?.tenantId || null },
+    });
+    res.json(out);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for checkout contract settings' });
+    }
+    if (/must be PHONE or TERMINAL/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 // Vehicle Profile pack (2026-06-10): fleet rotation rule (TIME | MILEAGE).
 settingsRouter.get('/fleet-rotation', async (_req, res, next) => {
   try {

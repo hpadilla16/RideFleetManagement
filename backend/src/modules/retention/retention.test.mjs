@@ -41,6 +41,9 @@ const MODELS = [
   'customer', 'reservation',
   'rentalAgreement', 'loanerAgreement',
   'rentalAgreementAddendum', 'agreementDriver', 'agreementSectionInitial',
+  // Terminal contract signing (2026-09-04) — the per-clause acceptance record.
+  // The sweep reaches it through the same agreementRelation the initials use.
+  'agreementClauseAcceptance',
   'rentalAgreementInspection', 'rentalAgreementVehicleSwap', 'rentalAgreementCharge',
   'rentalAgreementPayment', 'agreementCommission',
   'loanerPhoto', 'loanerDamagePoint',

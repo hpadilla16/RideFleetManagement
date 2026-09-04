@@ -29,6 +29,14 @@ function reset() {
     },
   });
   prisma.agreementSectionInitial.findMany = async () => [];
+  // Terminal fallback carry-over (2026-09-04): loadSession and complete both
+  // ask which clauses the renter already accepted on a QD2. Empty here on
+  // purpose — these tests ARE the phone-only path, and the whole contract of
+  // that carry-over is that a phone-only signing behaves exactly as it did
+  // before terminal signing existed. The terminal-fed cases live in
+  // terminal-contract.test.mjs.
+  prisma.agreementClauseAcceptance = prisma.agreementClauseAcceptance || {};
+  prisma.agreementClauseAcceptance.findMany = async () => [];
   // Brand resolution (resolveSigningBrand) reads the rental-agreement
   // settings + franchise on top of the token row. Unmocked these would hit a
   // real database from a unit test.

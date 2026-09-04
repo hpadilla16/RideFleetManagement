@@ -2115,6 +2115,38 @@
       "note3": "El token HPP se cifra en reposo y no vuelve a mostrarse; déjelo en blanco para conservar el guardado. Las credenciales de producción las entrega el soporte de Dejavoo."
     }
   },
+  "terminalContract": {
+    "title": "Paso 2 · Contrato en la terminal",
+    "loading": "Consultando la terminal del mostrador…",
+    "progress": "{{done}} de {{total}} cláusulas aceptadas",
+    "hint": "Entregue la QD2 al cliente. Esta lista la mueven las respuestas de la propia terminal — no es un temporizador.",
+    "onScreen": "Siguiente en la terminal",
+    "waiting": "En espera",
+    "send": "Enviar “{{label}}” a la terminal",
+    "send_none": "Enviar a la terminal",
+    "resend": "Reenviar esta cláusula",
+    "resendClause": "Reenviar",
+    "capture": "Capturar la firma en la terminal",
+    "declined": "El cliente rechazó “{{label}}”. Esto es una conversación, no un reintento — resuélvalo con él y luego reenvíe esa cláusula o vuelva al paso 1 para cambiar su cobertura.",
+    "busyCountdown": "La pasarela pidió esperar {{seconds}} s antes de volver a enviar.",
+    "fallback": "Pasar este check-out al teléfono del cliente",
+    "fallbackCost": "Al pasar al teléfono, el contrato se firma allí. El pago y el depósito se mueven con él — no se quedan en la terminal.",
+    "qrHint": "El cliente escanea esto y continúa en su teléfono. Las cláusulas que ya aceptó en la terminal se conservan.",
+    "state": {
+      "IDLE": "Terminal lista",
+      "PROMPTING": "Enviado a la terminal — esperando que lo muestre",
+      "CUSTOMER_READING": "El cliente está leyendo la cláusula",
+      "CAPTURING_SIGNATURE": "El cliente está firmando",
+      "SIGNED": "Contrato firmado en la terminal",
+      "DECLINED_BY_RENTER": "El cliente rechazó esta cláusula",
+      "TIMED_OUT": "La terminal dejó de esperar respuesta",
+      "BUSY": "La terminal está ocupada con otra transacción",
+      "TERMINAL_OFFLINE": "No se puede conectar con la terminal — revise corriente y Wi-Fi",
+      "NOT_CONFIGURED": "Este mostrador no tiene terminal configurada",
+      "GATEWAY_REJECTED": "La pasarela rechazó la solicitud antes de llegar a la terminal",
+      "UNKNOWN": "La terminal no respondió"
+    }
+  },
   "viewPayments": {
     "title": "Pagos",
     "back": "Volver",

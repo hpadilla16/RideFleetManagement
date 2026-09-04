@@ -77,11 +77,17 @@ function stub(rows) {
 }
 
 beforeEach(() => {
-  db = { checkoutSessions: [], agreements: [], handoffTokens: [], initials: [] };
+  db = { checkoutSessions: [], agreements: [], handoffTokens: [], initials: [], clauseAcceptances: [] };
   Object.assign(prisma.checkoutSession, stub(() => db.checkoutSessions));
   Object.assign(prisma.rentalAgreement, stub(() => db.agreements));
   Object.assign(prisma.handoffToken, stub(() => db.handoffTokens));
   Object.assign(prisma.agreementSectionInitial, stub(() => db.initials));
+  // Terminal fallback carry-over (2026-09-04): terms-signing asks which clauses
+  // the renter already accepted on a QD2 before falling back. Seeded EMPTY —
+  // these are phone-only signings, which is precisely the case that has to keep
+  // behaving the way it always did.
+  prisma.agreementClauseAcceptance = prisma.agreementClauseAcceptance || {};
+  Object.assign(prisma.agreementClauseAcceptance, stub(() => db.clauseAcceptances));
   prisma.$transaction = async (arg) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma));
 });
 

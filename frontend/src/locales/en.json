@@ -2115,6 +2115,38 @@
       "note3": "The HPP Auth Token is encrypted at rest and never shown again; leave it blank to keep the saved one. Production credentials come from Dejavoo support."
     }
   },
+  "terminalContract": {
+    "title": "Step 2 · Contract on the terminal",
+    "loading": "Reading the counter's terminal…",
+    "progress": "{{done}} of {{total}} clauses accepted",
+    "hint": "Hand the QD2 to the renter. This list is driven by the terminal's own answers — it is not a timer.",
+    "onScreen": "Next on the terminal",
+    "waiting": "Waiting",
+    "send": "Send “{{label}}” to the terminal",
+    "send_none": "Send to the terminal",
+    "resend": "Re-send this clause",
+    "resendClause": "Re-send",
+    "capture": "Capture signature on the terminal",
+    "declined": "The renter declined “{{label}}”. This is a conversation, not a retry — resolve it with them, then re-send that clause or go back to step 1 to change their coverage.",
+    "busyCountdown": "The gateway asked us to wait {{seconds}}s before sending again.",
+    "fallback": "Switch this checkout to the renter's phone",
+    "fallbackCost": "Falling back moves the contract to the phone. Payment and the deposit move with it — they do not stay on the terminal.",
+    "qrHint": "The renter scans this and continues on their phone. The clauses they already accepted on the terminal are carried over.",
+    "state": {
+      "IDLE": "Terminal ready",
+      "PROMPTING": "Sent to the terminal — waiting for it to display",
+      "CUSTOMER_READING": "The renter is reading the clause",
+      "CAPTURING_SIGNATURE": "The renter is signing",
+      "SIGNED": "Agreement signed on the terminal",
+      "DECLINED_BY_RENTER": "The renter declined this clause",
+      "TIMED_OUT": "The terminal stopped waiting for an answer",
+      "BUSY": "The terminal is in the middle of another transaction",
+      "TERMINAL_OFFLINE": "Cannot reach the terminal — check power and Wi-Fi",
+      "NOT_CONFIGURED": "This counter has no terminal configured",
+      "GATEWAY_REJECTED": "The gateway refused the request before it reached the terminal",
+      "UNKNOWN": "The terminal did not answer"
+    }
+  },
   "viewPayments": {
     "title": "Payments",
     "back": "Back",

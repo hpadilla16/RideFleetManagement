@@ -365,6 +365,29 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     columns: { redact: ['initialDataUrl'], null: ['customerIp'] },
     retainNote: 'Keep sectionKey + signedAt; erase the initials image + customer IP.',
   },
+  agreementClauseAcceptance: {
+    model: 'agreementClauseAcceptance',
+    label: 'AgreementClauseAcceptance',
+    retention: 'ANONYMISE',
+    match: { kind: 'agreementRelation', field: 'agreementId' },
+    // `inkDataUrl` is the only column here that can ever hold the person: it is
+    // NULL today and holds per-clause ink once that switch is thrown, so it is
+    // classified NOW rather than the day it starts being written.
+    //
+    // Everything else is deliberately RETAINED, and that is the whole reason
+    // this table is separate from the initials: `choiceOption`, `acceptedAt`,
+    // `sectionKey` and the masked TPN are the proof that a contract was agreed
+    // to, clause by clause, on a named device. Erasing them would erase the
+    // evidence that the retained agreement was consented to at all — which is
+    // the opposite of what an erasure request is for. Nothing in them
+    // identifies the renter: the clause text is the branch's own wording, the
+    // option string is the button label everyone sees, and the TPN is masked.
+    columns: { redact: ['inkDataUrl'] },
+    retainNote:
+      'Keep sectionKey, sectionLabel, sectionBody, choiceOption, accepted, acceptedAt, capturedVia, '
+      + 'terminalTpn (already masked) and registerId — the consent record for a retained agreement. '
+      + 'Erase only per-clause ink.',
+  },
   rentalAgreementInspection: {
     model: 'rentalAgreementInspection',
     label: 'RentalAgreementInspection',

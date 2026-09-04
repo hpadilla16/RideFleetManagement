@@ -40,6 +40,7 @@ const MODELS = [
   'trip', 'tripDocument', 'tripFulfillmentPlan', 'tripTimelineEvent', 'tripPayout',
   'conversation', 'message', 'hostReview', 'quote',
   'agreementDriver', 'reservationAdditionalDriver', 'agreementSectionInitial',
+  'agreementClauseAcceptance',
   'rentalAgreementInspection', 'rentalAgreementVehicleSwap', 'rentalAgreementCharge',
   'rentalAgreementPayment', 'agreementCommission', 'reservationCharge', 'reservationPayment',
   'customerInspection', 'reservationIncident', 'vehicleDamageReport', 'reviewProof',

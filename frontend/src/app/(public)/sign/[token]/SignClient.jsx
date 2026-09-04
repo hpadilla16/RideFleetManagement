@@ -77,6 +77,8 @@ const STRINGS = {
     sectionOf: 'Section {i} of {n}',
     initialed: '✓ Initialed',
     savedRedo: 'Saved — draw again to redo',
+    acceptedOnTerminal: '✓ Agreed on the counter terminal',
+    acceptedOnTerminalHint: 'You already accepted this one — no need to repeat it',
     initialHere: 'Initial here →',
     typeName: 'Type your full name',
     namePlaceholder: 'First Last',
@@ -101,6 +103,8 @@ const STRINGS = {
     sectionOf: 'Sección {i} de {n}',
     initialed: '✓ Iniciales puestas',
     savedRedo: 'Guardado — dibuja de nuevo para rehacer',
+    acceptedOnTerminal: '✓ Aceptado en la terminal del mostrador',
+    acceptedOnTerminalHint: 'Ya aceptaste esta cláusula — no hace falta repetirla',
     initialHere: 'Tus iniciales aquí →',
     typeName: 'Escribe tu nombre completo',
     namePlaceholder: 'Nombre y Apellido',
@@ -414,7 +418,18 @@ function TermsSection({ index, total, section, t, onInitial }) {
       </p>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <span style={{ fontSize: 12, color: '#6B7280' }}>
-          {section.signed ? (
+          {section.acceptedOnTerminal ? (
+            <>
+              {/* The renter already agreed to THIS clause on the counter's own
+                  device before it dropped out. Making them do it again is not a
+                  safety measure. Said out loud rather than silently pre-ticking
+                  a legal acknowledgement, which would read as the system having
+                  agreed on their behalf — and the pad below stays live, so they
+                  can still initial it if they want to. */}
+              <span style={{ color: '#047857', fontWeight: 600 }}>{t('acceptedOnTerminal')}</span>
+              <span style={{ display: 'block', fontSize: 11, marginTop: 2 }}>{t('acceptedOnTerminalHint')}</span>
+            </>
+          ) : section.signed ? (
             <>
               {/* Still reads as done — but not as CLOSED. A renter who sees only
                   the ✓ assumes the box is finished with them; the second line is

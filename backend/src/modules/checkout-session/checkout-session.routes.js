@@ -3,6 +3,7 @@ import { checkoutSessionService, CheckoutSessionError } from './checkout-session
 import { checkoutPresenceService } from './checkout-presence.service.js';
 import { vehicleSwapService } from './vehicle-swap.service.js';
 import { spinChargeService } from './spin-charge.service.js';
+import { terminalContractService } from './terminal-contract.service.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
@@ -26,6 +27,11 @@ function handleError(res, err) {
       // right fix without parsing the message. Same additive contract as
       // `session` above.
       ...(err.reason ? { reason: err.reason } : {}),
+      // 2026-09-04 (terminal contract): a terminal failure carries its own
+      // classification — { state, verdict, code, retryAfterSeconds } — because
+      // the agent's correct action differs per state and a raw gateway string
+      // cannot tell them which. Additive; absent on every other error.
+      ...(err.terminal ? { terminal: err.terminal } : {}),
     });
   }
   logger.error('[checkout-session] unexpected error', { message: err.message, stack: err.stack });
@@ -195,6 +201,84 @@ checkoutSessionRouter.post('/:id/terms-token', async (req, res) => {
       actorUserId: req.user?.id,
     });
     res.status(201).json(token);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// Terminal contract signing (2026-09-04) — step 2 of the US checkout.
+//
+// NO MONEY on any of these four. They drive /v2/Common/UserChoice and
+// /v2/Common/GetSignature, which display text and capture ink; no amount is
+// sent, nothing settles, and nothing is captured. That is why they carry no
+// paymentActions gate — the counter agent who runs the checkout is exactly who
+// should be able to put a clause on the screen in front of the renter.
+//
+// They are inert until a tenant/location sets checkoutContractMode = TERMINAL,
+// which defaults to PHONE; every one of them refuses with
+// CONTRACT_MODE_NOT_TERMINAL otherwise.
+// ---------------------------------------------------------------------
+
+// GET /:id/terminal-contract — the agent's ladder + the mode switch. Safe to
+// poll: it reads, resolves the mode, and touches no device.
+checkoutSessionRouter.get('/:id/terminal-contract', async (req, res) => {
+  try {
+    res.json(await terminalContractService.getState({ sessionId: req.params.id }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /:id/terminal-contract/clause — put ONE clause on the terminal and
+// record the answer. Body: { sectionKey? }. Omitted means "the next one that
+// is not yet accepted", which is what makes a resume a resume.
+checkoutSessionRouter.post('/:id/terminal-contract/clause', async (req, res) => {
+  try {
+    const { sectionKey } = req.body || {};
+    res.json(await terminalContractService.runClause({
+      sessionId: req.params.id,
+      sectionKey: sectionKey || null,
+      actorUserId: req.user?.id,
+    }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /:id/terminal-contract/signature — the single GetSignature that closes
+// the contract. Refuses unless every expected clause is accepted, then writes
+// the initials, the signature and tcCompletedAt in one transaction.
+checkoutSessionRouter.post('/:id/terminal-contract/signature', async (req, res) => {
+  try {
+    res.json(await terminalContractService.captureSignature({
+      sessionId: req.params.id,
+      actorUserId: req.user?.id,
+    }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /:id/terminal-contract/fallback — hand this checkout to the renter's
+// phone, carrying the clauses already accepted on the terminal. Returns the
+// TERMS_SIGNING token so the agent gets the QR in the same round trip: the
+// contract and its fallback move together, never in two clicks that can be
+// half-done.
+checkoutSessionRouter.post('/:id/terminal-contract/fallback', async (req, res) => {
+  try {
+    const { reason } = req.body || {};
+    const out = await terminalContractService.switchToPhone({
+      sessionId: req.params.id,
+      actorUserId: req.user?.id,
+      reason: reason || null,
+    });
+    const token = await checkoutSessionService.mintHandoffToken({
+      sessionId: req.params.id,
+      kind: 'TERMS_SIGNING',
+      actorUserId: req.user?.id,
+    });
+    res.json({ ...out, token });
   } catch (err) {
     handleError(res, err);
   }
