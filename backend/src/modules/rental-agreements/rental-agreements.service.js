@@ -38,6 +38,7 @@ import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
 import { isSoldItemCharge, SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
 import { normalizeReviewTiers, tierPercentFor } from '../../lib/review-tiers.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
+import { usesSpinCnpRail, holdVoidRail } from '../payment-gateway/cnp-rail.js';
 import { resolveTenantTerminalConfig, toSpinClientConfig } from '../payment-gateway/tenant-terminal-config.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
 import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
@@ -80,6 +81,7 @@ async function loadTenantSpinConfig(tenantId, locationId = null) {
     return {};
   }
 }
+
 
 /**
  * ⚠️ MONEY (2026-07-25, QA MAJOR). The one window in spinReauthDepositHold
@@ -3666,7 +3668,13 @@ export const rentalAgreementsService = {
                 method: true,
                 reference: true,
                 status: true,
-                amount: true
+                amount: true,
+                // The mirror link. Every Spin-orchestrated payment writes BOTH
+                // ledgers (RentalAgreementPayment + a ReservationPayment mirror)
+                // and records the link here precisely so consumers can tell
+                // "same money, second ledger" from "second payment". The print
+                // dedup below reads it — see paymentsForPrint.
+                rentalAgreementPaymentId: true
               }
             }
           }
@@ -3717,14 +3725,25 @@ export const rentalAgreementsService = {
     const signatureTime = agreement?.reservation?.signatureSignedAt || sigLog?.createdAt || null;
 
     const dbPayments = Array.isArray(agreement?.payments) ? agreement.payments : [];
-    const structuredReservationPrintPayments = structuredReservationPayments(agreement?.reservation).map((payment, idx) => ({
-      id: payment.id || `reservation-${idx}`,
-      paidAt: payment.paidAt,
-      method: payment.method || 'OTHER',
-      reference: payment.reference || null,
-      status: payment.status || 'PAID',
-      amount: Number(payment.amount || 0)
-    }));
+    // 2026-09-04 (RES-700371): drop reservation rows that are MIRRORS of an
+    // agreement row already in the list. The fuzzy timestamp|amount|reference
+    // key below can't catch them — the two ledgers stamp their rows moments
+    // apart (the sale's pair straddled a second boundary; the deposit's pair
+    // was 41s apart, written by different writers) — so the same $1.01 sale
+    // printed twice and the contract showed "two payments" for one charge.
+    // The explicit rentalAgreementPaymentId link is authoritative; the fuzzy
+    // key stays only for legacy rows that predate the link.
+    const dbPaymentIds = new Set(dbPayments.map((p) => p.id));
+    const structuredReservationPrintPayments = structuredReservationPayments(agreement?.reservation)
+      .filter((payment) => !(payment.rentalAgreementPaymentId && dbPaymentIds.has(payment.rentalAgreementPaymentId)))
+      .map((payment, idx) => ({
+        id: payment.id || `reservation-${idx}`,
+        paidAt: payment.paidAt,
+        method: payment.method || 'OTHER',
+        reference: payment.reference || null,
+        status: payment.status || 'PAID',
+        amount: Number(payment.amount || 0)
+      }));
     const seen = new Set();
     const paymentsForPrint = [...dbPayments, ...structuredReservationPrintPayments].filter((p) => {
       const k = `${new Date(p.paidAt || p.createdAt || Date.now()).toISOString().slice(0,19)}|${Number(p.amount || 0).toFixed(2)}|${String(p.reference || '').trim()}`;
@@ -5036,46 +5055,64 @@ export const rentalAgreementsService = {
       throw new Error('No card on file — complete a Spin sale at checkout first');
     }
 
-    // Route through the iPOSpays Transact API per the docs — this is
-    // the documented CNP path for tokenized sales (transactionType 1).
-    // Replaces the earlier SPIn-with-Token workaround.
     const tenantConfig = await loadTenantSpinConfig(agreement.tenantId, agreement.pickupLocationId);
-    const customer = agreement.reservation?.customer || {};
-    const customerName = [
-      agreement.customerFirstName || customer.firstName,
-      agreement.customerLastName || customer.lastName,
-    ].filter(Boolean).join(' ').trim();
-    const response = await iposTransactClient.chargeWithToken({
-      amount,
-      agreementNumber: agreement.agreementNumber || agreement.id,
-      cardToken: agreement.cardOnFileToken,
-      customer: {
-        name: customerName,
-        email: agreement.customerEmail || customer.email || '',
-        phone: agreement.customerPhone || customer.phone || '',
-      },
-      description: payload.notes || 'Card on file charge',
-      // Level 3 itemization inputs (Phase 1a). All optional — the client falls
-      // back to its previous single-line payload whenever they don't reconcile.
-      charges: agreement.charges || [],
-      // The agreement's own tax total is authoritative (plan §4.1); it is a
-      // stored Decimal, not something to recompute here.
-      taxAmount: Number(agreement.taxes || 0),
-      // Location.taxRate is a PERCENT (9.5 = 9.5%). Used only to synthesize
-      // the per-line TaxRate — RFM stores no per-line tax (plan §5.2).
-      taxRate: Number(agreement.pickupLocation?.taxRate || 0),
-      // Only sharpens UnitOfMeasure: a row whose quantity equals the rental
-      // day count is a per-day line ('DAY'), which chargeType alone cannot
-      // tell us for PER_DAY insurance. Never affects money.
-      rentalDays: rentalDays(agreement.pickupAt, agreement.returnAt),
-    }, tenantConfig);
 
-    const norm = iposTransactClient.normalizeResponse(response);
-    if (!norm.approved) {
-      throw new Error(norm.errMessage || norm.message || 'iPOSpays card-on-file charge declined');
+    let reference;
+    if (usesSpinCnpRail(tenantConfig)) {
+      // SPIn rail — tenant-resolved terminal (see usesSpinCnpRail). The saved
+      // iPOS token is billed CardPresent:false through the tenant's OWN
+      // terminal credentials; no Transact involvement, so no way to borrow
+      // another merchant's auth. spinRequest throws on a decline, so a
+      // response here is an approval.
+      const spinRefId = `${agreement.reservation?.reservationNumber || agreement.agreementNumber || agreement.id}-COF-${Date.now().toString(36)}`;
+      const spinResponse = await spinClient.chargeWithToken({
+        amount,
+        referenceId: spinRefId,
+        token: agreement.cardOnFileToken,
+        invoiceNumber: agreement.agreementNumber || undefined,
+      }, tenantConfig);
+      const spinNorm = spinClient.normalizeResponse(spinResponse);
+      reference = `SPIN_COF:${spinNorm.authCode || spinRefId}${agreement.cardOnFileLast4 ? ` ****${agreement.cardOnFileLast4}` : ''}`;
+    } else {
+      // Legacy env deployment — the iPOSpays Transact API, the documented CNP
+      // path for tokenized sales (transactionType 1).
+      const customer = agreement.reservation?.customer || {};
+      const customerName = [
+        agreement.customerFirstName || customer.firstName,
+        agreement.customerLastName || customer.lastName,
+      ].filter(Boolean).join(' ').trim();
+      const response = await iposTransactClient.chargeWithToken({
+        amount,
+        agreementNumber: agreement.agreementNumber || agreement.id,
+        cardToken: agreement.cardOnFileToken,
+        customer: {
+          name: customerName,
+          email: agreement.customerEmail || customer.email || '',
+          phone: agreement.customerPhone || customer.phone || '',
+        },
+        description: payload.notes || 'Card on file charge',
+        // Level 3 itemization inputs (Phase 1a). All optional — the client falls
+        // back to its previous single-line payload whenever they don't reconcile.
+        charges: agreement.charges || [],
+        // The agreement's own tax total is authoritative (plan §4.1); it is a
+        // stored Decimal, not something to recompute here.
+        taxAmount: Number(agreement.taxes || 0),
+        // Location.taxRate is a PERCENT (9.5 = 9.5%). Used only to synthesize
+        // the per-line TaxRate — RFM stores no per-line tax (plan §5.2).
+        taxRate: Number(agreement.pickupLocation?.taxRate || 0),
+        // Only sharpens UnitOfMeasure: a row whose quantity equals the rental
+        // day count is a per-day line ('DAY'), which chargeType alone cannot
+        // tell us for PER_DAY insurance. Never affects money.
+        rentalDays: rentalDays(agreement.pickupAt, agreement.returnAt),
+      }, tenantConfig);
+
+      const norm = iposTransactClient.normalizeResponse(response);
+      if (!norm.approved) {
+        throw new Error(norm.errMessage || norm.message || 'iPOSpays card-on-file charge declined');
+      }
+
+      reference = `IPOS_COF:${norm.authCode || norm.rrn || norm.referenceId}${agreement.cardOnFileLast4 ? ` ****${agreement.cardOnFileLast4}` : ''}`;
     }
-
-    const reference = `IPOS_COF:${norm.authCode || norm.rrn || norm.referenceId}${agreement.cardOnFileLast4 ? ` ****${agreement.cardOnFileLast4}` : ''}`;
     const note = String(payload.notes || '').trim();
     const finalNote = note
       ? `Spin card-on-file charge · ${note}`
@@ -5127,7 +5164,9 @@ export const rentalAgreementsService = {
           actorUserId: actorUserId || null,
           action: 'UPDATE',
           reason: `Spin card-on-file charge: $${amount.toFixed(2)}`,
-          metadata: JSON.stringify({ reference, refId, last4: agreement.cardOnFileLast4 || null })
+          // `refId` used to sit here too — an undefined variable, so this
+          // whole audit write silently threw into its catch{} since day one.
+          metadata: JSON.stringify({ reference, last4: agreement.cardOnFileLast4 || null })
         }
       });
     } catch {}
@@ -5152,13 +5191,27 @@ export const rentalAgreementsService = {
     const tenantConfig = await loadTenantSpinConfig(agreement.tenantId, agreement.pickupLocationId);
     let voidRef = agreement.depositHoldId;
 
-    if (!isManual) {
-      // The depositHoldId stored for Transact-issued pre-auths is the
-      // RRN (the void key per Transact docs). For older SPIn-issued
-      // holds it's the SPIn ReferenceId. We try Transact first since
-      // that's the new documented path; on a clearly-malformed RRN we
-      // could fall back to SPIn, but the typical case is one or the
-      // other and the Transact path is the documented one.
+    // Which rail placed this hold decides which rail can void it (2026-09-04):
+    // a SPIn card-present hold (the "-DEP-" ReferenceId spin-charge mints) is
+    // invisible to Transact — voidByRrn on it can only fail, which is exactly
+    // what the first LAX release attempt would have done. See holdVoidRail.
+    const rail = holdVoidRail(agreement.depositHoldId, tenantConfig);
+    if (rail === 'SPIN') {
+      // The SPIn void must carry the original amount (the gateway refuses it
+      // with 2201 otherwise — proven live 2026-09-04) and rides voidWithRetry
+      // because releases often follow another terminal op.
+      const holdAmount = Number(agreement.depositHoldAmount || agreement.securityDepositAmount || 0);
+      if (!(holdAmount > 0)) {
+        throw new Error('Spin deposit release needs the original hold amount and none is on file for this agreement — release it from the Dejavoo portal, then record a manual release here');
+      }
+      await spinClient.voidWithRetry({
+        referenceId: agreement.depositHoldId,
+        amount: holdAmount,
+      }, tenantConfig);
+      voidRef = agreement.depositHoldId;
+    } else if (rail === 'TRANSACT') {
+      // Transact-issued hold — the stored depositHoldId is the RRN (the void
+      // key per Transact docs).
       const response = await iposTransactClient.voidByRrn({
         rrn: agreement.depositHoldId,
         agreementNumber: agreement.agreementNumber || agreement.id,
@@ -5268,8 +5321,28 @@ export const rentalAgreementsService = {
     // from `voidedOldRef`, which only feeds the human-readable note/audit text.
     let gatewayVoidedRef = null;
     if (agreement.depositHoldId && !agreement.depositHoldVoidedAt) {
-      const isManual = String(agreement.depositHoldId).startsWith('MANUAL-');
-      if (!isManual) {
+      // Same rail rule as the release tool: the hold id says who placed it,
+      // and only that rail can void it (see holdVoidRail).
+      const oldRail = holdVoidRail(agreement.depositHoldId, tenantConfig);
+      if (oldRail === 'SPIN') {
+        try {
+          const oldHoldAmount = Number(agreement.depositHoldAmount || agreement.securityDepositAmount || 0);
+          if (oldHoldAmount > 0) {
+            await spinClient.voidWithRetry({
+              referenceId: agreement.depositHoldId,
+              amount: oldHoldAmount,
+            }, tenantConfig);
+            voidedOldRef = agreement.depositHoldId;
+            gatewayVoidedRef = voidedOldRef;
+          }
+          // No amount on file → skip the void (the gateway would 2201 it
+          // anyway); the new hold still lands and the orphan surfaces in the
+          // audit metadata below.
+        } catch {
+          // Swallow — surfaced via the new hold's audit log so the agent
+          // can chase the orphan hold via the Dejavoo portal if needed.
+        }
+      } else if (oldRail === 'TRANSACT') {
         try {
           const voidResponse = await iposTransactClient.voidByRrn({
             rrn: agreement.depositHoldId,
@@ -5296,18 +5369,40 @@ export const rentalAgreementsService = {
     // hold at all. Record that truth and flag it for staff BEFORE the error
     // propagates, and let the original error through untouched so the failure
     // stays loud for the agent.
-    let norm;
+    let newHoldId;
+    let reference;
     try {
-      const authResponse = await iposTransactClient.preAuthDeposit({
-        amount,
-        agreementNumber: agreement.agreementNumber || agreement.id,
-        cardToken: agreement.cardOnFileToken,
-        customer: customerInfo,
-      }, tenantConfig);
+      if (usesSpinCnpRail(tenantConfig)) {
+        // SPIn rail (see usesSpinCnpRail): hold against the saved iPOS token,
+        // CardPresent:false, through the tenant's own terminal credentials.
+        // spinClient.preAuthDeposit already carries the busy-only retry and
+        // throws on a decline. The minted "-DEP-" ReferenceId is the void key
+        // we persist, same shape spin-charge mints at checkout.
+        const spinRefId = `${agreement.reservation?.reservationNumber || agreement.agreementNumber || agreement.id}-DEP-${Date.now().toString(36)}`;
+        const authResponse = await spinClient.preAuthDeposit({
+          amount,
+          referenceId: spinRefId,
+          token: agreement.cardOnFileToken,
+          invoiceNumber: agreement.agreementNumber || undefined,
+        }, tenantConfig);
+        const spinNorm = spinClient.normalizeResponse(authResponse);
+        newHoldId = spinRefId;
+        reference = `SPIN_REAUTH:${spinNorm.authCode || spinRefId}`;
+      } else {
+        const authResponse = await iposTransactClient.preAuthDeposit({
+          amount,
+          agreementNumber: agreement.agreementNumber || agreement.id,
+          cardToken: agreement.cardOnFileToken,
+          customer: customerInfo,
+        }, tenantConfig);
 
-      norm = iposTransactClient.normalizeResponse(authResponse);
-      if (!norm.approved) {
-        throw new Error(norm.errMessage || norm.message || 'iPOSpays re-auth declined');
+        const norm = iposTransactClient.normalizeResponse(authResponse);
+        if (!norm.approved) {
+          throw new Error(norm.errMessage || norm.message || 'iPOSpays re-auth declined');
+        }
+        // Store the RRN — Transact uses RRN as the void key.
+        newHoldId = norm.rrn || norm.referenceId;
+        reference = `IPOS_REAUTH:${norm.authCode || newHoldId}`;
       }
     } catch (err) {
       await recordDepositHoldVoidedWithoutReplacement(agreement, {
@@ -5318,10 +5413,6 @@ export const rentalAgreementsService = {
       });
       throw err;
     }
-
-    // Store the RRN — Transact uses RRN as the void key.
-    const newHoldId = norm.rrn || norm.referenceId;
-    const reference = `IPOS_REAUTH:${norm.authCode || newHoldId}`;
 
     await prisma.rentalAgreement.update({
       where: { id: agreement.id },

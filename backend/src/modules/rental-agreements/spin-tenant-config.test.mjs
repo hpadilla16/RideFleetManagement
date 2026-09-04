@@ -56,3 +56,34 @@ test('a resolve failure degrades instead of throwing mid-charge', () => {
   // the way it always did, but loudly.
   assert.match(src, /catch \(e\) \{\s*\n\s*logger\.warn\?\.\(\{ tenantId, locationId, err: e\?\.message \}/);
 });
+
+// ── 2026-09-04: the CNP rail split ──────────────────────────────────────────
+// A tenant-resolved terminal has SPIn credentials only; the Transact client's
+// env fallback is another merchant's token. So every saved-card op must route
+// by rail. Behaviour of the rail functions is tested in
+// payment-gateway/cnp-rail.test.mjs; what is pinned HERE is that the three
+// money paths actually consult them.
+
+test('the module imports the shared rail rules rather than reimplementing them', () => {
+  assert.match(src, /import \{ usesSpinCnpRail, holdVoidRail \} from '\.\.\/payment-gateway\/cnp-rail\.js'/);
+  assert.equal(/function usesSpinCnpRail/.test(src), false, 'no local reimplementation');
+  assert.equal(/function holdVoidRail/.test(src), false, 'no local reimplementation');
+});
+
+test('charge-card-on-file and re-auth branch on the tenant rail', () => {
+  const gates = src.match(/if \(usesSpinCnpRail\(tenantConfig\)\)/g) || [];
+  assert.equal(gates.length, 2, `expected the 2 CNP money ops to gate on the rail, found ${gates.length}`);
+  // The SPIn branches bill the SAVED token through the tenant's own terminal
+  // credentials — never the Transact client.
+  assert.match(src, /spinClient\.chargeWithToken\(\{\s*\n\s*amount,\s*\n\s*referenceId: spinRefId,\s*\n\s*token: agreement\.cardOnFileToken/);
+  assert.match(src, /spinClient\.preAuthDeposit\(\{\s*\n\s*amount,\s*\n\s*referenceId: spinRefId,\s*\n\s*token: agreement\.cardOnFileToken/);
+});
+
+test('hold voids route by the rail that placed the hold, and SPIn voids carry the amount', () => {
+  const railPicks = src.match(/holdVoidRail\(agreement\.depositHoldId, tenantConfig\)/g) || [];
+  assert.equal(railPicks.length, 2, `release + re-auth must both pick the void rail, found ${railPicks.length}`);
+  // The SPIn void without the original amount is a call the gateway refuses
+  // (2201, proven live 2026-09-04) — both void sites must send it.
+  const spinVoids = src.match(/spinClient\.voidWithRetry\(\{\s*\n\s*referenceId: agreement\.depositHoldId,\s*\n\s*amount: /g) || [];
+  assert.equal(spinVoids.length, 2, `expected 2 amount-carrying SPIn void sites, found ${spinVoids.length}`);
+});
