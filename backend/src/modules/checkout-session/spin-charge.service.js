@@ -587,7 +587,10 @@ async function runChargeSequence({
       if (!isPrepaid) {
         try {
           log('SPIN_VOID_STARTED', { referenceId: refId });
-          await spinClient.void({ referenceId: refId }, tenantConfig);
+          // The gateway refuses a void that does not carry the original
+          // amount (2201, proven live 2026-09-04). saleAmount is what we just
+          // charged, so it is what we must give back.
+          await spinClient.void({ referenceId: refId, amount: requestedAmount }, tenantConfig);
           log('SPIN_VOID_OK', { referenceId: refId });
           // Mark the payment row as VOID so the agreement's paidAmount
           // recompute drops it.

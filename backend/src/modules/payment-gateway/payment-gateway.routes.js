@@ -74,9 +74,15 @@ paymentGatewayRouter.post('/capture', async (req, res, next) => {
 // Void
 paymentGatewayRouter.post('/void', async (req, res, next) => {
   try {
-    const { referenceId } = req.body || {};
+    const { referenceId, amount, paymentType } = req.body || {};
     if (!referenceId) return res.status(400).json({ error: 'referenceId is required' });
-    res.json(await paymentGatewayService.voidTransaction({ referenceId, tenantId: tenantIdFor(req), ...registerSelectionFor(req) }));
+    // The gateway refuses a void without the original amount (2201). Say so
+    // here rather than letting the caller read a gateway error about a field
+    // they never knew they had to send.
+    if (amount == null || !(Number(amount) > 0)) {
+      return res.status(400).json({ error: 'amount is required — the gateway rejects a void without the original amount' });
+    }
+    res.json(await paymentGatewayService.voidTransaction({ referenceId, amount, paymentType, tenantId: tenantIdFor(req), ...registerSelectionFor(req) }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
   }

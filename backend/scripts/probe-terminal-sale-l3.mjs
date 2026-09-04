@@ -601,7 +601,7 @@ async function main() {
       if (NO_VOID) {
         console.log(`\n  ⚠ NOT VOIDED (--i-will-void-these-myself). ref ${referenceId} is a live $${AMOUNT.toFixed(2)} charge.`);
       } else {
-        const voided = await voidStage(referenceId, cfg);
+        const voided = await voidStage(referenceId, cfg, AMOUNT);
         charged[charged.length - 1].voided = voided;
         if (!voided) {
           stopped = `stage ${stage.n} approved and the VOID FAILED`;
@@ -634,7 +634,7 @@ async function main() {
     if (live.length) {
       console.log(`\n  ⚠⚠ ${live.length} charge(s) ARE STILL LIVE ON A REAL CARD.`);
       console.log('  Void them in the iPOSpays portal, or:');
-      for (const c of live) console.log(`    node -e "…spinClient.void({ referenceId: '${c.referenceId}' }, cfg)"`);
+      for (const c of live) console.log(`    node scripts/void-spin-charge.mjs --tenant "<name>" --ref ${c.referenceId} --amount ${c.amount ?? AMOUNT}`);
     }
   }
   if (stopped) console.log(`\nStopped: ${stopped}`);
@@ -650,10 +650,10 @@ async function main() {
  * real person's card, so a failure here stops the ladder rather than letting a
  * second one accumulate behind it.
  */
-async function voidStage(referenceId, cfg) {
+async function voidStage(referenceId, cfg, amount) {
   console.log(`\n  … voiding ${referenceId}`);
   try {
-    const res = await spinClient.void({ referenceId }, cfg);
+    const res = await spinClient.void({ referenceId, amount }, cfg);
     const gr = res?.GeneralResponse || {};
     const ok = String(gr.ResultCode ?? '') === '0' && String(gr.StatusCode ?? '') === '0000';
     console.log(`     void ResultCode ${gr.ResultCode ?? '(none)'} StatusCode ${gr.StatusCode ?? '(none)'} ${gr.Message ?? ''}`);
