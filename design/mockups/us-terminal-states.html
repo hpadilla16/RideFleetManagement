@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet — Terminal State Vocabulary &amp; Fallback Paths</title>
+<style>
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --brand:#8752FE;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-600:#7440ea; --p-700:#5a26c9; --p-800:#45189e;
+  --gold-50:#fdf6e8; --gold-100:#fbe9c6; --gold-600:#a3660f; --gold-700:#7d4d08;
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --border-subtle:var(--n-100); --border:var(--n-200); --border-strong:var(--n-300);
+  --text-1:var(--n-900); --text-2:var(--n-700); --text-3:var(--n-600);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --focus:#0b63d6;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--n-50)}
+body{font-family:var(--font-sans);font-size:14px;line-height:1.55;color:var(--text-2);background:var(--n-50);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5{color:var(--text-1);letter-spacing:-.018em;line-height:1.15}
+table{border-collapse:collapse;width:100%}
+button,input,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+.tnum,table,.money,.mono,time{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs)}
+.mono{font-family:var(--font-mono)}
+
+.page-head{max-width:1440px;margin:0 auto;padding:44px 32px 20px}
+.page-head .eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.22);border-radius:var(--r-pill);padding:6px 13px 6px 10px}
+.page-head .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.page-head h1{margin-top:14px;font-size:clamp(28px,3.4vw,42px);font-weight:700;letter-spacing:-.03em}
+.page-head p{margin-top:10px;max-width:900px;color:var(--text-2);font-size:15px}
+.page-head .note{margin-top:14px;max-width:900px;font-size:12.5px;color:var(--text-3);border-left:3px solid var(--n-300);padding-left:12px;line-height:1.6}
+.mock-wrap{max-width:1440px;margin:20px auto 72px;padding:0 32px}
+.mock-label{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:40px 0 10px}
+.mock-label b{color:var(--p-700);font-weight:600}
+.mock-cap{font-size:12.5px;color:var(--text-3);max-width:940px;margin:0 0 14px;line-height:1.6}
+
+.screen{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sh-2);overflow:hidden}
+.mod-head{padding:16px 22px 16px;border-bottom:1px solid var(--border-subtle);background:var(--n-0)}
+.mod-title-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.mod-title-row h2{font-size:18px;font-weight:660}
+.mod-title-row .sub{font-size:12.5px;color:var(--text-3)}
+.mod-title-row .right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:640;line-height:1.4;padding:3px 8px;border-radius:var(--r-xs);white-space:nowrap;border:1px solid transparent}
+.chip i{width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.chip--ok{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.chip--warn{color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)}
+.chip--bad{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.chip--info{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.chip--neutral{color:var(--text-2);background:var(--n-100);border-color:var(--border)}
+.chip--brand{color:var(--p-800);background:var(--p-50);border-color:rgba(135,82,254,.25)}
+
+/* ---- state card gallery ---- */
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;padding:18px 22px 24px;background:var(--n-25)}
+.sc{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--n-0);overflow:hidden;box-shadow:var(--sh-1);display:flex;flex-direction:column}
+.sc > header{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border-subtle)}
+.sc > header .led{width:10px;height:10px;border-radius:50%;flex:0 0 auto;box-shadow:0 0 0 3px var(--n-100)}
+.sc > header b{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-1)}
+.sc > header .cls{margin-left:auto;font-size:10px;font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3)}
+.sc .banner{padding:13px 14px;font-size:13px;font-weight:640;color:var(--text-1);line-height:1.4;display:flex;align-items:flex-start;gap:10px}
+.sc .banner .ic{font-size:16px;line-height:1.1;flex:0 0 auto}
+.sc .banner .es{display:block;font-weight:500;font-size:11.5px;font-style:italic;color:var(--text-3);margin-top:3px}
+.sc .why{padding:0 14px 11px;font-size:11.5px;color:var(--text-3);line-height:1.6}
+.sc .why code{font-family:var(--font-mono);font-size:10.5px;background:var(--n-100);padding:1px 5px;border-radius:4px;color:var(--text-2)}
+.sc .acts{margin-top:auto;padding:11px 14px;border-top:1px solid var(--border-subtle);background:var(--n-25);display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.sc .verdict{font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-xs);border:1px solid transparent;margin-right:auto}
+.v-wait{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.v-retry{color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)}
+.v-fall{color:var(--p-800);background:var(--p-50);border-color:rgba(135,82,254,.25)}
+.v-stop{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.v-go{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+
+.sc.t-ok > header{background:var(--ok-bg)} .sc.t-ok .led{background:var(--ok)} .sc.t-ok > header b{color:var(--ok-tx)}
+.sc.t-live > header{background:var(--p-50)} .sc.t-live .led{background:var(--brand);animation:pulse 1.4s ease-in-out infinite} .sc.t-live > header b{color:var(--p-800)}
+.sc.t-warn > header{background:var(--warn-bg)} .sc.t-warn .led{background:var(--warn)} .sc.t-warn > header b{color:var(--warn-tx)}
+.sc.t-bad > header{background:var(--danger-bg)} .sc.t-bad .led{background:var(--danger)} .sc.t-bad > header b{color:var(--danger-tx)}
+.sc.t-idle > header{background:var(--n-50)} .sc.t-idle .led{background:var(--n-400)} .sc.t-idle > header b{color:var(--text-2)}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(135,82,254,.5)}50%{box-shadow:0 0 0 6px rgba(135,82,254,0)}}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;font-size:13px;font-weight:620;letter-spacing:-.01em;padding:8px 15px;border-radius:var(--r-sm);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:.15s}
+.btn--primary{background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(56,20,130,.28),0 6px 14px -6px rgba(135,82,254,.55)}
+.btn--secondary{background:var(--n-0);color:var(--text-1);border-color:var(--border-strong);box-shadow:var(--sh-1)}
+.btn--ghost{background:transparent;color:var(--p-700)}
+.btn--danger{background:var(--n-0);color:var(--danger-tx);border-color:var(--danger-bd)}
+.btn--sm{min-height:34px;padding:5px 11px;font-size:12px;border-radius:var(--r-xs)}
+
+/* ---- matrix table ---- */
+.mx-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--n-0);box-shadow:var(--sh-1)}
+table.mx{min-width:1180px}
+table.mx th{font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);text-align:left;padding:9px 12px;background:var(--n-50);border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:bottom}
+table.mx td{padding:9px 12px;font-size:12px;color:var(--text-2);border-bottom:1px solid var(--border-subtle);vertical-align:top;line-height:1.5}
+table.mx tbody tr:hover{background:var(--n-25)}
+table.mx tbody tr:last-child td{border-bottom:0}
+table.mx td.st{white-space:nowrap}
+table.mx td b{color:var(--text-1);font-weight:640}
+table.mx code{font-family:var(--font-mono);font-size:10.5px;background:var(--n-100);padding:1px 5px;border-radius:4px;color:var(--text-2);white-space:nowrap}
+table.mx tr.grp td{background:var(--n-50);font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--p-800);font-weight:600;padding:7px 12px}
+
+.callout{border:1px solid var(--border);border-left-width:3px;border-radius:var(--r-sm);padding:12px 14px;font-size:12.5px;line-height:1.65;background:var(--n-0);color:var(--text-2);margin-top:14px}
+.callout b{color:var(--text-1);font-weight:660}
+.callout--info{border-left-color:var(--info);background:var(--info-bg);border-color:var(--info-bd);color:#0a4a9e}
+.callout--info b{color:#083a7d}
+.callout--warn{border-left-color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.callout--warn b{color:#6b4204}
+.callout--bad{border-left-color:var(--danger);background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.callout--bad b{color:#7a1616}
+.callout--brand{border-left-color:var(--brand);background:var(--p-50);border-color:rgba(135,82,254,.22);color:var(--p-800)}
+.callout--brand b{color:var(--p-800)}
+
+/* ---- fallback flow diagram ---- */
+.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--n-0);box-shadow:var(--sh-1)}
+.fcol{padding:16px 18px 20px;border-right:1px solid var(--border-subtle)}
+.fcol:last-child{border-right:0}
+.fcol > h4{font-size:13.5px;font-weight:660;margin-bottom:3px}
+.fcol > .fsub{font-size:11.5px;color:var(--text-3);margin-bottom:14px;line-height:1.5}
+.fnode{border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;font-size:12px;background:var(--n-0);margin-bottom:8px;line-height:1.5}
+.fnode b{display:block;font-size:12.5px;font-weight:640;color:var(--text-1);margin-bottom:2px}
+.fnode small{font-size:11px;color:var(--text-3);line-height:1.5;display:block}
+.fnode.primary{border-color:var(--brand);background:var(--p-50);box-shadow:0 0 0 3px rgba(135,82,254,.07)}
+.fnode.fall{border-style:dashed;background:var(--n-25)}
+.fnode.term{border-color:var(--ok-bd);background:var(--ok-bg)}
+.fnode.term b{color:var(--ok-tx)}
+.fnode.stop{border-color:var(--danger-bd);background:var(--danger-bg)}
+.fnode.stop b{color:var(--danger-tx)}
+.farr{text-align:center;color:var(--n-400);font-size:14px;line-height:1;margin:-2px 0 6px}
+.fsplit{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3);margin:12px 0 7px;display:flex;align-items:center;gap:8px}
+.fsplit::after{content:"";flex:1;height:1px;background:var(--border-subtle)}
+
+@media (max-width:1080px){.flow{grid-template-columns:1fr}.fcol{border-right:0;border-bottom:1px solid var(--border-subtle)}}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <span class="eyebrow"><i></i>RideFleet · design only · 2026-09-04</span>
+  <h1>Terminal state vocabulary &amp; fallback paths</h1>
+  <p>A terminal-driven checkout fails in ways a web form never does. The renter walks away mid-signature. The QD2 drops off Wi-Fi. The gateway rejects a payload the terminal never saw. In every one of those, the agent needs one answer to one question: <b>do I wait, retry, or fall back?</b></p>
+  <p class="note">
+    Design only — no application code touched. States are named for the responses RFM's existing SPIn client already receives (<span class="mono">backend/src/modules/payment-gateway/spin-client.js</span>): <span class="mono">GeneralResponse.StatusCode</span>, the fuzzy-approval rule at L172-193, the <span class="mono">TERMINAL_NOT_CONFIGURED</span> 409 from <span class="mono">spin-charge.service.js</span>, and the 120 s <span class="mono">proxyTimeout</span> / 130 s client timeout pair.
+    <b>Every state below resolves to exactly one verdict and at most two buttons.</b> An agent at a counter with a queue does not read paragraphs.
+  </p>
+</div>
+
+<div class="mock-wrap">
+
+  <!-- ============================================================
+       1 · The vocabulary
+       ============================================================ -->
+  <div class="mock-label">1 · <b>The eleven states</b> — what the agent sees, and what it means</div>
+  <p class="mock-cap">Each card is the banner that replaces the step's action area. The coloured LED and the <span class="chip chip--neutral">verdict</span> pill are the whole message; the small print is for the agent who wants it. Spanish shipped alongside on every renter-facing string.</p>
+
+  <div class="screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <h2>Terminal state vocabulary</h2>
+        <span class="sub">11 states &middot; 5 verdicts</span>
+        <div class="right">
+          <span class="chip chip--info"><i></i>WAIT</span>
+          <span class="chip chip--warn"><i></i>RETRY</span>
+          <span class="chip chip--brand"><i></i>FALL BACK</span>
+          <span class="chip chip--bad"><i></i>STOP</span>
+          <span class="chip chip--ok"><i></i>CONTINUE</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="gal">
+
+      <div class="sc t-idle">
+        <header><span class="led"></span><b>Idle</b><span class="cls">reachable</span></header>
+        <div class="banner"><span class="ic">🖥️</span><span>Terminal ready<span class="es">Terminal lista</span></span></div>
+        <div class="why">Polled by <code>GET /v2/Common/TerminalStatus</code> on entering the step. Nothing is on the renter's screen. This is the only state from which a new operation may start.</div>
+        <div class="acts"><span class="verdict v-go">Continue</span><button class="btn btn--primary btn--sm">Send to terminal</button></div>
+      </div>
+
+      <div class="sc t-live">
+        <header><span class="led"></span><b>Prompting</b><span class="cls">op sent</span></header>
+        <div class="banner"><span class="ic">📤</span><span>Sent to the terminal — waiting for it to display<span class="es">Enviado a la terminal — esperando</span></span></div>
+        <div class="why">The HTTP call is open. Nothing has appeared on the QD2 yet. Typically under 2 s; anything past ~8 s means the terminal is not picking up the job.</div>
+        <div class="acts"><span class="verdict v-wait">Wait</span><button class="btn btn--secondary btn--sm">Cancel</button></div>
+      </div>
+
+      <div class="sc t-live">
+        <header><span class="led"></span><b>Customer reading</b><span class="cls">clause 4 / 6</span></header>
+        <div class="banner"><span class="ic">👀</span><span>Renter is reading “Liability and damages” · <b>108 s</b> left<span class="es">El cliente está leyendo · quedan 108 s</span></span></div>
+        <div class="why">A <code>Disclaimer</code> is displayed and the renter has not answered. The countdown is the real <code>proxyTimeout</code> (default 120 s), not a decoration — when it hits zero the state becomes <b>Timed out</b>.</div>
+        <div class="acts"><span class="verdict v-wait">Wait</span><button class="btn btn--secondary btn--sm">Resend clause</button><button class="btn btn--danger btn--sm">Cancel</button></div>
+      </div>
+
+      <div class="sc t-live">
+        <header><span class="led"></span><b>Capturing signature</b><span class="cls">GetSignature</span></header>
+        <div class="banner"><span class="ic">✍️</span><span>Renter is signing<span class="es">El cliente está firmando</span></span></div>
+        <div class="why"><code>/v2/Common/GetSignature</code> is open. The renter can clear and redraw as often as they like; only <b>Done</b> returns.</div>
+        <div class="acts"><span class="verdict v-wait">Wait</span><button class="btn btn--danger btn--sm">Cancel</button></div>
+      </div>
+
+      <div class="sc t-ok">
+        <header><span class="led"></span><b>Signed</b><span class="cls">tcCompletedAt</span></header>
+        <div class="banner"><span class="ic">✅</span><span>Agreement signed on the terminal<span class="es">Contrato firmado en la terminal</span></span></div>
+        <div class="why">All six clauses initialled and the signature image returned. <code>tcCompletedAt</code> is stamped — the same field the web path stamps, so the state machine's <code>ENTRY_REQUIRES</code> guard for <code>TC_SIGNED</code> is satisfied identically.</div>
+        <div class="acts"><span class="verdict v-go">Continue</span><button class="btn btn--primary btn--sm">Take payment →</button></div>
+      </div>
+
+      <div class="sc t-warn">
+        <header><span class="led"></span><b>Declined by renter</b><span class="cls">clause 3</span></header>
+        <div class="banner"><span class="ic">🚫</span><span>Renter declined “Insurance and coverage”<span class="es">El cliente rechazó “Seguro y cobertura”</span></span></div>
+        <div class="why">A deliberate human choice, not a fault. The contract cannot proceed unchanged. This is where the agent has a conversation — usually the renter wants to change the coverage selection, which means going back to step 1.</div>
+        <div class="acts"><span class="verdict v-stop">Stop</span><button class="btn btn--secondary btn--sm">← Change coverage</button><button class="btn btn--danger btn--sm">Abandon checkout</button></div>
+      </div>
+
+      <div class="sc t-warn">
+        <header><span class="led"></span><b>Timed out</b><span class="cls">120 s elapsed</span></header>
+        <div class="banner"><span class="ic">⏱️</span><span>The terminal stopped waiting for an answer<span class="es">La terminal dejó de esperar respuesta</span></span></div>
+        <div class="why">The proxy window closed with no response. Nothing was signed and nothing was charged. Clauses already accepted are <b>kept</b> — a resend resumes at the clause that timed out.</div>
+        <div class="acts"><span class="verdict v-retry">Retry</span><button class="btn btn--primary btn--sm">Resend clause 4</button><button class="btn btn--ghost btn--sm">Send link to phone</button></div>
+      </div>
+
+      <div class="sc t-warn">
+        <header><span class="led"></span><b>Busy</b><span class="cls">another txn</span></header>
+        <div class="banner"><span class="ic">⛔</span><span>The terminal is in the middle of another transaction<span class="es">La terminal está ocupada con otra transacción</span></span></div>
+        <div class="why">One terminal per tenant today — a second counter starting a checkout collides here. RFM must name <b>which</b> session holds it, or the agent's only tool is walking over and looking.</div>
+        <div class="acts"><span class="verdict v-wait">Wait</span><button class="btn btn--secondary btn--sm">Who has it?</button><button class="btn btn--danger btn--sm">Abort on terminal</button></div>
+      </div>
+
+      <div class="sc t-bad">
+        <header><span class="led"></span><b>Terminal offline</b><span class="cls">unreachable</span></header>
+        <div class="banner"><span class="ic">📴</span><span>Cannot reach the terminal — check power and Wi-Fi<span class="es">No se puede conectar con la terminal</span></span></div>
+        <div class="why"><code>TerminalStatus</code> did not answer, or the client's 130 s fetch timeout fired. Nothing was signed, nothing charged. This is the state the fallback path exists for.</div>
+        <div class="acts"><span class="verdict v-fall">Fall back</span><button class="btn btn--primary btn--sm">Switch to phone + payment link</button><button class="btn btn--secondary btn--sm">Recheck</button></div>
+      </div>
+
+      <div class="sc t-bad">
+        <header><span class="led"></span><b>Card declined</b><span class="cls">issuer</span></header>
+        <div class="banner"><span class="ic">💳</span><span>Card declined — ask for another card<span class="es">Tarjeta rechazada — solicite otra tarjeta</span></span></div>
+        <div class="why">The terminal worked perfectly; the <i>issuer</i> said no. Distinct from every state above because retrying the <b>same</b> card is almost always pointless — the useful action is a different card, which is a fresh tap, not a retry.</div>
+        <div class="acts"><span class="verdict v-retry">Retry</span><button class="btn btn--primary btn--sm">Try another card</button><button class="btn btn--ghost btn--sm">Record payment manually</button></div>
+      </div>
+
+      <div class="sc t-bad">
+        <header><span class="led"></span><b>Not configured</b><span class="cls">409</span></header>
+        <div class="banner"><span class="ic">🔧</span><span>This tenant has no payment terminal configured<span class="es">Este arrendador no tiene terminal configurada</span></span></div>
+        <div class="why">Raised <b>before</b> any provider call by <code>loadTenantSpinConfig()</code>. Two sub-reasons, and they need different sentences: <code>NO_CONFIG_ANYWHERE</code> (“add the Auth Key and TPN”) vs <code>INCOMPLETE_TENANT_CONFIG</code> (“somebody set one of the two — finish it”). Fail-closed on purpose: the alternative is charging another merchant's account.</div>
+        <div class="acts"><span class="verdict v-stop">Stop</span><button class="btn btn--secondary btn--sm">Open Settings → Payment Gateway</button></div>
+      </div>
+
+      <div class="sc t-bad">
+        <header><span class="led"></span><b>Gateway rejected</b><span class="cls">StatusCode 2201</span></header>
+        <div class="banner"><span class="ic">⚠️</span><span>The gateway refused the request before it reached the terminal<span class="es">La pasarela rechazó la solicitud</span></span></div>
+        <div class="why">A payload problem, not a card or terminal problem — and RFM has been bitten by it before: adding <code>GetToken</code>, <code>EnableTip</code> or <code>PrintReceipt</code> produced exactly this, with <b>nothing appearing in the Dejavoo portal</b>. Retrying an identical payload cannot help. The renter should never see this string.</div>
+        <div class="acts"><span class="verdict v-fall">Fall back</span><button class="btn btn--primary btn--sm">Switch to payment link</button><button class="btn btn--ghost btn--sm">Copy diagnostics</button></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="callout callout--warn">
+    <b>The one state RFM cannot currently draw: “Busy”.</b> There is no <span class="mono">Terminal</span> / <span class="mono">Register</span> model anywhere in the schema — a terminal exists only as an <span class="mono">(authKey, tpn)</span> pair in the tenant's settings blob, so <b>one terminal per tenant</b> with no per-location or per-register dimension. Two LAX counters sharing a tenant will collide on the same QD2 and RFM has no way to say who holds it. Drawn here because the failure is real; NOTES §6 phases the fix.
+  </div>
+
+  <!-- ============================================================
+       2 · The matrix
+       ============================================================ -->
+  <div class="mock-label">2 · <b>Failure &amp; fallback matrix</b> — the contract this design commits to</div>
+  <p class="mock-cap">Read as: <i>in this state, at this step, money is in this condition, so the agent does this.</i> The <b>Money</b> column is the one that decides whether a failure is an inconvenience or an incident.</p>
+
+  <div class="mx-scroll">
+    <table class="mx">
+      <thead>
+        <tr>
+          <th style="width:150px">State</th>
+          <th style="width:120px">Verdict</th>
+          <th style="width:190px">Money condition</th>
+          <th style="width:240px">Primary action</th>
+          <th style="width:240px">Fallback</th>
+          <th>Notes / code anchor</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="grp"><td colspan="6">Step 2 · contract on the terminal</td></tr>
+        <tr>
+          <td class="st"><b>Timed out</b></td>
+          <td><span class="chip chip--warn"><i></i>Retry</span></td>
+          <td>Nothing charged.</td>
+          <td>Resend the clause that timed out. Accepted clauses are kept.</td>
+          <td>Mint <code>/sign/:token</code> and hand the renter their phone.</td>
+          <td>Both paths stamp <code>tcCompletedAt</code> — the session never forks.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Declined by renter</b></td>
+          <td><span class="chip chip--bad"><i></i>Stop</span></td>
+          <td>Nothing charged.</td>
+          <td>Return to step 1 and change what they objected to.</td>
+          <td>None. A declined clause is a conversation, not a retry.</td>
+          <td>Coverage decline has its own supported path — <code>declinedInsurance</code> injects a 7th clause.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Terminal offline</b></td>
+          <td><span class="chip chip--brand"><i></i>Fall back</span></td>
+          <td>Nothing charged.</td>
+          <td>Recheck once — Wi-Fi blips resolve in seconds.</td>
+          <td><b>Full web fallback:</b> QR signing <i>and</i> HPP payment link for steps 3–4.</td>
+          <td>Falling back for the contract but not for payment strands the checkout half-done.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Gateway rejected</b></td>
+          <td><span class="chip chip--brand"><i></i>Fall back</span></td>
+          <td>Nothing charged. Nothing in the Dejavoo portal.</td>
+          <td>Do <b>not</b> retry the identical payload.</td>
+          <td>Web fallback, and raise a <code>PaymentOpsFlag</code> so this is investigated.</td>
+          <td>The 2026-05-30 <code>StatusCode 2201</code> lesson: extra fields are rejected before the terminal is reached.</td>
+        </tr>
+
+        <tr class="grp"><td colspan="6">Step 3 · sale + tokenization</td></tr>
+        <tr>
+          <td class="st"><b>Card declined</b></td>
+          <td><span class="chip chip--warn"><i></i>Retry</span></td>
+          <td>Nothing captured.</td>
+          <td>Ask for another card — a fresh tap, not a retry of the same one.</td>
+          <td><code>ManualSaleModal</code> (cash / check / external auth), or an emailed HPP link.</td>
+          <td>The existing manual-override modals stay; they are the counter's real failsafe.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Sale OK, token missing</b></td>
+          <td><span class="chip chip--warn"><i></i>Retry</span></td>
+          <td><b>Sale captured.</b> No card on file.</td>
+          <td>Run <code>/v2/Payment/GetCard</code> to tokenize without re-charging.</td>
+          <td>Continue with a <b>persistent</b> warning — never a toast.</td>
+          <td>Silently removes every post-rental autocharge: tolls, fuel, fines, damage. Raise <code>CARD_ON_FILE_FAILED</code>.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Timed out</b></td>
+          <td><span class="chip chip--bad"><i></i>Stop</span></td>
+          <td><b>UNKNOWN.</b> The tap may have captured.</td>
+          <td>Query <code>/v2/Payment/Status</code> on the reference before doing anything else.</td>
+          <td>Only after the status query answers.</td>
+          <td>The single most dangerous cell in this table. Never offer “retry” on an unresolved sale timeout — that is how a renter gets charged twice.</td>
+        </tr>
+
+        <tr class="grp"><td colspan="6">Step 4 · security deposit</td></tr>
+        <tr>
+          <td class="st"><b>Hold declined</b></td>
+          <td><span class="chip chip--bad"><i></i>Stop</span></td>
+          <td><b>Sale is voided automatically.</b></td>
+          <td>Explain, then restart payment with another card.</td>
+          <td><code>ManualDepositModal</code>, or a manager waiver.</td>
+          <td>Existing rollback: sale + failed hold → <code>/v2/Payment/Void</code>, returns <code>rollbackPerformed: true</code>.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Hold declined <i>and</i> void fails</b></td>
+          <td><span class="chip chip--bad"><i></i>Stop</span></td>
+          <td><b>INCIDENT — renter charged, no deposit.</b></td>
+          <td>Do not close the checkout. Escalate.</td>
+          <td>None. This is a human problem now.</td>
+          <td>Raise <code>ROLLBACK_FAILED</code> in the payment-ops queue with the reference and the amount.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Insufficient funds (debit)</b></td>
+          <td><span class="chip chip--warn"><i></i>Retry</span></td>
+          <td>Sale captured, hold not placed.</td>
+          <td>Offer a credit card — the debit uplift is why the amount rose.</td>
+          <td>Manager waiver, recorded with a reason.</td>
+          <td><code>applyDebitDepositUplift()</code> raised the amount after the card type was read. Show the renter <i>before</i> the hold, never after.</td>
+        </tr>
+
+        <tr class="grp"><td colspan="6">Any step</td></tr>
+        <tr>
+          <td class="st"><b>Not configured</b></td>
+          <td><span class="chip chip--bad"><i></i>Stop</span></td>
+          <td>Nothing attempted.</td>
+          <td>Send an admin to Settings → Payment Gateway → SPIn Terminal.</td>
+          <td>None — and that is deliberate.</td>
+          <td>Fail-closed. A half-configured tenant must never be paired with the platform terminal.</td>
+        </tr>
+        <tr>
+          <td class="st"><b>Busy</b></td>
+          <td><span class="chip chip--info"><i></i>Wait</span></td>
+          <td>Nothing attempted.</td>
+          <td>Wait, or abort the other transaction if it is stale.</td>
+          <td>Web fallback if the other counter is mid-checkout.</td>
+          <td>Needs a terminal-lease concept RFM does not have yet — NOTES §6, phase 3.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout--bad">
+    <b>The rule the matrix encodes.</b> A failure whose money condition is <i>known</i> gets a button. A failure whose money condition is <i>unknown</i> gets a status query first and no button at all. RFM already learned this the expensive way on the HPP rail — “never trust the redirect”, record only after a server-side <span class="mono">queryPaymentStatus</span>. The terminal rail deserves the same posture, and a sale timeout is exactly where it is tested.
+  </div>
+
+  <!-- ============================================================
+       3 · Fallback paths
+       ============================================================ -->
+  <div class="mock-label">3 · <b>The fallback path is the existing product</b>, not a new one</div>
+  <p class="mock-cap">Nothing below is built for this feature. Web signing and the HPP payment link are shipped, live surfaces; the US flow's degradation is simply “become the flow every other tenant already uses”. That is what makes the fallback trustworthy under pressure.</p>
+
+  <div class="flow">
+    <div class="fcol">
+      <h4>Contract</h4>
+      <div class="fsub">Step 2 · what the renter signs</div>
+      <div class="fnode primary"><b>Terminal (preferred)</b><small>6 × <span class="mono">Disclaimer</span> + <span class="mono">GetSignature</span> on the QD2. Agent watches the ladder.</small></div>
+      <div class="farr">↓ offline · timeout · gateway reject</div>
+      <div class="fnode fall"><b>Phone (existing)</b><small><span class="mono">mintTermsToken()</span> → <span class="mono">/sign/:token</span>, QR on screen. Clauses accepted on the terminal carry over.</small></div>
+      <div class="farr">↓</div>
+      <div class="fnode term"><b>Same stamp either way</b><small><span class="mono">tcCompletedAt</span> → <span class="mono">TC_SIGNED</span>. No forked state, no second code path in the state machine.</small></div>
+      <div class="fsplit">Never</div>
+      <div class="fnode stop"><b>Paper</b><small>A wet signature has no <span class="mono">AgreementSectionInitial</span> rows, so the agreement PDF loses its per-section initials. If a tenant needs it, it is a product decision — not an outage workaround.</small></div>
+    </div>
+
+    <div class="fcol">
+      <h4>Payment</h4>
+      <div class="fsub">Step 3 · the rental charge</div>
+      <div class="fnode primary"><b>Terminal sale (preferred)</b><small><span class="mono">AutoRental/Sale</span> with L2/L3. Returns the token step 4 needs.</small></div>
+      <div class="farr">↓ offline · gateway reject</div>
+      <div class="fnode fall"><b>HPP payment link (existing)</b><small>Emailed or texted; the renter pays on their own phone. Fail-closed if HPP credentials are missing — no silent hop to Authorize.Net.</small></div>
+      <div class="farr">↓ card declined · no gateway at all</div>
+      <div class="fnode fall"><b>Manual record (existing)</b><small><span class="mono">ManualSaleModal</span> — cash, check, external auth, waived. Unblocks the wizard by recording what actually happened.</small></div>
+      <div class="fsplit">Cost of the fallback</div>
+      <div class="fnode stop"><b>No token, no L3</b><small>HPP mints with <span class="mono">requestCardToken: false</span> and carries no L3 block. A fallback payment therefore loses card-on-file <i>and</i> the interchange benefit. Say so on screen — the agent is choosing, not just clicking.</small></div>
+    </div>
+
+    <div class="fcol">
+      <h4>Deposit</h4>
+      <div class="fsub">Step 4 · the hold</div>
+      <div class="fnode primary"><b>CNP PreAuth on the token (preferred)</b><small>Transact <span class="mono">transactionType: 5</span>. No second tap. Needs step 3's token.</small></div>
+      <div class="farr">↓ no token (step 3 fell back)</div>
+      <div class="fnode fall"><b>Card-present PreAuth</b><small><span class="mono">/v2/Payment/Auth</span> on the terminal — the renter taps a second time. Slower, but it works without a token.</small></div>
+      <div class="farr">↓ terminal unavailable too</div>
+      <div class="fnode fall"><b>Manual deposit (existing)</b><small><span class="mono">ManualDepositModal</span>. <span class="mono">depositHoldId</span> gets its distinguishing prefix so the nightly auto-voider skips it.</small></div>
+      <div class="fsplit">Hard stop</div>
+      <div class="fnode stop"><b>Waiving needs a manager and a reason</b><small>A waived deposit is the tenant deciding to carry the risk. It belongs in the audit log with a name attached, not behind a button any agent can press to make a red banner go away.</small></div>
+    </div>
+  </div>
+
+  <div class="callout callout--brand">
+    <b>One switch, not three.</b> When the terminal is unreachable the agent should press <i>one</i> control — “Switch this checkout to the web flow” — and have the contract, the payment and the deposit all move together. Three independent fallbacks is how a checkout ends up signed on the terminal, paid by link, and holding no deposit at all, with nobody noticing until the car comes back damaged.
+  </div>
+
+</div>
+</body>
+</html>

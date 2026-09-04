@@ -1,5 +1,7 @@
 import logger from '../../lib/logger.js';
 import { getAuthToken, invalidateCache as invalidateAuthCache, hasAutoRefresh, hasStaticToken } from './ipos-auth.js';
+import { buildLevel3LineItems } from './autorental-l3.builder.js';
+import { describeValidationErrors } from './autorental-validation.js';
 
 /**
  * iPOSpays Transact REST API client.
@@ -101,6 +103,32 @@ function getConfig(tenantConfig = {}) {
     // every sale + pre-auth. Qualifies for better interchange.
     autoRental: tenantConfig.iposTransactAutoRental !== false
       && String(process.env.IPOS_TRANSACT_AUTO_RENTAL || 'true').toLowerCase() !== 'false',
+    // 2026-09-04 — Phase 1a: send REAL Level 3 line items built from the
+    // agreement's charge rows instead of the one synthetic "Vehicle rental"
+    // line. Sub-switch of `autoRental` above: L3 off means no line items
+    // either. See autorental-l3.builder.js.
+    //
+    // ⚠️ DEFAULT OFF, deliberately, and this is a disagreement with the brief
+    // for this phase (which allowed default ON if the fallback was proven).
+    // The fallback IS proven — autorental-l3.test.mjs covers every refusal
+    // path and the deposit callers pass no charges at all, so their payload is
+    // byte-identical either way. What is NOT proven is that Dejavoo's
+    // validator ACCEPTS a multi-line block from us. It has never seen one.
+    // Same file records that their L2/L3 validator can HARD-FAIL a
+    // transaction (l2l3Flag "E", :330-341) and that a documented field shape
+    // was rejected outright (NetGrossIndicator). Defaulting ON would decide,
+    // on a live money path, that a payload nobody has ever sent is safe — and
+    // the cost of being wrong is a declined card at the counter, not a worse
+    // report. Plan §6.3 puts the whole autoRental block at "enabled": false
+    // for the same reason. Flip per tenant after one observed transaction.
+    l3LineItems: tenantConfig.iposTransactL3LineItems === true
+      || String(process.env.IPOS_TRANSACT_L3_LINE_ITEMS || 'false').toLowerCase() === 'true',
+    // Merchant attribute, no column exists (plan §4.1/§6.3). Omitted when blank.
+    summaryCommodityCode: String(
+      tenantConfig.iposTransactSummaryCommodityCode
+      || process.env.IPOS_TRANSACT_SUMMARY_COMMODITY_CODE
+      || '',
+    ).trim(),
     // 2026-06-03 — reconId is MANDATORY on Fiserv processors per the iPOSpays
     // docs ("if you are fiserv processor need to pass this as mandatory").
     // Hector's TPN is on Fiserv. Length is env-tunable because the docs
@@ -294,6 +322,32 @@ async function transactRequest(transactionType, payload, tenantConfig = {}) {
     throw err;
   }
 
+  // ── APPROVED. And that is exactly when the L2/L3 check matters. ──────────
+  //
+  // 2026-09-04, plan §5.4: L2L3ValidationError / AutoRentalValidationError are
+  // returned INSIDE a 200 OK, as objects keyed by field name. The transaction
+  // is approved, `responseCode` is 200, the customer has paid — and the
+  // interchange enrichment we are doing all this for can have silently failed.
+  // Nothing else in this response says so.
+  //
+  // So it is logged LOUDLY at WARN, naming the RFM field behind each gateway
+  // key (their keys are flat legacy XML names that do not match the nested
+  // REST paths we send — see autorental-validation.js).
+  //
+  // What is deliberately NOT done here: nothing. The sale is not voided and
+  // the caller is not failed. Plan §5.4 → H-14 is explicit — the money is
+  // real, record it; do not void a good sale over a reporting defect. Raising
+  // a PaymentOpsFlag for staff is the follow-on (payment-ops-queue.service.js)
+  // and belongs with the phase that turns line items on for a tenant.
+  const validationLine = describeValidationErrors(txResp) || describeValidationErrors(data);
+  if (validationLine) {
+    // Field names only — NEVER the payload, which carries renter PII.
+    logger.warn(`[ipos-transact] ${validationLine}`, {
+      responseCode,
+      transactionId: txResp.transactionId || '',
+    });
+  }
+
   return data;
 }
 
@@ -301,8 +355,58 @@ async function transactRequest(transactionType, payload, tenantConfig = {}) {
  * Build the Auto Rental Level-3 / VISA CEDP block for a charge.
  * PurchaseIdFormatCode "3" = Auto Rental Agreement Number per the spec —
  * the right value for car rental and unlocks better interchange rates.
+ *
+ * 2026-09-04 (Phase 1a, doc/us-terminal-checkout-plan-2026-09-04.md §10):
+ * when the caller supplies the agreement's charge rows AND the tenant has
+ * `l3LineItems` on, this emits REAL line items from autorental-l3.builder.js.
+ * Otherwise — and whenever the builder refuses — it emits the single synthetic
+ * line below, byte for byte what shipped before.
+ *
+ * The fallback is the normal outcome for the deposit callers, not a failure:
+ * deposits are excluded from L3 entirely, so Σ lines can never equal a deposit
+ * amount. See the builder's header comment.
  */
-function autoRentalL3Data({ amount, agreementNumber, description, today = new Date() }) {
+function autoRentalL3Data({
+  amount, agreementNumber, description, today = new Date(),
+  charges = null, taxAmount = null, taxRate = 0, rentalDays = null,
+  summaryCommodityCode = '', enableLineItems = false, logContext = {},
+}) {
+  if (enableLineItems && Array.isArray(charges) && charges.length > 0) {
+    const built = buildLevel3LineItems({
+      amount,
+      charges,
+      taxAmount,
+      taxRate,
+      agreementNumber,
+      orderDate: today,
+      summaryCommodityCode,
+      rentalDays,
+    });
+
+    if (built.ok) {
+      logger.info('[ipos-transact] Level 3 real line items built', {
+        ...logContext,
+        lineItemCount: built.lineItemCount,
+        taxAmount: built.taxAmount,
+        lineTotal: built.lineTotal,
+        excludedDeposits: built.excludedDeposits,
+      });
+      return { L3Data: { Header: built.header, items: built.items } };
+    }
+
+    // ⚠️ NEVER silent. A refusal means the itemization and the money disagree,
+    // which is either a real data defect (a charge row that does not reconcile)
+    // or an amount that legitimately is not the agreement total. Both are worth
+    // seeing; the second is routine and the first is a bug we would otherwise
+    // never learn about. The transaction still goes out, on the old payload.
+    logger.warn('[ipos-transact] Level 3 line items REFUSED — falling back to the single synthetic line', {
+      ...logContext,
+      reason: built.reason,
+      // detail carries only counts and money totals, never charge names.
+      ...built.detail,
+    });
+  }
+
   const isoDate = today.toISOString().slice(0, 10);
   return {
     L3Data: {
@@ -357,6 +461,13 @@ export const iposTransactClient = {
   async preAuthDeposit({
     amount, agreementNumber, cardToken, customer, autoRental,
   }, tenantConfig = {}) {
+    // NOTE — no `charges` are threaded here, on purpose. This call IS the
+    // security-deposit hold, and deposits are excluded from Level 3 by
+    // definition (they are not a purchase; they ride this separate PreAuth).
+    // Σ line items would be $0 against a $250 amount, so the §5.3 invariant
+    // could only ever refuse. Passing charges would buy a guaranteed WARN on
+    // every hold and nothing else. The single synthetic line stays correct
+    // here — it describes exactly what this transaction is.
     if (!cardToken) throw new Error('preAuthDeposit requires cardToken');
     const cfg = getConfig(tenantConfig);
     const includeL3 = autoRental !== false && cfg.autoRental;
@@ -394,6 +505,9 @@ export const iposTransactClient = {
    */
   async chargeWithToken({
     amount, agreementNumber, cardToken, customer, autoRental, description,
+    // 2026-09-04 Phase 1a. All optional and all additive — a caller that
+    // passes none of them gets exactly the payload it got before.
+    charges = null, taxAmount = null, taxRate = 0, rentalDays = null,
   }, tenantConfig = {}) {
     if (!cardToken) throw new Error('chargeWithToken requires cardToken');
     const cfg = getConfig(tenantConfig);
@@ -419,6 +533,10 @@ export const iposTransactClient = {
       },
       ...(includeL3 ? autoRentalL3Data({
         amount, agreementNumber, description: description || 'Card on file charge',
+        charges, taxAmount, taxRate, rentalDays,
+        summaryCommodityCode: cfg.summaryCommodityCode,
+        enableLineItems: cfg.l3LineItems,
+        logContext: { path: 'chargeWithToken', agreementNumber },
       }) : {}),
     };
     return transactRequest(1, body, tenantConfig);

@@ -4946,6 +4946,27 @@ export const rentalAgreementsService = {
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
       include: {
+        // 2026-09-04 Phase 1a — these charge rows feed REAL Level 3 line items
+        // (autorental-l3.builder.js) instead of the one synthetic "Vehicle
+        // rental" line this rail has been sending. Selected rows only: an
+        // unselected row is off the bill, so it is not part of the money and
+        // must not be part of the itemization.
+        //
+        // The builder REFUSES unless Σ ExtLineAmount + tax equals `amount` to
+        // the cent. On THIS path the agent types the amount by hand, so that
+        // only holds when they are charging the full outstanding balance
+        // rather than an ad-hoc toll/damage figure. The refusal is expected
+        // here and logged, not a bug — the old single-line payload goes out.
+        charges: {
+          where: { selected: true },
+          orderBy: [{ sortOrder: 'asc' }],
+          select: {
+            code: true, name: true, chargeType: true, quantity: true,
+            rate: true, total: true, taxable: true, selected: true,
+            sortOrder: true, source: true,
+          },
+        },
+        pickupLocation: { select: { taxRate: true } },
         reservation: {
           select: {
             id: true, tenantId: true, reservationNumber: true,
@@ -4978,6 +4999,19 @@ export const rentalAgreementsService = {
         phone: agreement.customerPhone || customer.phone || '',
       },
       description: payload.notes || 'Card on file charge',
+      // Level 3 itemization inputs (Phase 1a). All optional — the client falls
+      // back to its previous single-line payload whenever they don't reconcile.
+      charges: agreement.charges || [],
+      // The agreement's own tax total is authoritative (plan §4.1); it is a
+      // stored Decimal, not something to recompute here.
+      taxAmount: Number(agreement.taxes || 0),
+      // Location.taxRate is a PERCENT (9.5 = 9.5%). Used only to synthesize
+      // the per-line TaxRate — RFM stores no per-line tax (plan §5.2).
+      taxRate: Number(agreement.pickupLocation?.taxRate || 0),
+      // Only sharpens UnitOfMeasure: a row whose quantity equals the rental
+      // day count is a per-day line ('DAY'), which chargeType alone cannot
+      // tell us for PER_DAY insurance. Never affects money.
+      rentalDays: rentalDays(agreement.pickupAt, agreement.returnAt),
     }, tenantConfig);
 
     const norm = iposTransactClient.normalizeResponse(response);

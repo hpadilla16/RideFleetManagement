@@ -3,6 +3,11 @@ import { prisma } from '../../lib/prisma.js';
 import { reservationPricingService } from './reservation-pricing.service.js';
 import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import {
+  isSecurityDepositCharge,
+  isDepositCharge,
+  isTaxCharge,
+} from '../../lib/charge-predicates.js';
 
 // =============================================================================
 // Reservation Extension Service
@@ -82,31 +87,20 @@ export function rentalDays(pickupAt, returnAt) {
   return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) || 1);
 }
 
-export function isSecurityDepositCharge(row = {}) {
-  const source = String(row?.source || '').trim().toUpperCase();
-  const name = String(row?.name || '').trim().toUpperCase();
-  return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT';
-}
-
-// 2026-06-06 deposit-balance fix: ALL deposit charges (Deposit Due + Security
-// Deposit, both chargeType DEPOSIT) are excluded from agreement total/balance.
-export function isDepositCharge(row = {}) {
-  const type = String(row?.chargeType || '').trim().toUpperCase();
-  const source = String(row?.source || '').trim().toUpperCase();
-  const name = String(row?.name || '').trim().toUpperCase();
-  return type === 'DEPOSIT'
-    || source === 'DEPOSIT_DUE'
-    || source === 'SECURITY_DEPOSIT'
-    || name === 'SECURITY DEPOSIT'
-    || name === 'DEPOSIT (DUE NOW)';
-}
+// 2026-09-04 — isSecurityDepositCharge / isDepositCharge / isTaxCharge moved to
+// lib/charge-predicates.js (PURE, no prisma) so the Level 3 line-item builder
+// can import the SAME function objects rather than becoming a fourth copy of
+// isDepositCharge. Behaviour is byte-identical; re-exported here so every
+// existing importer of this module is unaffected.
+// See design/mockups/us-terminal-checkout-NOTES.md §5 gap 7.
+// NOTE: `export { x } from '...'` re-exports WITHOUT creating a local binding,
+// and this module calls isDepositCharge/isTaxCharge internally (see
+// listRepriceableRows and isBaseRentalRow below). So they are imported at the
+// top of the file and re-exported by name here.
+export { isSecurityDepositCharge, isDepositCharge, isTaxCharge };
 
 export function isExtensionCharge(row = {}) {
   return String(row?.code || '').trim().toUpperCase() === 'EXTENSION_RATE';
-}
-
-export function isTaxCharge(row = {}) {
-  return String(row?.chargeType || '').trim().toUpperCase() === 'TAX';
 }
 
 // Sources whose ReservationCharge rows are provisioned per-day by the

@@ -241,6 +241,18 @@ async function attemptCycleCharge({ plan, cycle, emailConfig, store }) {
   let norm;
   try {
     // chargeWithToken takes DOLLARS and converts to cents internally (toCents).
+    //
+    // 2026-09-04 Phase 1a — deliberately NOT passing `charges` for real Level 3
+    // line items. `amount` here is ONE monthly cycle of a multi-month plan,
+    // while the agreement's charge rows describe the whole agreement. The
+    // builder's §5.3 invariant (Σ ExtLineAmount + tax === amount) therefore
+    // could never hold, and passing charges anyway would buy a refusal WARN on
+    // every scheduled cycle and no itemization at all. The single synthetic
+    // line is the honest description of this transaction.
+    //
+    // Itemizing a cycle properly means an L3 line per MONTHLY_CYCLE row scoped
+    // to the cycle being billed — real work, and it belongs with the phase that
+    // turns line items on for a tenant, not with the builder.
     const response = await iposTransactClient.chargeWithToken({
       amount,
       agreementNumber: agreement.agreementNumber || agreement.id,
