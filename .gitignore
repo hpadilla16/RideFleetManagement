@@ -32,3 +32,6 @@ Thumbs.db
 # Local backups
 backups/
 
+# kiosk fold-measurement harness (frontend/scripts/kiosk-fold-harness/README.md) — a public route if committed
+frontend/src/app/kiosk/fold-harness/
+frontend/src/app/kiosk/_screens.harness.js

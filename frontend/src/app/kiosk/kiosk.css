@@ -185,6 +185,33 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; color: #4c1d95; font-weight: 750; margin-bottom: 14px; padding: 14px; overflow: hidden;
 }
+/* The ID photo frame. Was an inline minHeight:260 on the element; moved here so
+   the short-viewport block below can lower it — inline styles beat any media
+   query. The live <video>'s min-height moved the same way (rule below). */
+.kio-scanbox--id { min-height: 260px; }
+/* Live preview. min-height 240 was inline on the <video> (iPad debug rule: a
+   stalled stream must be a VISIBLE black box, never 0-height) — same rule, now
+   in CSS so the short-viewport block can also cap it. */
+.kio-scanbox--id video { min-height: 240px; }
+
+/* PAYMENT: totals panel beside the QR/status column. The side column has a
+   fixed basis of 300px on purpose. With the default `auto` basis its width is
+   its max-content, and the Spanish strings ("Enviarme el enlace de pago por
+   texto…", "Esperando el pago…") make that 482px — wider than the 474px left
+   beside the 400px panel — so the row WRAPPED in Spanish only, stacking the QR
+   under the totals and pushing every payment control to y≈868, below the fold
+   at 1024×768 AND 1180×820 (measured with puppeteer, 2026-09-04; English fit
+   at 400px and never wrapped). With basis 300 the two columns stay side by
+   side on landscape tablets in both languages and the long button text wraps
+   inside the button instead. Portrait (768 wide → 688px inner) still wraps,
+   exactly as before, because 400 + 26 + 300 does not fit; once wrapped the
+   column takes the full line as it always did (no max-width — a 474px cap
+   re-wrapped the ES button and pushed the portrait CTA 24px lower). */
+.kio-payrow {
+  display: flex; gap: 26px; align-items: flex-start; justify-content: center;
+  flex-wrap: wrap; width: 100%; max-width: 900px;
+}
+.kio-payrow-side { text-align: center; flex: 1 0 300px; }
 
 .kio-paystate {
   display: inline-flex; align-items: center; gap: 9px; background: rgba(245, 158, 11, .1);
@@ -263,6 +290,51 @@
   .kio-h1 { font-size: 28px; }
   .kio-h2 { font-size: 22px; }
   .kio-main { padding: 18px 16px 24px; }
+}
+
+/* SHORT VIEWPORTS — landscape tablets. 1024×768 and 1180×820 are the shortest
+   targets (fold ≈ 704–776px); the 860px cut takes every iPad landscape height
+   (744, 768, 810, 820, 834) and excludes every portrait height and the 13"
+   Pro's 1024. Measured with puppeteer against the real screen
+   components on 2026-09-04: before this block, the primary CTA already sat
+   below the fold on LOOKUP (es +25px / en +5px) and ID (es +20px) with NO
+   notice, and the in-flow assist notice (+42–63px) pushed ID in English from
+   visible to +51px. Everything was reachable through .kio-main's overflow-y
+   scroll — but a guest should not have to discover a scroll to find "Start
+   camera" or the keypad's Find button.
+
+   What this block does: it takes vertical AIR (padding, margins, line-height,
+   the idle camera frame) — never tap targets (everything stays ≥ 48px; keys
+   go 60 → 52) and never the progress row, the bar or the notice, which keep
+   their geometry so the 2.5s agent toast (absolute top:84) covers exactly what
+   it covered before and nothing new. The footer loses 8px, which only moves
+   the fold down. Horizontal padding is unchanged.
+
+   Portrait tablets (768×1024, 820×1180) are taller than 860px and never enter
+   this block — nothing changes there. */
+@media (max-height: 860px) {
+  .kio-main { padding-top: 10px; padding-bottom: 18px; }
+  .kio-h2 { line-height: 1.2; margin-bottom: 4px; }
+  .kio-sub { margin-bottom: 12px; }
+  .kio-note { padding: 8px 12px; margin: 6px 0 10px; line-height: 1.45; }
+  .kio-scanbox--id { min-height: 200px; }
+  /* Once the camera is on, the preview takes the stream's aspect: 560 wide →
+     312px tall at 16:9, 420px at the iPad's 4:3 — and "Take my photo" jumps
+     60–120px BELOW the fold, right after the guest tapped "Start camera" in
+     that very spot (measured: es 736–800 vs fold 712 at 1024×768). Pin the
+     preview to the idle frame height and crop to a centred band instead
+     (object-fit: cover). Only the PREVIEW is cropped — captureFrame draws the
+     raw videoWidth×videoHeight frame, so the OCR photo is unchanged. */
+  .kio-scanbox--id video { min-height: 200px; height: 200px; object-fit: cover; }
+  .kio-bigcard { padding: 18px 22px; }
+  .kio-bigcard .kio-ic { margin-bottom: 8px; }
+  .kio-field { padding: 10px 20px; } /* display-only (not a tap target); 68 → 60px */
+  .kio-keypad { margin-top: 10px; }
+  .kio-key { height: 52px; }
+  .kio-carcard { padding: 12px 20px; }
+  .kio-panel { padding-top: 14px; padding-bottom: 14px; }
+  .kio-kv { padding: 7px 0; }
+  .kio-foot { padding: 8px 26px; }
 }
 
 /* The guest is told, on their own screen, that someone touched their check-in.

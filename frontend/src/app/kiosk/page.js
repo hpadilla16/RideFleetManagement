@@ -1962,17 +1962,18 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
       {(phase === 'camera' || phase === 'countdown') ? (
         <>
           <div style={{ position: 'relative', width: 'min(560px, 92vw)' }}>
-            <div className="kio-scanbox" style={{ width: '100%', minHeight: 260, padding: 0, overflow: 'hidden' }}>
+            <div className="kio-scanbox kio-scanbox--id" style={{ width: '100%', padding: 0, overflow: 'hidden' }}>
               {cameraOn ? (
                 // Mirrored PREVIEW only — captureFrame reads raw frames.
-                // minHeight + black bg: a stalled stream must be a VISIBLE
-                // black box, never a 0-height invisible element (iPad debug).
+                // black bg + min-height (now .kio-scanbox--id video in kiosk.css,
+                // so short viewports can cap it): a stalled stream must be a
+                // VISIBLE black box, never a 0-height invisible element (iPad debug).
                 // eslint-disable-next-line jsx-a11y/media-has-caption
                 <video
                   ref={attachVideo}
                   muted
                   playsInline
-                  style={{ width: '100%', minHeight: 240, background: '#000', transform: 'scaleX(-1)' }}
+                  style={{ width: '100%', background: '#000', transform: 'scaleX(-1)' }}
                   onLoadedMetadata={(e) => {
                     if (!e.currentTarget.videoWidth) setCamDiag('loadedmetadata: videoWidth=0');
                   }}
@@ -2579,7 +2580,7 @@ function PaymentScreen({ t, busy, err, agreement, payState, onSimulate, onHelp, 
   return (
     <div className="kio-main">
       <div className="kio-h2">{t('kiosk.payTitle')}</div>
-      <div style={{ display: 'flex', gap: 26, alignItems: 'flex-start', maxWidth: 900, width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+      <div className="kio-payrow">
         <div className="kio-panel" style={{ maxWidth: 400 }}>
           <div className="kio-kv"><span className="kio-l">{t('kiosk.paySubtotal')}</span><b>{money(totals.subtotal)}</b></div>
           <div className="kio-kv"><span className="kio-l">{t('kiosk.payTaxesFees')}</span><b>{money(Number(totals.taxes || 0) + Number(totals.fees || 0))}</b></div>
@@ -2597,7 +2598,8 @@ function PaymentScreen({ t, busy, err, agreement, payState, onSimulate, onHelp, 
             </>
           ) : null}
         </div>
-        <div style={{ textAlign: 'center' }}>
+        {/* Layout rationale lives with the rule: .kio-payrow-side in kiosk.css. */}
+        <div className="kio-payrow-side">
           {/* Visual placeholder — the real QR/SMS payment link ships in Fase B5. */}
           <div className="kio-qrph"><span style={{ fontSize: 12, color: '#6f668f', fontWeight: 700 }}>{t('kiosk.payQrSoon')}</span></div>
           <div className="kio-paystate">⏳ {t('kiosk.payWaiting')}</div>
