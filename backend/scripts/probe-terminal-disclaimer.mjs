@@ -5,10 +5,17 @@
  *   node scripts/probe-terminal-disclaimer.mjs --tenant "International Rental Corp"
  *   node scripts/probe-terminal-disclaimer.mjs --tenant "..." --step 3
  *   node scripts/probe-terminal-disclaimer.mjs --tenant "..." --no-callback
+ *   node scripts/probe-terminal-disclaimer.mjs --tenant "Corpusa" --location LAX
  *
  *   --step N        run only step N (1–4). Default: all, stopping at the first failure.
  *   --no-callback   drop CallbackInfo from the payload. See "the 2201 trap" below.
  *   --clause KEY    step 4 uses this TC_SECTIONS key instead of the longest one.
+ *   --location X    which COUNTER to probe — a Location code (LAX) or id. Required
+ *                   for a tenant running per-location registers: without it the
+ *                   resolver refuses to guess which of five terminals you meant,
+ *                   and this probe occupies a real device. Prints the register it
+ *                   resolved and why.
+ *   --register ID   pin an exact register, for a branch with two counters.
  *
  * NO MONEY. Every call here puts text on a screen and waits for an ink
  * stroke. Nothing is authorized, captured, tokenized or voided. The terminal
@@ -57,6 +64,8 @@ const TENANT_ID = arg('--tenant-id');
 const ONLY_STEP = Number(arg('--step', '0')) || 0;
 const NO_CALLBACK = process.argv.includes('--no-callback');
 const CLAUSE_KEY = arg('--clause');
+const LOCATION = arg('--location');
+const REGISTER_ID = arg('--register');
 
 const SHORT = 'Test from RideFleet. Please sign to confirm you can see this.';
 const MEDIUM = ('This is a 250-character length test for the terminal disclaimer screen. '
@@ -108,13 +117,52 @@ async function main() {
   });
   if (!tenant) throw new Error(`Tenant not found: ${TENANT_ID || TENANT_NAME}`);
 
-  const resolved = await resolveTenantTerminalConfig(tenant.id);
+  // --location takes a human-friendly CODE (LAX) or a raw id. Resolve it here,
+  // once, and scoped to THIS tenant: a code is only unique within a tenant, and
+  // probing another tenant's branch is exactly what this script must not do.
+  let location = null;
+  if (LOCATION) {
+    location = await prisma.location.findFirst({
+      where: { tenantId: tenant.id, OR: [{ id: LOCATION }, { code: LOCATION }] },
+      select: { id: true, code: true, name: true },
+    });
+    if (!location) {
+      const known = await prisma.location.findMany({
+        where: { tenantId: tenant.id }, select: { code: true }, orderBy: { code: 'asc' },
+      });
+      throw new Error(`No location "${LOCATION}" under ${tenant.name}. Have: ${known.map((l) => l.code).join(', ') || '(none)'}`);
+    }
+  }
+
+  const resolved = await resolveTenantTerminalConfig(tenant.id, {
+    locationId: location?.id || null,
+    registerId: REGISTER_ID || null,
+  });
   const cfg = toSpinClientConfig(resolved);
   if (NO_CALLBACK) delete cfg.spinCallbackUrl;
 
   console.log(`\nTenant     ${tenant.name}`);
+  console.log(`Location   ${location ? `${location.code} — ${location.name}` : '(none given)'}`);
+  // WHICH register answered, and WHY — the whole point of the flag. A blank
+  // register with a TENANT source means this tenant is still on the single
+  // legacy terminal; a NONE source means nothing would have charged here.
+  console.log(`Register   ${resolved.registerId ? `${resolved.registerName || '(unnamed)'} · ${resolved.registerId}` : '(none — single tenant terminal)'}`);
   console.log(`Terminal   ${maskTpn(resolved.tpn)}  (source: ${resolved.source}${resolved.reason ? ` · ${resolved.reason}` : ''})`);
   console.log(`Callback   ${NO_CALLBACK ? 'OMITTED (--no-callback)' : (resolved.callbackUrl ? 'sent' : 'none configured')}`);
+
+  if (resolved.reason === 'NO_REGISTER_FOR_LOCATION') {
+    console.log('\n⚠ This tenant runs per-location registers and has NONE for that location.');
+    console.log('  A charge here would be refused, and so is this probe — reaching for another');
+    console.log('  branch\'s terminal is the failure the registers exist to prevent.');
+    console.log('  Add a register for it in Settings → Payment Gateway → Registers.\n');
+    return;
+  }
+  if (resolved.reason === 'AMBIGUOUS_REGISTER_NO_LOCATION') {
+    console.log('\n⚠ This tenant has several terminal registers and you did not say which counter.');
+    console.log('  Re-run with --location <code> (or --register <id>). This probe occupies a real');
+    console.log('  device; picking one for you is not a favour.\n');
+    return;
+  }
 
   // Credential SHAPE — lengths and character classes only, never the values.
   // SPIn's own rejection sentence is about shape ("Authkey must be a string

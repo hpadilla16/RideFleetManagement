@@ -5,6 +5,18 @@ import { isSuperAdmin } from '../../middleware/auth.js';
 
 export const paymentGatewayRouter = Router();
 
+// Optional per-request terminal selection (2026-09-04). A tenant running
+// per-location registers may say WHICH counter this operation belongs to.
+// Passed through, never guessed — see getTenantSpinConfig in the service for
+// why these routes do not look a location up from the reservation.
+function registerSelectionFor(req) {
+  const src = { ...(req.query || {}), ...(req.body || {}) };
+  return {
+    locationId: src.locationId ? String(src.locationId) : null,
+    registerId: src.registerId ? String(src.registerId) : null,
+  };
+}
+
 function tenantIdFor(req) {
   if (isSuperAdmin(req.user)) return req.query?.tenantId ? String(req.query.tenantId) : (req.user?.tenantId || null);
   return req.user?.tenantId || null;
@@ -20,6 +32,7 @@ paymentGatewayRouter.post('/charge', async (req, res, next) => {
       amount: Number(amount),
       tenantId: tenantIdFor(req),
       actorUserId: req.user?.id || req.user?.sub || null,
+      ...registerSelectionFor(req),
     }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
@@ -35,6 +48,7 @@ paymentGatewayRouter.post('/auth-hold', async (req, res, next) => {
       reservationId,
       amount: Number(amount),
       tenantId: tenantIdFor(req),
+      ...registerSelectionFor(req),
     }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
@@ -50,6 +64,7 @@ paymentGatewayRouter.post('/capture', async (req, res, next) => {
       referenceId,
       amount: amount ? Number(amount) : undefined,
       tenantId: tenantIdFor(req),
+      ...registerSelectionFor(req),
     }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
@@ -61,7 +76,7 @@ paymentGatewayRouter.post('/void', async (req, res, next) => {
   try {
     const { referenceId } = req.body || {};
     if (!referenceId) return res.status(400).json({ error: 'referenceId is required' });
-    res.json(await paymentGatewayService.voidTransaction({ referenceId, tenantId: tenantIdFor(req) }));
+    res.json(await paymentGatewayService.voidTransaction({ referenceId, tenantId: tenantIdFor(req), ...registerSelectionFor(req) }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
   }
@@ -76,6 +91,7 @@ paymentGatewayRouter.post('/refund', async (req, res, next) => {
       amount: Number(amount),
       referenceId,
       tenantId: tenantIdFor(req),
+      ...registerSelectionFor(req),
     }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
@@ -85,7 +101,7 @@ paymentGatewayRouter.post('/refund', async (req, res, next) => {
 // Tokenize card (card on file)
 paymentGatewayRouter.post('/tokenize', async (req, res, next) => {
   try {
-    res.json(await paymentGatewayService.tokenizeCard({ tenantId: tenantIdFor(req) }));
+    res.json(await paymentGatewayService.tokenizeCard({ tenantId: tenantIdFor(req), ...registerSelectionFor(req) }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
   }
@@ -94,7 +110,7 @@ paymentGatewayRouter.post('/tokenize', async (req, res, next) => {
 // Terminal status
 paymentGatewayRouter.get('/terminal-status', async (req, res, next) => {
   try {
-    res.json(await paymentGatewayService.checkTerminal({ tenantId: tenantIdFor(req) }));
+    res.json(await paymentGatewayService.checkTerminal({ tenantId: tenantIdFor(req), ...registerSelectionFor(req) }));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -103,7 +119,7 @@ paymentGatewayRouter.get('/terminal-status', async (req, res, next) => {
 // Settle batch
 paymentGatewayRouter.post('/settle', async (req, res, next) => {
   try {
-    res.json(await paymentGatewayService.settleBatch({ tenantId: tenantIdFor(req) }));
+    res.json(await paymentGatewayService.settleBatch({ tenantId: tenantIdFor(req), ...registerSelectionFor(req) }));
   } catch (e) {
     res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
   }
@@ -112,7 +128,7 @@ paymentGatewayRouter.post('/settle', async (req, res, next) => {
 // Summary report
 paymentGatewayRouter.get('/summary', async (req, res, next) => {
   try {
-    res.json(await paymentGatewayService.getSummaryReport({ tenantId: tenantIdFor(req) }));
+    res.json(await paymentGatewayService.getSummaryReport({ tenantId: tenantIdFor(req), ...registerSelectionFor(req) }));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

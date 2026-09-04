@@ -247,7 +247,7 @@ a{color:inherit;text-decoration:none}
       </div>
 
       <div class="callout callout--bad">
-        <b>One terminal per tenant, today.</b> There is no <span class="mono">Terminal</span> or <span class="mono">Register</span> model in RFM — a terminal exists only as this credential pair, with no per-location or per-register dimension. Two LAX counters on the same tenant will collide on this device. Adding a register list is drawn below as <i>proposed</i>, not shipped.
+        <b>SUPERSEDED 2026-09-04 — registers shipped.</b> This card is still the tenant's single terminal and still governs a tenant that has no registers (IRC today). The moment a tenant enables one register, the Registers section below decides which terminal charges and this card is only the fallback for "every register disabled". Kept visible, with that note, while any tenant is still on it.
       </div>
 
       <div class="callout callout--warn">
@@ -259,9 +259,9 @@ a{color:inherit;text-decoration:none}
     <div class="sect" style="background:var(--n-25)">
       <header>
         <h3>Registers</h3>
-        <div class="right"><span class="chip chip--brand">Proposed · phase 3</span></div>
+        <div class="right"><span class="chip chip--brand">Shipped · 2026-09-04</span></div>
       </header>
-      <p class="desc">What multi-counter support looks like when it arrives: a named terminal per counter, assigned to a location, so an agent picks their register once and the “Busy” state can say <i>who</i> holds the device.</p>
+      <p class="desc">A named terminal per counter, assigned to a location. Built for Corpusa: five locations, LAX only the first. A checkout at a location charges through that location's register, and a location with <b>no</b> register is refused rather than charged on another branch's device.</p>
 
       <div class="grid3">
         <div class="fld"><label>Register name</label><div class="in">LAX Counter 1</div></div>
@@ -274,7 +274,7 @@ a{color:inherit;text-decoration:none}
       <div style="margin-top:12px"><button class="btn btn--secondary btn--sm">+ Add register</button></div>
 
       <div class="callout callout--info">
-        Until this exists, the terminal is resolved per <b>tenant</b>. That is safe (fail-closed, never the wrong merchant) but not sufficient for a two-counter branch. Sequenced deliberately after the single-counter flow is live at LAX — see NOTES §6.
+        Resolution order: an enabled register matching the pickup location (<span class="mono">REGISTER_MATCH</span>) → the sole enabled register when no location is given (<span class="mono">SOLE_REGISTER</span>) → the legacy tenant block → the platform env terminal. A location with registers configured elsewhere but none of its own resolves to <span class="mono">NONE / NO_REGISTER_FOR_LOCATION</span> and the charge fails closed. Two registers at one branch are disambiguated with <span class="mono">registerId</span>. See modules/payment-gateway/tenant-terminal-config.js.
       </div>
     </div>
 

@@ -30,20 +30,29 @@ test('the tautological stub is gone', () => {
 test('the module delegates to the one terminal resolver', () => {
   assert.match(src, /import \{ resolveTenantTerminalConfig, toSpinClientConfig \} from '\.\.\/payment-gateway\/tenant-terminal-config\.js'/,
     'imports the shared resolver rather than reimplementing it');
-  assert.match(src, /toSpinClientConfig\(await resolveTenantTerminalConfig\(tenantId\)\)/,
-    'same call payment-gateway.service.js makes');
+  // 2026-09-04 — the call now also carries the pickup location, so a tenant on
+  // per-location registers resolves to THAT branch's terminal instead of
+  // whichever one happens to be first. Still the one resolver, still no local
+  // reimplementation.
+  assert.match(src, /toSpinClientConfig\(await resolveTenantTerminalConfig\(tenantId, \{ locationId \}\)\)/,
+    'same call payment-gateway.service.js makes, with the location threaded');
 });
 
 test('all three money paths still read their config through that one function', () => {
   for (const fn of ['spinChargeCardOnFile', 'spinReleaseDepositHold', 'spinReauthDepositHold']) {
     assert.ok(src.includes(`async ${fn}(`), `${fn} still exists`);
   }
-  const uses = src.match(/await loadTenantSpinConfig\(agreement\.tenantId\)/g) || [];
-  assert.equal(uses.length, 3, `expected 3 call sites, found ${uses.length}`);
+  // Each of the three must pass the agreement's OWN pickup location. Passing
+  // the tenant alone would put a multi-branch tenant back on "whichever
+  // terminal", which is what registers exist to stop.
+  const uses = src.match(/await loadTenantSpinConfig\(agreement\.tenantId, agreement\.pickupLocationId\)/g) || [];
+  assert.equal(uses.length, 3, `expected 3 location-carrying call sites, found ${uses.length}`);
+  assert.equal((src.match(/await loadTenantSpinConfig\(agreement\.tenantId\)/g) || []).length, 0,
+    'no call site may drop the location');
 });
 
 test('a resolve failure degrades instead of throwing mid-charge', () => {
   // A money path must not die because a settings read blipped; it falls back
   // the way it always did, but loudly.
-  assert.match(src, /catch \(e\) \{\s*\n\s*logger\.warn\?\.\(\{ tenantId, err: e\?\.message \}/);
+  assert.match(src, /catch \(e\) \{\s*\n\s*logger\.warn\?\.\(\{ tenantId, locationId, err: e\?\.message \}/);
 });

@@ -76,6 +76,16 @@ export const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
     callbackUrl: '',
     proxyTimeout: '120'
   },
+  // Per-location terminal REGISTERS (2026-09-04). One named counter terminal
+  // per Location; supersedes the single `spin` block above for any tenant with
+  // at least one enabled row. Empty means "not adopted" and the tenant keeps
+  // resolving on `spin` exactly as before.
+  //
+  // Each row: { id, name, locationId, tpn, authKey, hasAuthKey, merchantNumber,
+  //             callbackUrl, proxyTimeout, enabled }
+  // `authKey` follows the same never-returned / blank-means-keep contract as
+  // spin.authKey — per row, matched by `id`.
+  registers: [],
   // iPOSpays Hosted Payment Page — customer PAYMENT LINKS settle through the
   // tenant's own iPOS merchant. The HPP Auth Token follows the same
   // encrypted-at-rest, never-returned contract as spin.authKey (`hasHppToken`

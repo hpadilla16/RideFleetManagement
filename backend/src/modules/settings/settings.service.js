@@ -16,6 +16,7 @@ import { resolveTenantProviderCredential } from '../../lib/tenant-provider-crede
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
 import { normalizeAutoConfirmScore, normalizeTollsMatchConfig } from '../tolls/tolls-match-config.js';
+import { randomUUID } from 'node:crypto';
 
 const DEFAULTS = {
   companyName: 'Ride Fleet',
@@ -571,6 +572,29 @@ function defaultPaymentGatewayConfig() {
       callbackUrl: '',
       proxyTimeout: '120'
     },
+    // PER-LOCATION TERMINAL REGISTERS (2026-09-04).
+    //
+    // The `spin` block above is ONE terminal for the whole tenant. Corpusa has
+    // five locations; LAX was only the first, and configuring Orlando meant
+    // overwriting LAX. Each entry here is a named counter terminal bound to a
+    // Location:
+    //
+    //   { id, name, locationId, tpn, authKey, merchantNumber, callbackUrl,
+    //     proxyTimeout, enabled }
+    //
+    // Same AppSetting row as the block above, on purpose — see the "ONE HOME"
+    // note in payment-gateway/tenant-terminal-config.js. A second Prisma model
+    // would be a second read on every tap and a second answer to "which
+    // terminal charges this", which is how the wrong-merchant bug comes back.
+    //
+    // EMPTY is the default and means "this tenant has not adopted registers":
+    // the resolver then behaves byte for byte as it did before, on the single
+    // `spin` block. IRC is in that state today and must stay working.
+    //
+    // Each authKey obeys the identical write-only / encrypted-at-rest /
+    // blank-means-keep contract as spin.authKey — see registersForRead and
+    // normalizeRegistersForWrite.
+    registers: [],
     // iPOSpays Hosted Payment Page — customer PAYMENT LINKS for tenants who
     // transact through iPOS/Dejavoo (gateway: 'ipos'). Distinct from the
     // `spin` block above (card-present terminal) although the two share a
@@ -643,6 +667,102 @@ function spinBlockForRead(spin = {}) {
   const stored = typeof spin?.authKey === 'string' ? spin.authKey.trim() : '';
   const out = { ...spin, authKey: '', hasAuthKey: !!stored };
   delete out.clearAuthKey;
+  return out;
+}
+
+/**
+ * Shape the stored `registers` array for a READ (2026-09-04).
+ *
+ * Every register's authKey is the SAME live payment credential as
+ * spin.authKey, so it gets the SAME treatment, per row: never echoed in either
+ * form, a `hasAuthKey` boolean instead, and `clearAuthKey` stripped because it
+ * is a write-only command flag.
+ *
+ * Rows without an id are dropped rather than repaired. An id is what the write
+ * path matches on to carry a blank-means-keep credential forward, what the
+ * health check names and what the audit trail records; a register that cannot
+ * be addressed is not a register, and inventing an id on READ would mint a new
+ * one on every GET.
+ */
+function registersForRead(registers) {
+  if (!Array.isArray(registers)) return [];
+  return registers.map((raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = String(raw.id || '').trim();
+    if (!id) return null;
+    const stored = typeof raw.authKey === 'string' ? raw.authKey.trim() : '';
+    return {
+      id,
+      name: String(raw.name || ''),
+      locationId: String(raw.locationId || ''),
+      tpn: String(raw.tpn || ''),
+      authKey: '',
+      hasAuthKey: !!stored,
+      merchantNumber: String(raw.merchantNumber || '1'),
+      callbackUrl: String(raw.callbackUrl || ''),
+      proxyTimeout: String(raw.proxyTimeout || '120'),
+      // Absent means ON — matches the resolver's reading of the same field.
+      enabled: raw.enabled !== false
+    };
+  }).filter(Boolean);
+}
+
+/**
+ * Normalize the `registers` array for a WRITE.
+ *
+ * The credential rules are spin.authKey's, applied per row and keyed by `id`:
+ *
+ *   • blank authKey in the payload → KEEP the stored bytes for THAT id. As with
+ *     spin.authKey this carries the RAW stored value (carrySettingSecret) and
+ *     never decrypt→re-encrypt: one bad INTEGRATION_ENC_KEY read would
+ *     otherwise silently erase a live terminal credential.
+ *   • a non-empty authKey → encryptSettingSecret (THROWS rather than storing a
+ *     live payment key in plaintext).
+ *   • clearAuthKey: true → erase, and only then.
+ *
+ * A row whose id matches nothing stored is a NEW register; blank-means-keep has
+ * nothing to keep and it is saved with an empty key — half-configured, which
+ * the resolver then refuses (INCOMPLETE_REGISTER) rather than pairing with
+ * somebody else's key.
+ *
+ * Rows are dropped when they have neither an id nor a name and TPN to make one
+ * meaningful; ids are minted for genuinely new rows so the client never has to.
+ */
+function normalizeRegistersForWrite(payloadRegisters, storedRegisters) {
+  if (!Array.isArray(payloadRegisters)) {
+    // The key was not submitted at all — carry the stored array through
+    // untouched. A settings form that does not know about registers (an older
+    // client, a partial PUT) must not delete a tenant's terminals.
+    return Array.isArray(storedRegisters) ? storedRegisters : [];
+  }
+  const storedById = new Map(
+    (Array.isArray(storedRegisters) ? storedRegisters : [])
+      .filter((r) => r && r.id)
+      .map((r) => [String(r.id), r])
+  );
+  const seen = new Set();
+  const out = [];
+  for (const raw of payloadRegisters) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = String(raw.id || '').trim() || randomUUID();
+    if (seen.has(id)) continue; // a duplicated id would make blank-means-keep ambiguous
+    seen.add(id);
+    const stored = storedById.get(id);
+    const supplied = String(raw.authKey || '').trim();
+    out.push({
+      id,
+      name: String(raw.name || '').trim(),
+      locationId: String(raw.locationId || '').trim(),
+      tpn: String(raw.tpn || '').trim(),
+      authKey: raw.clearAuthKey
+        ? ''
+        : (supplied ? encryptSettingSecret(supplied) : carrySettingSecret(stored?.authKey)),
+      merchantNumber: String(raw.merchantNumber || '1').trim(),
+      callbackUrl: String(raw.callbackUrl || '').trim(),
+      proxyTimeout: String(raw.proxyTimeout || '120').trim(),
+      enabled: raw.enabled !== false
+    });
+  }
   return out;
 }
 
@@ -1427,6 +1547,10 @@ export const settingsService = {
           ...defaults.spin,
           ...(parsed?.spin || {})
         }),
+        // NOT spread over the defaults: an array is replaced wholesale, and
+        // `defaults.registers` is [] anyway. registersForRead strips every
+        // register's authKey the same way spinBlockForRead strips the block's.
+        registers: registersForRead(parsed?.registers),
         ipos: iposBlockForRead({
           ...defaults.ipos,
           ...(parsed?.ipos || {})
@@ -1540,6 +1664,11 @@ export const settingsService = {
         hasAuthKey: undefined,
         clearAuthKey: undefined
       },
+      // Per-location registers. Same blank-means-keep / encrypt-on-write /
+      // never-echo contract as spin.authKey, applied per row and keyed by id —
+      // and the same raw-bytes carry, so a bad INTEGRATION_ENC_KEY read cannot
+      // silently erase a counter's live credential.
+      registers: normalizeRegistersForWrite(payload?.registers, storedRaw?.registers),
       ipos: {
         ...defaults.ipos,
         ...(payload?.ipos || {}),

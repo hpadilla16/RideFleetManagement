@@ -17,18 +17,27 @@ import { resolveTenantTerminalConfig, toSpinClientConfig } from './tenant-termin
  * These routes have no frontend caller today, so no fail-closed gate is added
  * here — that belongs to the live charge path (spin-charge.service). The
  * resolver's own precedence and its loud env-fallback warning still apply.
+ *
+ * 2026-09-04 — `locationId` / `registerId` are PASSED THROUGH from the caller,
+ * never derived. Deliberately: these routes still have no frontend caller, and
+ * adding a reservation→location DB lookup to a dead path would be inventing a
+ * money-path read nobody exercises. A tenant on per-location registers calling
+ * one of these WITHOUT a location gets the resolver's fail-closed
+ * AMBIGUOUS_REGISTER_NO_LOCATION — an empty config, so the operation refuses —
+ * rather than a guessed counter. That is the right answer to "charge this, I
+ * won't say where".
  */
-async function getTenantSpinConfig(tenantId) {
+async function getTenantSpinConfig(tenantId, { locationId = null, registerId = null } = {}) {
   if (!tenantId) return {};
-  return toSpinClientConfig(await resolveTenantTerminalConfig(tenantId));
+  return toSpinClientConfig(await resolveTenantTerminalConfig(tenantId, { locationId, registerId }));
 }
 
 export const paymentGatewayService = {
   /**
    * Charge a reservation/trip via SPIn terminal.
    */
-  async chargeReservation({ reservationId, amount, tenantId, actorUserId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async chargeReservation({ reservationId, amount, tenantId, actorUserId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     const referenceId = `RES-${reservationId?.slice(-8)}-${Date.now().toString(36)}`;
 
     logger.info('SPIn charge initiated', { reservationId, amount, referenceId });
@@ -64,8 +73,8 @@ export const paymentGatewayService = {
   /**
    * Place an auth hold (security deposit).
    */
-  async authHold({ reservationId, amount, tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async authHold({ reservationId, amount, tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     const referenceId = `AUTH-${reservationId?.slice(-8)}-${Date.now().toString(36)}`;
 
     const result = await spinClient.auth({
@@ -88,8 +97,8 @@ export const paymentGatewayService = {
   /**
    * Capture a previously authorized hold.
    */
-  async captureHold({ referenceId, amount, tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async captureHold({ referenceId, amount, tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     const result = await spinClient.capture({ referenceId, amount }, config);
     return { ...spinClient.normalizeResponse(result), referenceId, gateway: 'SPIN' };
   },
@@ -97,8 +106,8 @@ export const paymentGatewayService = {
   /**
    * Void a transaction.
    */
-  async voidTransaction({ referenceId, tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async voidTransaction({ referenceId, tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     const result = await spinClient.void({ referenceId }, config);
     return { ...spinClient.normalizeResponse(result), referenceId, gateway: 'SPIN' };
   },
@@ -106,8 +115,8 @@ export const paymentGatewayService = {
   /**
    * Refund to card.
    */
-  async refund({ amount, referenceId, tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async refund({ amount, referenceId, tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     const ref = referenceId || `REF-${Date.now().toString(36)}`;
     const result = await spinClient.refund({ amount, referenceId: ref, paymentType: 'Credit' }, config);
     return { ...spinClient.normalizeResponse(result), referenceId: ref, amount, gateway: 'SPIN' };
@@ -116,8 +125,8 @@ export const paymentGatewayService = {
   /**
    * Tokenize a card for future use (card-on-file).
    */
-  async tokenizeCard({ tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async tokenizeCard({ tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     const referenceId = `TOK-${Date.now().toString(36)}`;
     const result = await spinClient.getCard({ referenceId }, config);
     const normalized = spinClient.normalizeResponse(result);
@@ -132,8 +141,15 @@ export const paymentGatewayService = {
   /**
    * Check terminal connection.
    */
-  async checkTerminal({ tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async checkTerminal({ tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
+    // No credentials resolved = no device to reach. Say so plainly instead of
+    // letting spin-client fall through to whatever the env holds — a health
+    // check that quietly probes the PLATFORM terminal and reports "connected"
+    // is worse than one that fails.
+    if (!config?.spinTpn || !config?.spinAuthKey) {
+      return { connected: false, error: 'No terminal resolved for this tenant/location — check Settings → Payment Gateway.', gateway: 'SPIN' };
+    }
     try {
       const result = await spinClient.terminalStatus(config);
       return { connected: true, result, gateway: 'SPIN' };
@@ -145,8 +161,8 @@ export const paymentGatewayService = {
   /**
    * Settle/batch close.
    */
-  async settleBatch({ tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async settleBatch({ tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     const result = await spinClient.settle(config);
     return { ...spinClient.normalizeResponse(result), gateway: 'SPIN' };
   },
@@ -154,8 +170,8 @@ export const paymentGatewayService = {
   /**
    * Get summary report.
    */
-  async getSummaryReport({ tenantId }) {
-    const config = await getTenantSpinConfig(tenantId);
+  async getSummaryReport({ tenantId, locationId = null, registerId = null }) {
+    const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
     return spinClient.summaryReport(config);
   },
 };
