@@ -22,7 +22,25 @@ export const VOZIA_ERROR_CODES = Object.freeze([
 ]);
 
 // Kiosk wizard screen → contract step enum. additional_drivers never applies.
+//
+// EVERY screen that can hold a guest while help is open must be here. The six that were missing
+// (BOOT, WELCOME, ESCALATED, PAIRING, OUT_OF_SERVICE, WALKUP_SOON) made `postVoziaState` return
+// early, so the agent's Kiosk tab read "no state reported" for the WHOLE session: measured
+// 2026-09-03, of eleven kiosk conversations ever created only ONE ever carried a state, from the
+// July E2E. A guest most naturally taps Ayuda from WELCOME, which is exactly one of the six.
+//
+// BOOT and WELCOME are honest funnel positions — the guest has not found their reservation yet.
+// The others are NOT positions in the funnel: they are overlays that can happen at any step, so
+// they map to null ON PURPOSE and `postVoziaState` reports the last real step instead of
+// inventing one. Telling an agent the guest is on `find_reservation` when they escalated from
+// the signature pad would be worse than telling them nothing.
 const SCREEN_TO_STEP = {
+  BOOT: 'find_reservation',
+  WELCOME: 'find_reservation',
+  // Su UNICO predecesor es WELCOME (un solo call site), asi que decir
+  // find_reservation aqui es verdad, no una invencion. Un walk-up parado en esta
+  // pantalla que pide ayuda dejaba al agente sin nada. (QA MINOR-2)
+  WALKUP_SOON: 'find_reservation',
   LOOKUP: 'find_reservation',
   SUMMARY: 'find_reservation',
   ID: 'license_scan',
@@ -37,6 +55,45 @@ const SCREEN_TO_STEP = {
 
 export function voziaStepForScreen(screen) {
   return SCREEN_TO_STEP[screen] || null;
+}
+
+/**
+ * The step a co-presence post should carry, given the screen and the last step already reported.
+ *
+ * PURE and exported ON PURPOSE: this is the rule that broke (`if (!step) return` threw the post
+ * away for six of sixteen screens), and a rule that only exists inside a React callback can only
+ * be tested by matching the text of page.js — a test that snaps on a reformat and, worse, can go
+ * green because its pattern stopped applying. Here the behaviour tests call the SHIPPED function.
+ *
+ * An overlay screen (ESCALATED, PAIRING, OUT_OF_SERVICE) is not a position in the
+ * funnel, so it repeats the last real step rather than inventing one — and with no last step it
+ * returns null, because a kiosk that never got anywhere has nothing true to say.
+ */
+export function resolveCoPresenceStep(screenName, lastStep = null) {
+  return voziaStepForScreen(screenName) || lastStep || null;
+}
+
+/**
+ * Progress number for the five-step bar the agent sees. Lives HERE, beside the
+ * step table, because the two must never disagree: deriving the number from the
+ * SCREEN while the step came from the last real one made the console read
+ * "4/5 · Payment" and then "0/5 · Payment" for the same guest — the label right,
+ * the number walking backwards. (QA MINOR-1.)
+ */
+const SCREEN_PROGRESS = {
+  LOOKUP: 1, SUMMARY: 1, ID: 2, SELFIE: 2, OFFERS: 3, PAYMENT: 4, SIGN: 5, DONE: 5,
+};
+
+/**
+ * The whole co-presence position: step AND its number, resolved together so an
+ * overlay repeats both or neither. `last` is the previous return value (or null).
+ * Returns null when there is nothing true to say.
+ */
+export function resolveCoPresence(screenName, last = null) {
+  const mapped = voziaStepForScreen(screenName);
+  if (mapped) return { step: mapped, stepNumber: SCREEN_PROGRESS[screenName] || 0 };
+  if (last?.step) return { step: last.step, stepNumber: last.stepNumber || 0 };
+  return null;
 }
 
 export function voziaOrigin(host) {
