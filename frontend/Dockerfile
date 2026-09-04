@@ -12,7 +12,15 @@ FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a55
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+# npm ci, not npm install: this image is what CI's containerised jobs and local
+# dev run, and `npm install` re-resolves every dependency inside its semver range
+# on each build, so package-lock.json was only advisory here. Measured 2026-09-03:
+# what an install produced differed from the lockfile by 55 packages in backend
+# and 38 in frontend. That is how an unchanged tree goes green at 18:20 and red at
+# 02:39 with nobody having touched the repo. Production already did the right
+# thing (Dockerfile.prod uses `npm ci --omit=dev`); this puts dev and CI on the
+# same lockfile, so a green CI means something reproducible.
+RUN npm ci
 
 COPY . .
 

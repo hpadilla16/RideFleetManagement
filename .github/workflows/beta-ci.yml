@@ -339,8 +339,20 @@ jobs:
             fi
             sleep 2
           done
-          echo "backend not ready"
-          docker compose -f docker-compose.yml logs backend
+          echo "backend not ready after 90s"
+          # WHY the container is not answering, not just THAT it is not. A container
+          # still running `npm install` is Up with an empty log and looks identical to
+          # one that crashed before flushing stdout — and on 2026-09-03 that ambiguity
+          # cost an evening: zero log lines, /health resetting, and no way to tell the
+          # two apart from the run output. Status + exit code separates them.
+          echo "--- container state ---"
+          docker compose -f docker-compose.yml ps -a || true
+          docker inspect fleet-backend \
+            --format 'status={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} startedAt={{.State.StartedAt}} error={{.State.Error}}' || true
+          echo "--- what the container command is actually doing ---"
+          docker exec fleet-backend sh -lc 'ps -o pid,etime,args' 2>/dev/null || echo "(container not exec-able — it is not running)"
+          echo "--- backend log, in full ---"
+          docker compose -f docker-compose.yml logs --no-color backend || true
           exit 1
       - name: Seed tenants
         run: docker exec fleet-backend sh -lc "cd /app && node scripts/tenant-seed-beta.mjs && node scripts/tenant-seed-superadmin.mjs"
