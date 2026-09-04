@@ -143,6 +143,12 @@ const ALLOWED = [
   // account's role (AGENT) defaults kiosk=false → Hector grants the module to
   // the account in People (access-control change, not made here).
   ['GET', '/api/kiosk/admin/sessions/:id/assist-view'],
+  // F3 remote overrides. WRITES, and deliberately narrow: three exact paths, no
+  // wildcard. Granting the kiosk module to the service account opens these and
+  // nothing else — every other /api/kiosk/* route stays denied.
+  ['POST', '/api/kiosk/admin/sessions/:id/remote-assist/unlock'],
+  ['POST', '/api/kiosk/admin/sessions/:id/remote-assist/verify-id'],
+  ['POST', '/api/kiosk/admin/sessions/:id/remote-assist/confirm-name'],
 ];
 
 // -----------------------------------------------------------------------------

@@ -58,7 +58,7 @@ kioskRouter.post(
 // Shared middleware stack for every device-token route. Applied per-route
 // (NOT router.use) so unmatched paths — the admin GETs — fall through to the
 // authed router without hitting requireKioskDevice.
-const deviceGuards = [
+export const deviceGuards = [
   attachPublicRequestMeta('kiosk-device'),
   createPublicRateLimitGuard({ name: 'kiosk-device', maxRequests: 120, windowMs: 60 * 1000 }),
   requireKioskDevice,

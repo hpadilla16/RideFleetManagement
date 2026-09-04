@@ -6195,8 +6195,18 @@ model KioskSession {
   // consulted for authorization. Cleared when a different reservation is
   // attached to the session.
   idVerifiedAt   DateTime?
-  // How the ID was verified: 'SCAN' (guest AAMVA scan) | 'STAFF_OVERRIDE'
-  // (B3c staff assist — manual entry after PIN unlock).
+  // How the ID was verified:
+  //   'SCAN'                       — the guest's own AAMVA scan
+  //   'STAFF_OVERRIDE'             — B3c staff assist, manual entry after a PIN
+  //                                  unlock, with a human standing at the kiosk
+  //   'STAFF_NAME_OVERRIDE'        — staff vouched for the NAME only, in person
+  //   'REMOTE_AGENT_OVERRIDE'      — F3: a Valet agent typed the licence in with
+  //                                  NOBODY beside the guest
+  //   'REMOTE_AGENT_NAME_OVERRIDE' — F3: a Valet agent vouched for the name only
+  // The remote pair is deliberately distinct from the in-person pair. They are
+  // not the same event: in person someone saw the licence and the person holding
+  // it. This column is the durable, queryable record of which one happened — the
+  // audit log always knew, and this did not until 2026-09-04.
   idVerifyMethod String?
 
   // B3c Staff Assist: short-lived grant bound to THIS session. assistUserId
@@ -6220,6 +6230,20 @@ model KioskSession {
   // alone never reaches a session. The per-conversation SECRET is never
   // stored here. Cleared (null) when the iframe resets/closes.
   voziaConversationId String?
+  // When that binding was made. F3 turns the binding into WRITE authority, so it
+  // can no longer live forever: an unreleased binding (tablet offline when the
+  // guest closed the chat) would be a standing permit over someone else's
+  // session. Reads and remote writes both require it to be fresher than
+  // VOZIA_BINDING_TTL_MIN. Nothing sweeps it — a stale row is harmless once no
+  // code path honours it.
+  voziaBoundAt DateTime?
+  // Who Valet SAYS is holding the assist grant. Stamped only by the remote path,
+  // alongside the same pair in the audit metadata, and named "asserted" for the
+  // same reason: RFM cannot see which human is behind the shared service account.
+  // It exists so a SECOND agent picking up the case can see the grant is already
+  // held and by whom, instead of discovering it by being refused.
+  assistAgentRef  String?
+  assistAgentName String?
   // Server-written marker (F1 truth): persistIdPhotos stored at least one
   // LICENSE photo for this session. eventsJson also carries ID_PHOTOS_STORED,
   // but the events endpoint accepts any client-fed name, so the assist-view

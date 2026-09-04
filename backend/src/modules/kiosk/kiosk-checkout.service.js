@@ -1090,7 +1090,15 @@ async function complete(sessionId, device) {
       where: { id: session.id },
       // assistGrantedAt: null — a staff-assist grant (B3c) dies with the
       // session; assistUserId stays as the audit trail.
-      data: { outcome: 'COMPLETED', step: 'DONE', endedAt: new Date(), lastActivityAt: new Date(), assistGrantedAt: null },
+      // The conversation binding dies with the session, next to the assist grant
+      // it sits beside: both are permits over a guest who has now left with the
+      // keys. NOT cleared on ESCALATED — escalation is the moment the guest most
+      // needs an agent, and cutting the binding there would blind the very
+      // person coming to help. There the TTL is what eventually retires it.
+      data: {
+        outcome: 'COMPLETED', step: 'DONE', endedAt: new Date(), lastActivityAt: new Date(),
+        assistGrantedAt: null, voziaConversationId: null, voziaBoundAt: null,
+      },
     });
   }
 
@@ -1109,6 +1117,8 @@ async function complete(sessionId, device) {
     },
   };
 }
+
+export { loadCheckoutSessionFor, isTerminal };
 
 export const kioskCheckoutService = {
   verifyId,

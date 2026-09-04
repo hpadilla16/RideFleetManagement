@@ -77,6 +77,57 @@ function unconfiguredResolve(reason = 'NOT_CONFIGURED') {
 }
 
 describe('ipos-hpp-payment: mintHppSession', () => {
+  // B5 Phase 2 (2026-09-03). The kiosk OWNS its reference — one payment intent per
+  // session — so it must be able to hand that reference in rather than receive a
+  // new one. Two references for one guest are not duplicates to any dedupe: they
+  // settle as two genuine charges, which is exactly what a second QR in the world
+  // produces. These two pin both directions.
+  it('uses the reference the CALLER owns when one is supplied — no second QR', async () => {
+    const db = memoryPrisma();
+    let mintedArgs = null;
+    const out = await mintHppSession({
+      reservation,
+      amount: 87.25,
+      buildReturnUrl: (ref) => `https://api.example.com/return?ref=${ref}`,
+      origin: 'KIOSK',
+      reuseReferenceId: 'IPOSK7X2QW',
+    }, {
+      prisma: db,
+      resolveConfig: configuredResolve(),
+      mint: async (args) => { mintedArgs = args; return { url: 'https://pay/x', transactionReferenceId: args.transactionReferenceId }; },
+    });
+
+    assert.equal(out.referenceId, 'IPOSK7X2QW', 'the caller\'s reference must survive to the gateway');
+    assert.equal(mintedArgs.transactionReferenceId, 'IPOSK7X2QW');
+    assert.equal(mintedArgs.returnUrl, 'https://api.example.com/return?ref=IPOSK7X2QW',
+      'the return URL must carry the SAME reference, or a late payment cannot be resolved home');
+    assert.equal(db.auditRows.length, 1, 'the reference is still bound to the reservation');
+  });
+
+  it('still mints its own reference when the caller does not own one', async () => {
+    const db = memoryPrisma();
+    const a = await mintHppSession({
+      reservation, amount: 10, buildReturnUrl: (r) => `u/${r}`, origin: 'PORTAL',
+    }, { prisma: db, resolveConfig: configuredResolve(), mint: async (x) => ({ url: 'u', transactionReferenceId: x.transactionReferenceId }) });
+    const b = await mintHppSession({
+      reservation, amount: 10, buildReturnUrl: (r) => `u/${r}`, origin: 'PORTAL',
+      reuseReferenceId: '   ',
+    }, { prisma: db, resolveConfig: configuredResolve(), mint: async (x) => ({ url: 'u', transactionReferenceId: x.transactionReferenceId }) });
+
+    for (const out of [a, b]) {
+      assert.match(out.referenceId, /^[A-Za-z0-9]{1,20}$/);
+      assert.notEqual(out.referenceId, 'IPOSK7X2QW', 'a blank reuse id must fall through to the generator');
+    }
+    // NOT asserted: that a and b differ. They can be IDENTICAL, and that is a
+    // property of the generator, not of this change: hppReferenceId builds
+    // `PL<seed>` (up to 12 chars) + a base36 timestamp (8 chars) + randomness,
+    // then slices to 20 — so with a normal reservation number the random tail is
+    // truncated away ENTIRELY and uniqueness rests on the millisecond alone.
+    // Measured 2026-09-03: two back-to-back calls returned the same reference.
+    // Flagged separately; the kiosk path is unaffected because it supplies its
+    // own reference from an intent with a DB-enforced unique index.
+  });
+
   it('mints, binds the reference to the reservation via AuditLog, and builds the return URL from the reference', async () => {
     const db = memoryPrisma();
     let mintedArgs = null;

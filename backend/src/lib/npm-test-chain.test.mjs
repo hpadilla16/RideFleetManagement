@@ -38,6 +38,12 @@ const KNOWN_OUT = {
   // on a laptop with no Postgres. Run it with `npm run test:precheckin-charges`
   // after `npm install --no-save embedded-postgres`.
   'test:precheckin-charges': 'DB-backed (embedded-postgres)',
+  // Needs a LIVE backend on a port, not just a database: it exercises the real
+  // HTTP chain (device token, service-account allowlist, module gate) that only
+  // exists once the server is up. Run it with `npm run test:e2e-kiosk-remote-assist`
+  // against a running backend. Registered here rather than left as a loose file,
+  // because a suite nobody runs is worse than no suite (2026-09-04).
+  'test:e2e-kiosk-remote-assist': 'needs a live backend on a port, not only a DB',
   // Boots its own throwaway Postgres, but only after `npm install --no-save
   // embedded-postgres` — which `npm ci` does not provide. In the chain it
   // would wedge `npm test` for everyone on a fresh checkout. Its DB-free half

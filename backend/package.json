@@ -229,7 +229,8 @@
     "test:route-corridor": "node --test src/modules/shuttle/route-corridor.test.mjs",
     "test:shuttle-offroute": "node --test --test-force-exit src/modules/shuttle/shuttle-offroute.test.mjs",
     "test:tenant-credentials": "node --test --test-force-exit src/lib/tenant-provider-credential.test.mjs src/modules/citations/citation-ocr-no-platform-key.test.mjs src/modules/sms/sms-platform-credentials.test.mjs",
-    "test:ipos-hpp": "node --test --test-force-exit src/modules/payment-gateway/ipos-hpp-client.test.mjs src/modules/payment-gateway/ipos-hpp-payment.test.mjs src/modules/public-booking/ipos-payment-session.test.mjs"
+    "test:ipos-hpp": "node --test --test-force-exit src/modules/payment-gateway/ipos-hpp-client.test.mjs src/modules/payment-gateway/ipos-hpp-payment.test.mjs src/modules/public-booking/ipos-payment-session.test.mjs",
+    "test:e2e-kiosk-remote-assist": "node scripts/e2e-kiosk-remote-assist.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1116.0",
