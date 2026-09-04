@@ -87,6 +87,10 @@ function report(label, res) {
   }
   const extra = Object.keys(res || {}).filter((k) => !/^(GeneralResponse|generalResponse|Signature|signature)$/.test(k));
   if (extra.length) console.log(`     Other keys   ${extra.join(', ')}`);
+  // The raw body, minus the signature blob which would drown the console.
+  const redacted = { ...(res || {}) };
+  for (const k of ['Signature', 'signature']) if (redacted[k]) redacted[k] = `<${String(redacted[k]).length} chars>`;
+  console.log(`     RAW          ${JSON.stringify(redacted)}`);
   // Approved is ResultCode 0 / StatusCode 0000; anything else is the answer we came for.
   const ok = String(gr.ResultCode ?? '') === '0' && String(gr.StatusCode ?? '') === '0000';
   if (String(gr.StatusCode ?? '') === '2201') {
@@ -122,9 +126,22 @@ async function main() {
       const res = await spinClient.terminalStatus(cfg);
       console.log(`\n  ── TerminalStatus`);
       console.log(`     Status  ${res?.TerminalStatus ?? '(none)'}`);
-      console.log(`     Tpn     ${maskTpn(res?.Tpn || '')}`);
+      console.log(`     Tpn     ${res?.Tpn ? maskTpn(res.Tpn) : '(none)'}`);
       if (res?.ErrorDescription) console.log(`     Error   ${res.ErrorDescription}`);
-      return { ok: String(res?.TerminalStatus || '').toLowerCase() === 'online', sig: false };
+      const online = String(res?.TerminalStatus || '').toLowerCase() === 'online';
+      if (!online) {
+        // ALWAYS show what actually came back. A probe that hides the response
+        // when it does not match expectations is worse than no probe: it turns
+        // "unexpected shape" and "endpoint down" into the same blank line.
+        console.log(`     RAW     ${JSON.stringify(res)}`);
+        console.log('\n     ⚠ Not "Online" — but this step does NOT gate the rest.');
+        console.log('       TerminalStatus is a convenience endpoint with its own quirks (no');
+        console.log('       GeneralResponse, GET with request.* params, and possibly a');
+        console.log('       different host — see open question D-1). Disclaimer is what we');
+        console.log('       came to test, so the probe continues to step 2 regardless.');
+      }
+      // Deliberately never fatal.
+      return { ok: true, sig: false, soft: !online };
     } },
     { n: 2, name: `Disclaimer, ${SHORT.length} chars — does the call work at all?`, run: async () =>
       report('Disclaimer (short)', await spinClient.disclaimer({ title: SHORT }, cfg)) },
