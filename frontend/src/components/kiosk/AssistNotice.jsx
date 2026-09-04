@@ -15,9 +15,13 @@
  *      distinguish the two, and which survives the grant. This is what the guest
  *      actually needs to know, and it stays for the rest of the session.
  *
- * Rendered ABOVE the help overlay (zIndex 85, same layer as the agent toast):
- * the first version sat under the opaque chat iframe for its entire life and
- * was never seen. pointer-events: none — it informs, it never blocks a control.
+ * Rendered IN FLOW, between the progress row and the screen, so it displaces
+ * content instead of covering it. Two absolute placements each hid something
+ * real — the bar's controls, then the five progress steps — and the class of
+ * bug was the positioning, not the number. It still paints above the chat
+ * overlay (same stacking context, z 84 over the overlay's 70); the agent toast
+ * (85) wins for its 2.5 seconds. pointer-events: none — it informs, it never
+ * blocks a control.
  *
  * The name is the VERIFIED actor (User.fullName via assistUserId), never the
  * free text Valet asserted. A service account is not a person, so it gets the
