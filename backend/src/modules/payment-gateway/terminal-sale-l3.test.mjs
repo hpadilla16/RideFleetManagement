@@ -350,8 +350,16 @@ test('autoRental ON: the NESTED shape, under the body key SPIn actually wanted',
     'AutoRentalPricing', 'AutoRentalPickup', 'AutoRentalReturn', 'AutoRentalDistance']) {
     assert.equal(typeof body.AutoRental[k], 'object', `${k} must be a nested sub-object`);
   }
-  assert.ok(body.AutoRental.AutoRentalAgreement.AutoRentalAdjustment,
+  // AutoRentalAdjustment nests inside AutoRentalAgreement WHEN IT IS SENT — it
+  // is omitted on an ordinary rental (see the omitted-fields test), so this
+  // pins the nesting on a payload that actually carries one.
+  const { body: adjusted } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R',
+      level3: { ...L3IN, autoRental: { ...AUTO_IN, adjustmentAmount: 9.99 } } }, ON_AUTO,
+  );
+  assert.equal(typeof adjusted.AutoRental.AutoRentalAgreement.AutoRentalAdjustment, 'object',
     'AutoRentalAdjustment nests inside AutoRentalAgreement');
+  assert.equal(adjusted.AutoRental.AutoRentalAgreement.AutoRentalAdjustment.AdjustmentAmount, 9.99);
 });
 
 test('RentalClassId is NORMALIZED — an ACRISS letter code is the documented 2201', () => {
@@ -376,12 +384,31 @@ test('ExtraCharges is exactly [\'NoExtraCharge\'] — [] and [\'\'] were both re
   assert.deepEqual(block.AutoRentalPricing.ExtraCharges, ['NoExtraCharge']);
 });
 
-test('dates are ISO or empty — never an Invalid Date on a parser that returns 500 for shape', () => {
+test('dates are yyyy-MM-dd — the spec format, not a timestamp', () => {
+  // The AutoRental spec states yyyy-MM-dd for Pickup/Return DateTime. The
+  // first build sent a full ISO stamp with milliseconds and a Z, which is
+  // precisely the "unacceptable value" shape this gateway answers with 2201 —
+  // and 2201 lands before the terminal, so it would have cost a trip to the
+  // counter to learn nothing.
   const good = buildAutoRentalBlock(AUTO_IN);
-  assert.equal(good.AutoRentalPickup.DateTime, '2026-09-10T14:00:00.000Z');
+  assert.equal(good.AutoRentalPickup.DateTime, '2026-09-10');
+  assert.match(good.AutoRentalReturn.DateTime, /^\d{4}-\d{2}-\d{2}$/);
   const bad = buildAutoRentalBlock({ pickupAt: 'not a date', returnAt: null });
   assert.equal(bad.AutoRentalPickup.DateTime, '');
   assert.equal(bad.AutoRentalReturn.DateTime, '');
+});
+
+test('optional fields are OMITTED rather than sent empty or null', () => {
+  // This parser rejected an empty string inside an array ("Unacceptable value
+  // for ExtraCharges[0]", ddd6d4b0) and 500'd on a shape it disliked. An
+  // absent optional field is a weaker claim than a present meaningless one.
+  const plain = buildAutoRentalBlock(AUTO_IN);
+  assert.equal('PurchaseIdentifier' in plain.AutoRentalAgreement, false);
+  assert.equal('AutoRentalAdjustment' in plain.AutoRentalAgreement, false);
+  const withBoth = buildAutoRentalBlock({ ...AUTO_IN, purchaseIdentifier: 'RA-99', adjustmentAmount: 12.5 });
+  assert.equal(withBoth.AutoRentalAgreement.PurchaseIdentifier, 'RA-99');
+  assert.equal(withBoth.AutoRentalAgreement.AutoRentalAdjustment.AdjustmentAmount, 12.5);
+  assert.equal(withBoth.AutoRentalAgreement.AutoRentalAdjustment.AdjustmentAuditIndicatorCode, 'Y');
 });
 
 test('the AutoRental block carries the location fields, capped as they were on the accepted wire', () => {
