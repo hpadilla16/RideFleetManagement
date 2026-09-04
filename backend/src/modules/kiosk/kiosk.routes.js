@@ -58,7 +58,7 @@ kioskRouter.post(
 // Shared middleware stack for every device-token route. Applied per-route
 // (NOT router.use) so unmatched paths — the admin GETs — fall through to the
 // authed router without hitting requireKioskDevice.
-const deviceGuards = [
+export const deviceGuards = [
   attachPublicRequestMeta('kiosk-device'),
   createPublicRateLimitGuard({ name: 'kiosk-device', maxRequests: 120, windowMs: 60 * 1000 }),
   requireKioskDevice,
@@ -145,16 +145,6 @@ kioskRouter.post('/sessions/:id/sign', deviceGuards, ok(
 
 // POST /api/kiosk/sessions/:id/sandbox-payment — B3 DEMO ONLY (403 unless
 // KIOSK_PAYMENT_SANDBOX=true). Replaced by the B5 payment-link flow.
-// POST /api/kiosk/sessions/:id/payment-link — B5 Phase 2. Mints (or REUSES) the
-// hosted payment page for the TENANT'S OWN gateway and returns the URL the kiosk
-// renders as a link and a QR. The guest pays on their own phone; no card data
-// ever reaches the tablet. Behind the Phase 1 kill switch, and fail-closed if the
-// tenant's gateway is not configured — never a silent fallback to the platform's
-// Authorize.Net, which would settle this tenant's money into another merchant.
-kioskRouter.post('/sessions/:id/payment-link', deviceGuards, ok(
-  (req) => kioskCheckoutService.createPaymentLink(req.params.id, req.kioskDevice),
-));
-
 kioskRouter.post('/sessions/:id/sandbox-payment', deviceGuards, ok(
   (req) => kioskCheckoutService.sandboxPayment(req.params.id, req.kioskDevice),
 ));

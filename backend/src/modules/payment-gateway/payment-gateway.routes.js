@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { paymentGatewayService } from './payment-gateway.service.js';
 import { paymentOpsQueue } from './payment-ops-queue.service.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
+import { deviceGuards } from '../kiosk/kiosk.routes.js';
+import { kioskPaymentLinkService } from './kiosk-payment-link.service.js';
 
 export const paymentGatewayRouter = Router();
 
@@ -172,3 +174,31 @@ paymentGatewayRouter.post('/ops-queue/:id/resolve', async (req, res) => {
     res.status(e.status || 400).json({ error: e.message });
   }
 });
+
+// ── The kiosk's payment link lives HERE, not in the kiosk router ────────────
+//
+// payment-references.test.mjs R2 forbids any kiosk module file from importing a
+// gateway client, so that the live-payment guards cannot be reached past. The
+// route therefore sits on this side of that line while keeping the kiosk's own
+// device-token middleware, so nothing about how a kiosk authenticates changes.
+//
+// POST /api/kiosk/sessions/:id/payment-link → mints (or REUSES) the tenant's own
+// hosted payment page and returns the URL the kiosk renders as a link and a QR.
+// The guest pays on their own phone; no card data ever reaches the tablet.
+paymentGatewayRouter.post(
+  '/kiosk/sessions/:id/payment-link',
+  deviceGuards,
+  async (req, res, next) => {
+    try {
+      res.json(await kioskPaymentLinkService.createPaymentLink(req.params.id, req.kioskDevice));
+    } catch (err) {
+      // KioskError carries its own status/code; everything else goes to the
+      // shared handler so a gateway fault is never rendered as a guest problem.
+      if (err?.status) {
+        res.status(err.status).json({ error: err.message, code: err.code || undefined });
+        return;
+      }
+      next(err);
+    }
+  },
+);
