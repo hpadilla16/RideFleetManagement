@@ -115,6 +115,28 @@ async function main() {
   console.log(`\nTenant     ${tenant.name}`);
   console.log(`Terminal   ${maskTpn(resolved.tpn)}  (source: ${resolved.source}${resolved.reason ? ` · ${resolved.reason}` : ''})`);
   console.log(`Callback   ${NO_CALLBACK ? 'OMITTED (--no-callback)' : (resolved.callbackUrl ? 'sent' : 'none configured')}`);
+
+  // Credential SHAPE — lengths and character classes only, never the values.
+  // SPIn's own rejection sentence is about shape ("Authkey must be a string
+  // with a minimum length of 10 and a maximum length of 10"), so shape is
+  // exactly what a diagnostic may show and all it needs to show.
+  const shape = (s) => {
+    const v = String(s || '');
+    if (!v) return 'EMPTY';
+    const cls = /^[0-9]+$/.test(v) ? 'digits' : /^[A-Za-z0-9]+$/.test(v) ? 'alphanumeric' : 'mixed/other';
+    return `${v.length} chars, ${cls}`;
+  };
+  const authShape = shape(resolved.authKey);
+  const tpnShape = shape(resolved.tpn);
+  console.log(`Authkey    ${authShape}${String(resolved.authKey || '').length === 10 ? '' : '   ← SPIn requires EXACTLY 10'}`);
+  console.log(`Tpn        ${tpnShape}`);
+  if (String(resolved.authKey || '').length !== 10) {
+    console.log('\n⚠ The Auth Key is not 10 characters, and SPIn rejects anything else with');
+    console.log('  StatusCode 2201 before the terminal is involved. That is a credential');
+    console.log('  problem, not a Disclaimer problem — fix it in Settings → Payment Gateway');
+    console.log('  → SPIn Terminal (the key is in the iPOSpays portal under the TPN), then');
+    console.log('  re-run. The steps below will fail identically until then.\n');
+  }
   if (resolved.source !== 'TENANT') {
     console.log('\n⚠ This tenant has no terminal of its own — the probe would use the PLATFORM terminal.');
     console.log('  Refusing: a probe is not worth touching somebody else\'s device.\n');
@@ -164,8 +186,19 @@ async function main() {
     try {
       out = await step.run();
     } catch (e) {
+      // spinRequest hangs the whole body off the error (err.spinResponse); the
+      // Message field is often just "Error" and the DetailedMessage is the
+      // sentence that actually names what is wrong. Print both.
       console.log(`\n  ✖ threw: ${e?.message || e}`);
-      console.log('    A timeout here means the terminal never answered — check that it woke up.');
+      if (e?.spinStatusCode) console.log(`    StatusCode ${e.spinStatusCode}`);
+      const gr = e?.spinResponse?.GeneralResponse;
+      if (gr?.DetailedMessage) console.log(`    DETAIL     ${gr.DetailedMessage}`);
+      if (e?.spinResponse) console.log(`    RAW        ${JSON.stringify(e.spinResponse)}`);
+      if (String(e?.spinStatusCode || '') === '2201') {
+        console.log('\n    2201 is the GATEWAY refusing the request — the terminal never saw it,');
+        console.log('    so a blank screen here is expected and means nothing about Disclaimer.');
+        console.log('    Read the DETAIL line: it names the field it did not like.');
+      }
       break;
     }
     if (!out.ok) {
