@@ -428,6 +428,18 @@ export function buildStages({
         spinL3Envelope: envelope === L3_ENVELOPE.CART ? L3_ENVELOPE.L3DATA : L3_ENVELOPE.CART,
       }),
     },
+    {
+      n: 7,
+      name: 'the AUTO RENTAL endpoint - the stage 5 payload, sent where rental data belongs',
+      why: 'stages 1-5 all approved on the generic Sale and ARLFlag never came back',
+      args: () => {
+        const a = withLines(many.rows, many.taxAmount, 2);
+        a.level3.autoRental = autoRentalInputs(agreementNumber, 2);
+        return a;
+      },
+      cfg: on({ spinL3LineItems: true, spinL3AutoRental: true }),
+      endpoint: 'AutoRental',
+    },
   ];
 }
 
@@ -597,7 +609,10 @@ async function main() {
       // 2026-09-04, where stage 2 came back busy while the stage-1 void was
       // still settling - and this probe then announced that stage 2's FIELDS
       // had been rejected. They never reached the device.
-      const res = await withBusyRetry(() => spinClient.sale(callArgs, stage.cfg));
+      const send = stage.endpoint === 'AutoRental'
+        ? () => spinClient.autoRentalSale(callArgs, stage.cfg)
+        : () => spinClient.sale(callArgs, stage.cfg);
+      const res = await withBusyRetry(send);
       out = report(`stage ${stage.n}`, res);
     } catch (e) {
       out = explainThrow(e);
