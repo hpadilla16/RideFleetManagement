@@ -620,3 +620,228 @@ test('R1: staff verify-id clears the name-mismatch marker + outstanding possessi
   assert.equal(session.nameUpdateCodeHash, null, 'outstanding code dies with the verify');
   assert.equal(session.nameUpdateCodeExpiresAt, null);
 });
+
+/* ───────────────── F3: the same assist, given from Valet ─────────────────
+ *
+ * These WRITE through the conversation binding, which is why the binding now
+ * has an age and refuses finished sessions. The proof of identity is the only
+ * thing that changes; every hard stop below is the shared implementation's.
+ */
+
+const SCOPE = { tenantId: 't1' };
+const AGENT = { agentRef: 'valet-agent-77', agentName: 'Marta Ruiz' };
+const CONV = 'conv-remote-1';
+
+/** A session a remote agent is legitimately entitled to act on. */
+function seedBound(overrides = {}) {
+  return seedSession({
+    voziaConversationId: CONV, voziaBoundAt: new Date(), ...overrides,
+  });
+}
+
+test('F3 remote unlock: mints the SAME grant a PIN would, and records who Valet says is acting', async () => {
+  seedDeviceRow(); seedStaff(); seedBound();
+  const before = Date.now();
+  const out = await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Scanner glare, third attempt',
+  });
+  assert.equal(out.ttlMinutes, ASSIST_GRANT_TTL_MIN, 'remote and in-person grants must not drift apart');
+
+  const session = db.sessions.find((s) => s.id === 'ks1');
+  assert.equal(session.assistUserId, 'u-svc', 'the grant is held by the service account — a Valet agent is not an RFM user');
+  assert.ok(session.assistGrantedAt.getTime() >= before, 'grant is stamped, so it can expire');
+
+  const audit = db.auditLogs.at(-1);
+  assert.equal(audit.action, 'ADMIN_OVERRIDE');
+  assert.match(audit.reason, /Scanner glare/, 'the stated reason survives into the audit');
+  const meta = JSON.parse(audit.metadata);
+  assert.equal(meta.kind, 'kiosk_remote_assist_unlock');
+  assert.deepEqual(meta.agentAssertedByValet, { ref: 'valet-agent-77', name: 'Marta Ruiz' });
+  assert.ok(!('agentUserId' in meta), 'RFM must never write the agent as an identity it verified');
+});
+
+test('F3 remote unlock: no binding, wrong conversation, or a FINISHED session — all the same 404', async () => {
+  seedDeviceRow(); seedStaff();
+  seedSession({ id: 'unbound' });                                        // never bound
+  seedSession({ id: 'other', voziaConversationId: 'conv-zzz', voziaBoundAt: new Date() });
+  seedSession({ id: 'stale', voziaConversationId: CONV, voziaBoundAt: new Date(Date.now() - 999 * 60 * 1000) });
+  seedSession({ id: 'gone', voziaConversationId: CONV, voziaBoundAt: new Date(), tenantId: 't2' });
+
+  for (const id of ['unbound', 'other', 'stale', 'gone', 'no-such-session']) {
+    await assert.rejects(
+      () => kioskStaffAssistService.remoteUnlock(SCOPE, id, { ...AGENT, conversationId: CONV, reason: 'x' }),
+      (e) => e.status === 404 && e.code === 'SESSION_NOT_FOUND',
+      `${id} must be indistinguishable from a session that never existed`,
+    );
+  }
+});
+
+test('F3 remote unlock: refuses to act anonymously or without a stated reason', async () => {
+  seedDeviceRow(); seedStaff(); seedBound();
+  const base = { conversationId: CONV, reason: 'Scanner glare' };
+  await assert.rejects(
+    () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', base),
+    (e) => e.status === 400 && e.code === 'AGENT_REF_REQUIRED',
+  );
+  await assert.rejects(
+    () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', { ...base, agentRef: 'a' }),
+    (e) => e.status === 400 && e.code === 'AGENT_NAME_REQUIRED',
+  );
+  // Standing at a kiosk the context is the room. Remotely, the reason IS the context.
+  await assert.rejects(
+    () => kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', { ...AGENT, conversationId: CONV }),
+    (e) => e.status === 400 && e.code === 'REASON_REQUIRED',
+  );
+  assert.equal(db.auditLogs.length, 0, 'a refused override leaves no grant and no audit noise');
+});
+
+test('F3 remote unlock: a tenant scope is mandatory — a service token alone reaches nothing', async () => {
+  seedDeviceRow(); seedStaff(); seedBound();
+  await assert.rejects(
+    () => kioskStaffAssistService.remoteUnlock({}, 'ks1', { ...AGENT, conversationId: CONV, reason: 'x' }),
+    (e) => e.status === 400 && e.code === 'TENANT_SCOPE_REQUIRED',
+  );
+});
+
+test('F3 remote override: the hard stops are the SAME ones, because it is the same code', async () => {
+  seedDeviceRow(); seedStaff(); seedBound();
+  seedWorld();
+  // No grant yet → the override is refused exactly as it is at the counter.
+  await assert.rejects(
+    () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+      ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' },
+    }),
+    (e) => e.status === 403 && e.code === 'ASSIST_GRANT_REQUIRED',
+    'a remote agent cannot skip the grant any more than a staff member can',
+  );
+
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Scanner glare',
+  });
+  // Photos are still mandatory — but a REMOTE agent has no camera, and the guest
+  // already photographed the licence into this session. Without photos on file
+  // the remote path is refused exactly like the counter's.
+  await assert.rejects(
+    () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+      ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' },
+    }),
+    (e) => e.status === 422 && e.code === 'MISSING_PHOTO',
+    'with nothing on file, a remote verify is refused like any other',
+  );
+});
+
+test('F3 remote override: with photos ALREADY on file the agent types only the fields', async () => {
+  seedDeviceRow(); seedStaff();
+  // The server's own column — stamped by persistIdPhotos when the guest scanned.
+  seedBound({ idPhotosStoredAt: new Date() });
+  seedWorld();
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare on the barcode, two failed scans',
+  });
+  const out = await kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+    ...AGENT,
+    conversationId: CONV,
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+  });
+  // A verdict, not a 422: the remote path is reachable at all, which it was not.
+  assert.ok(out && typeof out.verified === 'boolean', 'a remote verify must return a verdict');
+});
+
+test('F3 remote override: the waiver comes from the SERVER column, never from the caller', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({ idPhotosStoredAt: null });   // nothing on file
+  seedWorld();
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'x',
+  });
+  // Every shape a caller might use to claim the photos exist must be ignored.
+  for (const forged of [
+    { idPhotosStoredAt: new Date() },
+    { photosOnFile: true },
+    { allowPhotosOnFile: true },
+  ]) {
+    await assert.rejects(
+      () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+        ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' }, ...forged,
+      }),
+      (e) => e.status === 422 && e.code === 'MISSING_PHOTO',
+      `a caller must not be able to assert photos exist (${Object.keys(forged)[0]})`,
+    );
+  }
+});
+
+test('F3 contract: the two TTL constants must not drift apart', async () => {
+  // ASSIST_GRANT_TTL_MIN is duplicated in kiosk-session.service.js (importing it
+  // would create a cycle, since staff-assist imports session). If they diverge,
+  // the console counts down against a deadline the server does not honour.
+  const sess = await import('./kiosk-session.service.js');
+  assert.equal(sess.ASSIST_GRANT_TTL_MIN, ASSIST_GRANT_TTL_MIN,
+    'the assist-view would advertise an expiry the override path does not enforce');
+});
+
+test('F3 contract: the assist block reports an ABSOLUTE expiry and who Valet says holds it', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  const sessionService = await import('./kiosk-session.service.js');
+
+  const before = await sessionService.kioskSessionService.assistView(SCOPE, 'ks1', { conversationId: CONV });
+  assert.deepEqual(before.assist, { open: false, expiresAt: null, heldBy: null },
+    'no grant reads as closed, not as absent');
+
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare on the barcode',
+  });
+  const after = await sessionService.kioskSessionService.assistView(SCOPE, 'ks1', { conversationId: CONV });
+  assert.equal(after.assist.open, true);
+  // An instant, never a duration: a locally counted duration drifts against the
+  // server that actually decides, and eventually lies to the agent.
+  assert.match(after.assist.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(new Date(after.assist.expiresAt).getTime() > Date.now());
+  assert.deepEqual(after.assist.heldBy, { ref: 'valet-agent-77', name: 'Marta Ruiz', assertedByValet: true },
+    'a second agent must see the grant is held, and by whom, before being refused');
+});
+
+test('F3 contract: an EXPIRED grant reads as closed, so the panel never shows a permit that is gone', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({
+    outcome: 'ESCALATED',
+    assistGrantedAt: new Date(Date.now() - (ASSIST_GRANT_TTL_MIN + 1) * 60 * 1000),
+    assistAgentRef: 'valet-agent-77', assistAgentName: 'Marta Ruiz',
+  });
+  const sessionService = await import('./kiosk-session.service.js');
+  const view = await sessionService.kioskSessionService.assistView(SCOPE, 'ks1', { conversationId: CONV });
+  assert.equal(view.assist.open, false, 'past its expiry the grant is closed');
+  assert.ok(view.assist.heldBy, 'but who held it is still visible — useful context, not authority');
+});
+
+test('F3 audit: a remote override is NOT recorded as a staff-at-the-kiosk override', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({ outcome: 'ESCALATED', idPhotosStoredAt: new Date() });
+  seedWorld();
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare, two failed scans',
+  });
+  await kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV,
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+  });
+  const session = db.sessions.find((s) => s.id === 'ks1');
+  // The two are not the same event and the permanent record must not say they
+  // are: in person a human saw the licence AND the person holding it. With three
+  // roles able to do this remotely, that distinction is the whole audit.
+  assert.notEqual(session.idVerifyMethod, 'STAFF_OVERRIDE',
+    'a remote override recorded as an in-person one erases the only difference that matters');
+  assert.equal(session.idVerifyMethod, 'REMOTE_AGENT_OVERRIDE');
+});
+
+test('F3 audit: an IN-PERSON override keeps saying in-person', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED', idPhotosStoredAt: new Date() });
+  seedWorld();
+  await unlockAsAdmin();
+  await kioskStaffAssistService.staffVerifyId('ks1', DEVICE, {
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+    licenseFrontPhoto: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    licenseBackPhoto: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+  });
+  const session = db.sessions.find((s) => s.id === 'ks1');
+  assert.equal(session.idVerifyMethod, 'STAFF_OVERRIDE', 'the in-person path must be unchanged');
+});
