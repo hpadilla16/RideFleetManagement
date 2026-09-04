@@ -1161,7 +1161,13 @@ function stripDeclineCoverageIfNotApplicable(html, declined) {
 // dynamically. The customer's per-section initials live on
 // agreement.sectionInitials[]; the final consolidated signature is on
 // agreement.tcSignatureDataUrl.
-function buildSignedTermsBlock(agreement, ctx) {
+//
+// EXPORTED only so clause-history-immutability.test.mjs can render it directly
+// (2026-09-04). It is pure — an agreement object in, HTML out — and the test
+// that pins what a SIGNED agreement re-prints after its branch's clause text is
+// edited has to call the real renderer, not a paraphrase of it. Nothing else
+// imports it; the print path still reaches it as a local call below.
+export function buildSignedTermsBlock(agreement, ctx) {
   // Same override source the signing flows used (2026-07-24). These pages carry
   // the customer's own initials next to each section's text, so printing the
   // canonical text here while they initialled the branch's would put a

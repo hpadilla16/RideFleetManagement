@@ -37,6 +37,7 @@ import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPan
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
 import { SelfReturnQrSettings } from '../../components/settings/SelfReturnQrSettings';
+import { LocationClausesPanel } from '../../components/settings/LocationClausesPanel';
 import { TwoFactorPolicySettings } from '../../components/settings/TwoFactorPolicySettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { OneStepGpsConnectorTab } from './OneStepGpsConnectorTab';
@@ -7371,6 +7372,11 @@ function SettingsInner({ token, me, logout }) {
                   ['operations', 'Hours of Operations'],
                   ['closed', 'Closed Days'],
                   ['fees', 'Fees & Taxes'],
+                  // The acknowledgements a renter initials AT THIS BRANCH.
+                  // Per-location, unlike the global agreement template beside
+                  // it — hence the placement and the "(Global)" label on that
+                  // one staying exactly where it was.
+                  ['clauses', 'Contract Clauses'],
                   ['agreementTemplate', 'Agreement Template (Global)']
                 ].map(([key, label]) => (
                   <button
@@ -7622,6 +7628,19 @@ function SettingsInner({ token, me, logout }) {
                     ))}
                   </div>
                 </>
+              )}
+
+              {locationEditorTab === 'clauses' && (
+                locationEditor.id
+                  ? (
+                    <LocationClausesPanel
+                      locationId={locationEditor.id}
+                      locationName={locationEditor.name}
+                      locationCode={locationEditor.code}
+                      scopedSettingsPath={scopedSettingsPath}
+                    />
+                  )
+                  : <div className="label">Save this location first — clauses are stored against the branch.</div>
               )}
 
               {locationEditorTab === 'agreementTemplate' && (

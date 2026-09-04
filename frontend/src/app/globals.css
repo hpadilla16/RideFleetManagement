@@ -2963,3 +2963,56 @@ tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 .ca-opt.is-sel { border-color: var(--border-brand); background: var(--p-50); }
 .ca-opt.is-off { opacity: .55; cursor: not-allowed; }
 .ca-dismiss-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* ==========================================================================
+   CONTRACT CLAUSES — per-location clause editor (2026-09-04).
+   Same vocabulary as the tolls redesign A: flat token-driven surfaces, an
+   11px text floor, chips instead of raw status strings. The one thing this
+   namespace adds is a LENGTH METER, because 250 characters is not a style
+   preference here — past it the counter terminal refuses the clause and every
+   check-out at that branch moves to the renter's phone.
+   ========================================================================== */
+.lc-panel { gap: 14px; }
+.lc-clause { display: grid; gap: 10px; }
+.lc-clause-label { font-size: 14px; font-weight: 700; color: var(--text-1); }
+.lc-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.lc-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 560; line-height: 1.4; border-radius: var(--r-xs); padding: 1px 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
+.lc-chip.lc-c-ok   { background: var(--ok-bg);     border-color: var(--ok-bd);     color: var(--ok-tx); }
+.lc-chip.lc-c-warn { background: var(--warn-bg);   border-color: var(--warn-bd);   color: var(--warn-tx); }
+.lc-chip.lc-c-bad  { background: var(--danger-bg); border-color: var(--danger-bd); color: var(--danger-tx); }
+.lc-chip.lc-c-info { background: var(--info-bg);   border-color: var(--info-bd);   color: var(--info-tx); }
+
+/* The meter. The COUNT and the CONSEQUENCE sit on one line: a colour alone
+   tells an admin that something is wrong and not what it does to their
+   counter, so the sentence is never optional. */
+.lc-meter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11.5px; }
+.lc-count { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text-2); }
+.lc-count-near { color: var(--warn-tx); }
+.lc-count-over { color: var(--danger-tx); }
+.lc-bar { width: 96px; height: 4px; border-radius: 2px; background: var(--n-200); overflow: hidden; flex: none; }
+.lc-bar i { display: block; height: 100%; border-radius: 2px; background: var(--ok); }
+.lc-bar i.lc-bar-near { background: var(--warn); }
+.lc-bar i.lc-bar-over { background: var(--danger); }
+.lc-consequence { color: var(--text-3); line-height: 1.5; flex: 1 1 240px; min-width: 200px; }
+
+.lc-alert { padding: 8px 12px; border-radius: var(--r-md); font-size: 12px; line-height: 1.55; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); display: grid; gap: 3px; }
+.lc-alert.lc-ok   { background: var(--ok-bg);     border-color: var(--ok-bd);     color: var(--ok-tx); }
+.lc-alert.lc-warn { background: var(--warn-bg);   border-color: var(--warn-bd);   color: var(--warn-tx); }
+.lc-alert.lc-bad  { background: var(--danger-bg); border-color: var(--danger-bd); color: var(--danger-tx); }
+
+/* The terminal preview. Deliberately narrow — the QD2 screen is small, and a
+   preview as wide as the settings modal would flatter a clause the device
+   cannot show. */
+.lc-preview { display: grid; gap: 5px; }
+.lc-preview-cap { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.lc-preview-screen { max-width: 340px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--n-0); padding: 10px 12px; display: grid; gap: 8px; }
+.lc-preview-body { font-size: 11.5px; line-height: 1.45; color: var(--text-1); white-space: pre-wrap; }
+.lc-preview-buttons { display: flex; gap: 6px; }
+.lc-preview-buttons span { flex: 1; text-align: center; font-size: 11px; font-weight: 620; padding: 5px 6px; border-radius: var(--r-xs); border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); }
+.lc-preview-buttons span:first-child { background: var(--brand); border-color: transparent; color: #fff; }
+.lc-preview-refused { border-style: dashed; border-color: var(--danger-bd); background: var(--danger-bg); color: var(--danger-tx); font-size: 11.5px; line-height: 1.5; }
+
+.lc-standard { display: grid; gap: 5px; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-1); border: 1px solid var(--border-subtle); }
+.lc-standard-body { font-size: 11.5px; line-height: 1.55; color: var(--text-2); white-space: pre-wrap; }
+.lc-mini { min-height: 32px; padding: 4px 12px; font-size: 12px; border-radius: var(--r-xs); font-weight: 620; }
+

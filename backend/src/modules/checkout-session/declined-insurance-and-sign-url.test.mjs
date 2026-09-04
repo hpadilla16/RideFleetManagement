@@ -476,6 +476,16 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     // phone. terminal-contract.test.mjs pins that measurement.
     'src/modules/checkout-session/terminal-contract.service.js',
     'src/modules/checkout-session/terminal-contract.test.mjs',
+    // Configurable contract clauses (2026-09-04). TESTS ONLY, and neither one
+    // touches the column: both pass the name as an ARGUMENT to the pure
+    // sectionsForAgreement() — location-clauses.test.mjs to prove the editor
+    // resolves exactly the bodies the signing flow resolves with the addendum
+    // present, clause-history-immutability.test.mjs to build the section list a
+    // signed agreement's PDF re-prints. The editor itself cannot reach the
+    // column: it validates against the canonical clause key set and writes
+    // exactly one field, Location.termsSectionsJson. No gate applies.
+    'src/modules/locations/location-clauses.test.mjs',
+    'src/modules/rental-agreements/clause-history-immutability.test.mjs',
   ]);
 
   const found = [];

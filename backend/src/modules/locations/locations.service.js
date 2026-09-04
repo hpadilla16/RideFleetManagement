@@ -86,6 +86,17 @@ export const locationsService = {
     if (!current) throw new Error('Location not found');
     const { feeIds, ...rest } = patch || {};
     delete rest.tenantId;
+    // The clause overrides have their OWN endpoint (PUT /:id/clauses) because
+    // they need three things this generic patch cannot give them: validation
+    // against the canonical key set, an ADMIN-only gate (this router is
+    // ADMIN+OPS), and an audit row naming which clauses moved. Letting them
+    // through here would mean the editor's guarantees hold only for admins who
+    // happen to use the editor — a truncated blob pasted through this route
+    // would leave every renter at the branch signing canonical text while ops
+    // believed the branch wording was live. Rejected, never silently dropped.
+    if (Object.prototype.hasOwnProperty.call(rest, 'termsSectionsJson')) {
+      throw new Error('termsSectionsJson cannot be set here — use PUT /api/locations/:id/clauses');
+    }
     if (Object.prototype.hasOwnProperty.call(rest, 'locationConfig')) {
       rest.locationConfig = rest.locationConfig
         ? (typeof rest.locationConfig === 'string' ? rest.locationConfig : JSON.stringify(rest.locationConfig))
