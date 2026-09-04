@@ -26,6 +26,7 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { KioskError } from './kiosk-device.service.js';
 import {
+  voziaBindingIsLive,
   getSessionForDevice,
   recordSessionTelemetry,
   registerDeviceLookupMiss,
@@ -211,7 +212,7 @@ async function unlock(sessionId, device, { userId, pin } = {}) {
  * STAFF_OVERRIDE + assistUserId persisted, Customer write-through, AuditLog,
  * outcome flips back to IN_PROGRESS, grant consumed.
  */
-async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, licenseBackPhoto } = {}) {
+async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, licenseBackPhoto } = {}, opts = {}) {
   const session = await getSessionForDevice(sessionId, device);
   if (!grantIsLive(session)) {
     throw new KioskError('A staff unlock is required (or the grant expired)', 403, 'ASSIST_GRANT_REQUIRED');
@@ -219,7 +220,19 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
   if (!session.reservationId) throw new KioskError('Attach a reservation first', 422, 'NO_RESERVATION_ATTACHED');
 
   // BOTH photos mandatory, validated BEFORE anything is written.
-  if (!licenseFrontPhoto || !licenseBackPhoto) {
+  //
+  // ONE exception, and it is not a relaxation: a REMOTE agent has no camera and
+  // no copy of the licence — they are typing the fields the scanner could not
+  // read, for a guest who already photographed the licence into this session. The
+  // waiver is granted by the SERVER'S OWN column (idPhotosStoredAt, stamped by
+  // persistIdPhotos), never by anything the caller says, and only when that
+  // column proves the photos exist. Standing at the kiosk nothing changes.
+  //
+  // Deliberately NOT the other option: we do not ship the licence images out to
+  // Valet so the agent can echo them back. That would export a government ID to
+  // a second system to satisfy a check the first system can already answer.
+  const photosOnFile = opts.allowPhotosOnFile === true && !!session.idPhotosStoredAt;
+  if (!photosOnFile && (!licenseFrontPhoto || !licenseBackPhoto)) {
     throw new KioskError('Front and back license photos are both required', 422, 'MISSING_PHOTO');
   }
   const photos = [
@@ -299,7 +312,13 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
     where: { id: session.id },
     data: {
       idVerifiedAt: now,
-      idVerifyMethod: 'STAFF_OVERRIDE',
+      // A REMOTE override is not the same event as a staff member standing at the
+      // kiosk, and the permanent record must not say it is. In person there is a
+      // human beside the guest who saw the licence; remotely there is nobody, and
+      // since this is now open to three roles the difference is exactly what an
+      // auditor would need. The audit log always knew; this is the durable,
+      // queryable field that did not.
+      idVerifyMethod: opts.remote === true ? 'REMOTE_AGENT_OVERRIDE' : 'STAFF_OVERRIDE',
       // grant consumed; assistUserId stays as the audit trail
       assistGrantedAt: null,
       // R1: a verified session must not stay name-update eligible — clear
@@ -356,7 +375,7 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
  * evidence. Stamps idVerifyMethod 'STAFF_NAME_OVERRIDE', audits, un-escalates
  * and consumes the grant.
  */
-async function confirmName(sessionId, device, { fields, licensePhoto } = {}) {
+async function confirmName(sessionId, device, { fields, licensePhoto } = {}, opts = {}) {
   const session = await getSessionForDevice(sessionId, device);
   if (!grantIsLive(session)) {
     throw new KioskError('A staff unlock is required (or the grant expired)', 403, 'ASSIST_GRANT_REQUIRED');
@@ -413,7 +432,7 @@ async function confirmName(sessionId, device, { fields, licensePhoto } = {}) {
     where: { id: session.id },
     data: {
       idVerifiedAt: now,
-      idVerifyMethod: 'STAFF_NAME_OVERRIDE',
+      idVerifyMethod: opts.remote === true ? 'REMOTE_AGENT_NAME_OVERRIDE' : 'STAFF_NAME_OVERRIDE',
       nameMismatchAt: null,
       // R1 hygiene: any outstanding possession code dies with the approval.
       nameUpdateCodeHash: null,
@@ -456,9 +475,184 @@ async function confirmName(sessionId, device, { fields, licensePhoto } = {}) {
   };
 }
 
+
+/* ─────────────────────────── F3: assisting from Valet ───────────────────────────
+ *
+ * The same assist a staff member gives standing at the kiosk, given by an agent
+ * who is somewhere else. Everything about the grant is REUSED unchanged — the
+ * 10-minute TTL, the binding to one session, the single-use consumption, the
+ * ADMIN_OVERRIDE audit row, and every hard stop underneath. Only the proof of
+ * identity changes, because the current proof is a PIN typed on the tablet and
+ * there is no tablet in front of a remote agent (and Hector's standing rule is
+ * that agents never type PINs).
+ *
+ * WHERE THE AUTHORITY COMES FROM, stated plainly because it is a trust boundary:
+ *   1. The service account is authenticated by RFM, exactly as it is for the
+ *      read-only assist-view.
+ *   2. The conversation binding must be LIVE — the guest opened Get Help on THIS
+ *      session, recently. That is the guest's own consent, and it expires.
+ *   3. `agentRef` / `agentName` are ASSERTED BY VALET and recorded as such. RFM
+ *      cannot verify which human is behind the shared service account, the same
+ *      way it cannot verify which human is holding a kiosk tablet. Calling that
+ *      out in the audit row is honest; silently writing it as if RFM had checked
+ *      it would not be.
+ *
+ * The session's assistUserId is WHOEVER AUTHENTICATED — the service account when
+ * Valet calls, a real person when an ADMIN or OPS user does (kiosk is on by
+ * default for both, so that path is reachable). Never a service account we go
+ * looking for: that named an arbitrary one and erased the only identity RFM can
+ * actually vouch for. The human Valet says is behind a shared account is named
+ * separately in the audit metadata, where its provenance travels with it.
+ */
+
+/** The session a remote agent is entitled to act on, or the same 404 as always. */
+async function resolveRemoteSession(scope, sessionId, conversationId) {
+  if (!scope?.tenantId) {
+    throw new KioskError('A tenant scope is required (super-admins pass ?tenantId=)', 400, 'TENANT_SCOPE_REQUIRED');
+  }
+  const conv = conversationId == null ? '' : String(conversationId).trim();
+  if (!conv) throw new KioskError('conversationId is required', 400, 'CONVERSATION_ID_REQUIRED');
+
+  const session = sessionId
+    ? await prisma.kioskSession.findUnique({ where: { id: String(sessionId) } })
+    : null;
+  // One indistinguishable 404 for unknown / wrong tenant / unbound / expired, so
+  // a caller cannot map the space of sessions by probing.
+  if (!session || session.tenantId !== scope.tenantId || !voziaBindingIsLive(session, conv)) {
+    throw new KioskError('Session not found', 404, 'SESSION_NOT_FOUND');
+  }
+  const device = await prisma.kioskDevice.findFirst({
+    where: { id: session.deviceId, tenantId: scope.tenantId },
+  });
+  if (!device) throw new KioskError('Session not found', 404, 'SESSION_NOT_FOUND');
+  return { session, device };
+}
+
+function assertAgentIdentity({ agentRef, agentName } = {}) {
+  const ref = String(agentRef || '').trim();
+  const name = String(agentName || '').trim();
+  if (!ref || ref.length > 128) {
+    throw new KioskError('agentRef is required (who is acting)', 400, 'AGENT_REF_REQUIRED');
+  }
+  if (!name || name.length > 128) {
+    throw new KioskError('agentName is required (who is acting)', 400, 'AGENT_NAME_REQUIRED');
+  }
+  return { ref, name };
+}
+
+/**
+ * POST /api/kiosk/admin/sessions/:id/remote-assist/unlock
+ * { conversationId, agentRef, agentName, reason } → the same 10-minute,
+ * session-bound, single-use grant `unlock` mints for someone standing there.
+ */
+async function remoteUnlock(scope, sessionId, body = {}, actor = null) {
+  const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  assertAssistable(session);
+  const agent = assertAgentIdentity(body);
+  const reason = String(body.reason || '').trim();
+  if (!reason) {
+    // A remote override with no stated reason is the one an auditor cannot read
+    // back later. Standing at the kiosk the context is the room; here it is this.
+    throw new KioskError('A reason is required', 400, 'REASON_REQUIRED');
+  }
+
+  // THE ACTOR IS WHOEVER AUTHENTICATED, not a service account we go looking for.
+  //
+  // The first version resolved `findFirst({ isServiceAccount: true })` with no
+  // ordering, so with more than one service account in a tenant the audit named
+  // an arbitrary one. Worse, these routes carry no role assert and `kiosk` is ON
+  // by default for ADMIN and OPS — so a tenant's own admin could override a
+  // guest's identity today and have it recorded as the robot, with the agentRef
+  // and agentName they typed themselves. The real human appeared nowhere, while
+  // the in-person path has always recorded user.id.
+  //
+  // That contradicted the whole point of the remote/in-person distinction this
+  // change exists to make, so the caller's identity is now required and used.
+  // agentRef/agentName stay what they always were: Valet's assertion about WHICH
+  // human sits behind a shared account — never a substitute for an actor.
+  if (!actor?.id) {
+    throw new KioskError('An authenticated caller is required', 401, 'ACTOR_REQUIRED');
+  }
+  const auditActor = { id: actor.id };
+
+  const grantedAt = new Date();
+  await prisma.kioskSession.update({
+    where: { id: session.id },
+    data: {
+      assistUserId: auditActor.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt,
+      // So a second agent picking up the case sees the grant is already held,
+      // and by whom, instead of learning it by being refused.
+      assistAgentRef: agent.ref, assistAgentName: agent.name,
+    },
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: scope.tenantId,
+      reservationId: session.reservationId || null,
+      actorUserId: auditActor.id,
+      action: 'ADMIN_OVERRIDE',
+      reason: `Remote kiosk assist unlock — ${reason}`,
+      metadata: JSON.stringify({
+        kind: 'kiosk_remote_assist_unlock',
+        kioskSessionId: session.id,
+        deviceId: device.id,
+        conversationId: String(body.conversationId).trim(),
+        // Asserted by Valet, NOT verified by RFM. Named so nobody reading this
+        // row later mistakes it for an identity this system checked.
+        // WHO authenticated (verified by RFM) vs WHO Valet says is acting
+        // (asserted, unverifiable here). Both, never one standing in for the other.
+        actorUserId: actor.id,
+        agentAssertedByValet: { ref: agent.ref, name: agent.name },
+        grantExpiresAt: new Date(grantedAt.getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000).toISOString(),
+      }),
+    },
+  }).catch((err) => logger.warn('[kiosk] remote assist audit failed', { err: err?.message }));
+
+  await recordSessionTelemetry(session, { step: null, event: 'REMOTE_ASSIST_GRANTED', data: null });
+  logger.info('[kiosk] remote assist grant', {
+    sessionId: session.id, tenantId: scope.tenantId, agentRef: agent.ref,
+  });
+  return {
+    ok: true,
+    grantedAt: grantedAt.toISOString(),
+    expiresAt: new Date(grantedAt.getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000).toISOString(),
+    ttlMinutes: ASSIST_GRANT_TTL_MIN,
+  };
+}
+
+/**
+ * The two overrides themselves. Both DELEGATE to the functions a staff member
+ * already uses, so the hard stops (underage, expired licence, both photos
+ * required, live grant) are enforced by exactly one implementation and cannot
+ * drift apart between the counter and the console.
+ */
+async function remoteVerifyId(scope, sessionId, body = {}, actor = null) {
+  const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  if (!actor?.id) throw new KioskError('An authenticated caller is required', 401, 'ACTOR_REQUIRED');
+  assertAgentIdentity(body);
+  // The remote agent may supply photos (rare — they would have to have been sent
+  // one), but normally the guest already photographed the licence into this
+  // session and the agent is only typing what the scanner misread. Without this
+  // the remote path was structurally uncallable: the assist-view deliberately
+  // carries no photo URLs, so there was nowhere for an agent to get them, and
+  // every remote verify answered 422. Caught by a third session reading the
+  // contract against the code — my own test had pinned the 422 as correct.
+  return staffVerifyId(session.id, device, body, { allowPhotosOnFile: true, remote: true });
+}
+
+async function remoteConfirmName(scope, sessionId, body = {}, actor = null) {
+  const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  if (!actor?.id) throw new KioskError('An authenticated caller is required', 401, 'ACTOR_REQUIRED');
+  assertAgentIdentity(body);
+  return confirmName(session.id, device, body, { remote: true });
+}
+
 export const kioskStaffAssistService = {
   listAssistStaff,
   unlock,
   staffVerifyId,
   confirmName,
+  remoteUnlock,
+  remoteVerifyId,
+  remoteConfirmName,
 };

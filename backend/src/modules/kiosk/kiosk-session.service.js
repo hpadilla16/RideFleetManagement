@@ -27,6 +27,39 @@ import { isoDayInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { scopedSettingKey } from '../../lib/module-access.js';
 
+// How long a conversation binding stays usable. F1 only READ through it, so an
+// unreleased binding was untidy; F3 WRITES through it, so the same stale row is
+// a standing permit over a guest who has walked away. The client releases it on
+// the ✕, on reset and on unmount — all best-effort, all lost if the tablet is
+// offline. This is the backstop that does not depend on the tablet being alive.
+// 2h: longer than any real assisted check-in, far shorter than forever.
+export const VOZIA_BINDING_TTL_MIN = 120;
+
+// Mirrors ASSIST_GRANT_TTL_MIN in kiosk-staff-assist.service.js. Duplicated
+// rather than imported because that module imports THIS one, and a cycle here
+// would break at boot. A test pins the two to the same value.
+export const ASSIST_GRANT_TTL_MIN = 10;
+
+// Outcomes a conversation may still be bound to. ESCALATED belongs here: it is
+// the guest saying "I am stuck", which is when an agent is most needed.
+export const BINDABLE_OUTCOMES = ['IN_PROGRESS', 'ESCALATED'];
+
+/**
+ * Is `conversationId` currently entitled to act on this session?
+ *
+ * Fail-closed on every axis: no binding, a different conversation, no stamp
+ * (rows from before the TTL migration), or an expired stamp all return false.
+ * Callers turn a false into the SAME 404 an unknown session gets, so a probe
+ * cannot tell "expired" from "never existed".
+ */
+export function voziaBindingIsLive(session, conversationId, now = Date.now()) {
+  if (!session?.voziaConversationId || !conversationId) return false;
+  if (session.voziaConversationId !== conversationId) return false;
+  if (!session.voziaBoundAt) return false;
+  const age = now - new Date(session.voziaBoundAt).getTime();
+  return age >= 0 && age <= VOZIA_BINDING_TTL_MIN * 60 * 1000;
+}
+
 export const MAX_SESSION_EVENTS = 500;
 export const MAX_LOOKUP_MISSES = 5;
 export const LOOKUP_LOCKOUT_MIN = 15;
@@ -147,6 +180,26 @@ async function createSession({ kind } = {}, device) {
   if (cleanKind === 'WALKUP' && !device.walkupEnabled) {
     throw new KioskError('Walk-up rentals are disabled on this kiosk', 403, 'WALKUP_DISABLED');
   }
+  // AFTER validation on purpose: a rejected request (a bad `kind`, a walk-up on a
+  // kiosk with walk-ups off) used to wipe the live binding on its way to the
+  // error, so a malformed call cost the guest their open chat for nothing.
+  // (QA m2.)
+  // A new guest is sitting down, so no OTHER live session on this tablet may
+  // keep a conversation bound. The client releases its own binding on the X, on
+  // reset and on unmount, but all three are lost if the tablet was offline — and
+  // with F3 that leftover binding is WRITE authority over the previous guest's
+  // check-in, reachable for up to the TTL with nobody in front of the kiosk.
+  // This is the cheap control the TTL alone does not give. (QA M3.)
+  await prisma.kioskSession.updateMany({
+    where: {
+      deviceId: device.id,
+      tenantId: device.tenantId,
+      outcome: { in: BINDABLE_OUTCOMES },
+      NOT: { voziaConversationId: null },
+    },
+    data: { voziaConversationId: null, voziaBoundAt: null },
+  }).catch((err) => logger.warn('[kiosk] could not release prior bindings', { err: err?.message }));
+
   const session = await prisma.kioskSession.create({
     data: {
       tenantId: device.tenantId,
@@ -800,10 +853,33 @@ async function bindVoziaConversation(sessionId, device, { conversationId } = {})
     throw new KioskError('conversationId must be 1-64 chars of [A-Za-z0-9_-]', 422, 'INVALID_CONVERSATION_ID');
   }
   const next = raw || null;
+  // Only a session the guest is still SITTING AT can be bound. getSessionForDevice
+  // proves the row belongs to this device — it does NOT prove it is the one in
+  // front of the person asking for help, so a tampered or buggy kiosk could
+  // otherwise attach a PREVIOUS guest's finished session to the current
+  // conversation and the agent would act on the wrong person's check-in
+  // believing it was theirs.
+  //
+  // ESCALATED is bindable and that is the WHOLE POINT: escalating IS asking for
+  // help, and the guest usually opens the chat immediately after. Gating on
+  // IN_PROGRESS alone locked out exactly the case this feature exists for — an
+  // existing test caught it. Only genuinely finished sessions are refused.
+  // UNBINDING stays legal at any outcome: releasing a permit must never be
+  // blocked by the state that makes releasing it necessary.
+  if (next && !BINDABLE_OUTCOMES.includes(session.outcome)) {
+    throw new KioskError(
+      `Session is ${String(session.outcome).toLowerCase()}`,
+      409, 'SESSION_NOT_BINDABLE',
+    );
+  }
   if (session.voziaConversationId !== next) {
     await prisma.kioskSession.update({
       where: { id: session.id },
-      data: { voziaConversationId: next, lastActivityAt: new Date() },
+      data: {
+        voziaConversationId: next,
+        voziaBoundAt: next ? new Date() : null,
+        lastActivityAt: new Date(),
+      },
     });
     logger.info('[kiosk] vozia conversation bound', {
       sessionId: session.id, deviceId: device.id, tenantId: device.tenantId, bound: !!next,
@@ -887,15 +963,16 @@ async function assistView(scope = {}, kioskSessionId, { conversationId } = {}) {
     ? await prisma.kioskSession.findUnique({
       where: { id: String(kioskSessionId) },
       select: {
-        tenantId: true, outcome: true, step: true, voziaConversationId: true,
+        tenantId: true, outcome: true, step: true, voziaConversationId: true, voziaBoundAt: true,
         idVerifiedAt: true, idVerifyMethod: true, idPhotosStoredAt: true,
+        assistGrantedAt: true, assistAgentRef: true, assistAgentName: true,
         paymentIntentState: true, reservationId: true, checkoutSessionId: true,
         eventsJson: true,
       },
     })
     : null;
   if (!session || session.tenantId !== scope.tenantId
-    || !session.voziaConversationId || session.voziaConversationId !== conv) {
+    || !voziaBindingIsLive(session, conv)) {
     throw new KioskError('Session not found', 404, 'SESSION_NOT_FOUND');
   }
 
@@ -926,6 +1003,24 @@ async function assistView(scope = {}, kioskSessionId, { conversationId } = {}) {
       paymentIntentState: enumOrNull(session.paymentIntentState),
       idPhotosStored: !!session.idPhotosStoredAt,
     },
+    // The assist grant, so the console can render it after a reload instead of
+    // remembering it. `expiresAt` is an ABSOLUTE server instant, deliberately
+    // not a duration: a duration counted down locally drifts against the server
+    // that actually decides, and a clock that drifts eventually lies to the
+    // agent about whether they still hold the permit. The clock is DISPLAYED
+    // TRUTH, never authority — the server refuses an expired grant whatever the
+    // panel shows. `heldBy` is what Valet asserted, and is named accordingly.
+    assist: (() => {
+      if (!session.assistGrantedAt) return { open: false, expiresAt: null, heldBy: null };
+      const expires = new Date(new Date(session.assistGrantedAt).getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000);
+      return {
+        open: expires.getTime() > Date.now(),
+        expiresAt: expires.toISOString(),
+        heldBy: session.assistAgentRef
+          ? { ref: session.assistAgentRef, name: session.assistAgentName || null, assertedByValet: true }
+          : null,
+      };
+    })(),
     timeline: projectAssistTimeline(session.eventsJson),
   };
 }

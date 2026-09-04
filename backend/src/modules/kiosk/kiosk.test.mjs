@@ -32,6 +32,7 @@ import {
   MAX_LOOKUP_MISSES,
   projectAssistTimeline,
   ASSIST_TIMELINE_CAP,
+  VOZIA_BINDING_TTL_MIN,
 } from './kiosk-session.service.js';
 import { setKioskSmartMatcher } from './kiosk-smart-match.js';
 import { samePickupDay } from './kiosk-session.service.js';
@@ -1176,9 +1177,75 @@ test('F1 bind: an ESCALATED session can still be bound (guest opens Get Help aft
   assert.equal(session.voziaConversationId, 'conv-esc');
 });
 
+// ── F3 prep: the binding becomes WRITE authority, so it needs an age and a limit ──
+//
+// F1 only READ through this binding. F3 writes through it — a remote agent types
+// a guest's licence into THIS session — so a binding that outlives the guest is a
+// standing permit over whoever sits down next. These pin the two locks.
+
+test('F3 lock: a binding with no timestamp is DEAD — pre-migration rows fail closed', async () => {
+  seedDevice();
+  // Exactly the shape every row had before the TTL column existed.
+  seedSession({ voziaConversationId: 'conv-1' });
+  await assert.rejects(
+    () => kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-1' }),
+    (e) => e.status === 404 && e.code === 'SESSION_NOT_FOUND',
+    'an unstamped binding must not resolve — a permit of unknown age is not a permit',
+  );
+});
+
+test('F3 lock: a binding older than the TTL is DEAD, and says nothing about why', async () => {
+  seedDevice();
+  const stale = new Date(Date.now() - (VOZIA_BINDING_TTL_MIN + 1) * 60 * 1000);
+  seedSession({ voziaConversationId: 'conv-1', voziaBoundAt: stale });
+  await assert.rejects(
+    () => kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-1' }),
+    (e) => e.status === 404 && e.code === 'SESSION_NOT_FOUND',
+    'expired must be indistinguishable from never-existed',
+  );
+  // One minute inside the window still resolves, so the TTL is a window and not an off-by-one.
+  const fresh = new Date(Date.now() - (VOZIA_BINDING_TTL_MIN - 1) * 60 * 1000);
+  seedSession({ id: 'ks9', voziaConversationId: 'conv-9', voziaBoundAt: fresh });
+  const ok = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks9', { conversationId: 'conv-9' });
+  assert.equal(ok.outcome, 'IN_PROGRESS');
+});
+
+test('F3 lock: a FINISHED session cannot be bound, but an ESCALATED one can', async () => {
+  const device = seedDevice();
+  seedSession({ id: 'done1', outcome: 'COMPLETED' });
+  await assert.rejects(
+    () => kioskSessionService.bindVoziaConversation('done1', device, { conversationId: 'conv-x' }),
+    (e) => e.status === 409 && e.code === 'SESSION_NOT_BINDABLE',
+    "a finished guest's session must not be attachable to a new conversation",
+  );
+  seedSession({ id: 'aband1', outcome: 'ABANDONED' });
+  await assert.rejects(
+    () => kioskSessionService.bindVoziaConversation('aband1', device, { conversationId: 'conv-x' }),
+    (e) => e.status === 409,
+  );
+  // ESCALATED is the whole point of the feature: the guest just said "I am stuck".
+  seedSession({ id: 'esc1', outcome: 'ESCALATED' });
+  const bound = await kioskSessionService.bindVoziaConversation('esc1', device, { conversationId: 'conv-esc2' });
+  assert.equal(bound.bound, true, 'escalating IS asking for help — it must stay bindable');
+});
+
+test('F3 lock: UNBINDING is legal at every outcome, and stamps the age away', async () => {
+  const device = seedDevice();
+  // Releasing a permit must never be blocked by the state that makes release necessary.
+  for (const outcome of ['IN_PROGRESS', 'ESCALATED', 'COMPLETED', 'ABANDONED']) {
+    const id = `u-${outcome}`;
+    seedSession({ id, outcome, voziaConversationId: 'conv-old', voziaBoundAt: new Date() });
+    const out = await kioskSessionService.bindVoziaConversation(id, device, { conversationId: null });
+    assert.equal(out.bound, false, `${outcome} must still be releasable`);
+    const row = db.sessions.find((r) => r.id === id);
+    assert.equal(row.voziaConversationId, null);
+    assert.equal(row.voziaBoundAt, null, 'the age must go with the binding, or a re-bind inherits it');
+  }
+});
+
 test('F1 assist-view: 404 (one indistinguishable error) for wrong tenant / wrong conversationId / unbound; 400 without conversationId or scope', async () => {
   seedDevice();
-  seedSession({ voziaConversationId: 'conv-1' });
+  seedSession({ voziaConversationId: 'conv-1', voziaBoundAt: new Date() });
   const unbound = seedSession({ id: 'ks2' });
 
   // happy path resolves (shape asserted in the next test)
@@ -1208,7 +1275,7 @@ test('F1 assist-view: truth comes from SERVER columns, never from eventsJson; ex
     { at: '2026-09-03T14:00:02.000Z', step: 'PAYMENT', event: 'SANDBOX_PAYMENT_STAMPED', data: null },
   ];
   seedSession({
-    voziaConversationId: 'conv-1', step: 'PAYMENT', eventsJson: forged,
+    voziaConversationId: 'conv-1', voziaBoundAt: new Date(), step: 'PAYMENT', eventsJson: forged,
     reservationId: 'res1', checkoutSessionId: 'cs1',
     idVerifiedAt: null, idVerifyMethod: null, idPhotosStoredAt: null, paymentIntentState: null,
   });
@@ -1216,7 +1283,11 @@ test('F1 assist-view: truth comes from SERVER columns, never from eventsJson; ex
   db.checkoutSessions.push({ id: 'cs1', tenantId: 't1', reservationId: 'res1', currentStep: 'PAYMENT_PENDING' });
 
   let view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-1' });
-  assert.deepEqual(Object.keys(view), ['outcome', 'step', 'truth', 'timeline']);
+  // `assist` joined the contract with F3 (the console must be able to render an
+  // open permission after a reload instead of remembering it). Pinned here so the
+  // shape cannot grow again without someone deciding to.
+  assert.deepEqual(Object.keys(view), ['outcome', 'step', 'truth', 'assist', 'timeline']);
+  assert.deepEqual(Object.keys(view.assist), ['open', 'expiresAt', 'heldBy']);
   assert.deepEqual(view.truth, {
     idVerified: false, idVerifyMethod: null, vehicleAssigned: false,
     checkoutStep: 'PAYMENT_PENDING', paymentIntentState: null, idPhotosStored: false,
@@ -1238,7 +1309,7 @@ test('F1 assist-view: truth comes from SERVER columns, never from eventsJson; ex
   });
 
   // No reservation / no checkout session yet → false / null, never a throw.
-  seedSession({ id: 'ks3', voziaConversationId: 'conv-3', step: 'LOOKUP' });
+  seedSession({ id: 'ks3', voziaConversationId: 'conv-3', voziaBoundAt: new Date(), step: 'LOOKUP' });
   view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks3', { conversationId: 'conv-3' });
   assert.deepEqual(view.truth, {
     idVerified: false, idVerifyMethod: null, vehicleAssigned: false,
@@ -1247,7 +1318,7 @@ test('F1 assist-view: truth comes from SERVER columns, never from eventsJson; ex
   assert.deepEqual(view.timeline, []);
 
   // A cross-tenant checkout-session / reservation id is not read (scoped lookups).
-  seedSession({ id: 'ks4', voziaConversationId: 'conv-4', reservationId: 'resX', checkoutSessionId: 'csX' });
+  seedSession({ id: 'ks4', voziaConversationId: 'conv-4', voziaBoundAt: new Date(), reservationId: 'resX', checkoutSessionId: 'csX' });
   db.reservations.push({ id: 'resX', tenantId: 't2', vehicleId: 'vehX' });
   db.checkoutSessions.push({ id: 'csX', tenantId: 't2', currentStep: 'CLOSED' });
   view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks4', { conversationId: 'conv-4' });
