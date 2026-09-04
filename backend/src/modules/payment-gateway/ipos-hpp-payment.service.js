@@ -66,7 +66,9 @@ export function hppNotConfiguredMessage(resolved = {}) {
  *        reference so the return URL can carry it back to us
  * @param {string} [opts.cancelUrl]
  * @param {string} [opts.failureUrl]
- * @param {string} [opts.origin]      — 'PORTAL' | 'PUBLIC' (audit only)
+ * @param {string} [opts.origin]      — 'PORTAL' | 'PUBLIC' | 'KIOSK' (audit only)
+ * @param {string} [opts.reuseReferenceId] — use THIS reference instead of minting one.
+ *        For callers that own the reference already (the kiosk payment intent).
  * @returns {Promise<{ url: string, referenceId: string }>}
  */
 export async function mintHppSession({
@@ -79,6 +81,7 @@ export async function mintHppSession({
   merchantName = '',
   description = '',
   origin = 'PORTAL',
+  reuseReferenceId = '',
 }, deps = {}) {
   const db = deps.prisma || prisma;
   const resolveConfig = deps.resolveConfig || resolveTenantHppConfig;
@@ -98,7 +101,14 @@ export async function mintHppSession({
     throw codedError(hppNotConfiguredMessage(resolved), 'GATEWAY_NOT_CONFIGURED');
   }
 
-  const referenceId = hppReferenceId(reservation.reservationNumber || reservation.id, { amount });
+  // A caller that already OWNS a reference passes it in, and we must use theirs
+  // rather than minting a second one. The kiosk is the case: its payment intent
+  // owns one reference per session precisely so a retried link cannot put a
+  // second live QR into the world (two references are not duplicates to the
+  // dedupe, so they would settle as two genuine charges). Every existing caller
+  // omits it and keeps the generated reference, byte for byte as before.
+  const referenceId = String(reuseReferenceId || '').trim()
+    || hppReferenceId(reservation.reservationNumber || reservation.id, { amount });
   const { url } = await mint({
     amount,
     transactionReferenceId: referenceId,
@@ -161,6 +171,11 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
       reservationId: reservation.id,
       metadata: { contains: `"${AUDIT_MARKER}":"${ref}"` },
     },
+    // The kiosk reuses one reference across presses, so there can be several
+    // mint rows for it. Without an order this picked an arbitrary one, and if
+    // the balance had moved between presses a genuine payment failed as an
+    // amount mismatch. The latest mint is the one the guest actually paid.
+    orderBy: { createdAt: 'desc' },
     select: { id: true, metadata: true },
   });
   if (!minted) throw codedError('Unknown iPOS payment reference for this reservation', 'UNKNOWN_REFERENCE');
@@ -229,7 +244,16 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
  *
  * @returns {Promise<{ ok: true, duplicate: boolean, amount: number, reference: string }>}
  */
-export async function verifyAndRecordHppReturn({ reservation, iposRef }, deps = {}) {
+export async function verifyAndRecordHppReturn({
+  reservation,
+  iposRef,
+  // Optional labels. The defaults are the exact literals every existing caller
+  // (customer-portal, public-booking) has always produced — byte-identical for
+  // them. The kiosk passes its own so reports by origin stop attributing kiosk
+  // money to the website.
+  origin = 'PORTAL',
+  notes = 'Paid via iPOSpays hosted payment page (website checkout)',
+} = {}, deps = {}) {
   const db = deps.prisma || prisma;
   const verdict = await verifyHppPayment({ reservation, iposRef }, deps);
 
@@ -241,8 +265,8 @@ export async function verifyAndRecordHppReturn({ reservation, iposRef }, deps = 
         method: 'CARD',
         status: 'PAID',
         reference: verdict.reference,
-        notes: 'Paid via iPOSpays hosted payment page (website checkout)',
-        origin: 'PORTAL', // guest-paid; matches the PayArc precedent
+        notes,
+        origin, // guest-paid; matches the PayArc precedent
         paidAt: new Date(),
       },
     }).catch((e) => {

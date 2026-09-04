@@ -469,7 +469,12 @@ async function syncAgreementCharges(reservationId, scope = {}, opts = {}) {
   return { agreementId: agreement.id, subtotal, taxes, fees, total, balance };
 }
 
-async function maybeCreateAgreementPayment({ reservation, payment }) {
+// Exported (2026-09-04) for the kiosk's hosted-page return. That path already had
+// its ReservationPayment written by the shared HPP verifier, but nothing mirrored it
+// onto the agreement ledger — and RentalAgreement.balance is computed ONLY from
+// RentalAgreementPayment, so the counter kept seeing the full balance and charged
+// the guest again. Behaviour is unchanged for every existing caller.
+export async function maybeCreateAgreementPayment({ reservation, payment }) {
   const agreement = reservation?.rentalAgreement;
   if (!agreement?.id) return null;
   // Only CANCELLED is hard-blocked. A CLOSED agreement is still adjustable by admins

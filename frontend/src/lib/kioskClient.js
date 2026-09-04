@@ -298,6 +298,17 @@ export function sandboxPayment(sessionId) {
 // the server does not believe.
 export function getAssistState(sessionId) {
   return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/assist-state`);
+// B5 Phase 2 — mint (or REUSE) the tenant's own hosted payment page for this
+// session and get back the URL the kiosk renders as a link and a QR. The guest
+// pays on their own phone; no card data ever touches the tablet. Retrying at
+// the SAME amount returns the SAME stored link — nothing is minted, so there is
+// never a second live link for one guest (two links mean two real charges). If
+// the balance moved, the server supersedes the intent and mints fresh, and the
+// old link stays resolvable in case it is paid late.
+export function createPaymentLink(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/payment-link`, {
+    method: 'POST',
+  });
 }
 
 export function completeSession(sessionId) {
