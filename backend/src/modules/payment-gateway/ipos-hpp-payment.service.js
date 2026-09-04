@@ -66,7 +66,9 @@ export function hppNotConfiguredMessage(resolved = {}) {
  *        reference so the return URL can carry it back to us
  * @param {string} [opts.cancelUrl]
  * @param {string} [opts.failureUrl]
- * @param {string} [opts.origin]      — 'PORTAL' | 'PUBLIC' (audit only)
+ * @param {string} [opts.origin]      — 'PORTAL' | 'PUBLIC' | 'KIOSK' (audit only)
+ * @param {string} [opts.reuseReferenceId] — use THIS reference instead of minting one.
+ *        For callers that own the reference already (the kiosk payment intent).
  * @returns {Promise<{ url: string, referenceId: string }>}
  */
 export async function mintHppSession({
@@ -79,6 +81,7 @@ export async function mintHppSession({
   merchantName = '',
   description = '',
   origin = 'PORTAL',
+  reuseReferenceId = '',
 }, deps = {}) {
   const db = deps.prisma || prisma;
   const resolveConfig = deps.resolveConfig || resolveTenantHppConfig;
@@ -98,7 +101,14 @@ export async function mintHppSession({
     throw codedError(hppNotConfiguredMessage(resolved), 'GATEWAY_NOT_CONFIGURED');
   }
 
-  const referenceId = hppReferenceId(reservation.reservationNumber || reservation.id, { amount });
+  // A caller that already OWNS a reference passes it in, and we must use theirs
+  // rather than minting a second one. The kiosk is the case: its payment intent
+  // owns one reference per session precisely so a retried link cannot put a
+  // second live QR into the world (two references are not duplicates to the
+  // dedupe, so they would settle as two genuine charges). Every existing caller
+  // omits it and keeps the generated reference, byte for byte as before.
+  const referenceId = String(reuseReferenceId || '').trim()
+    || hppReferenceId(reservation.reservationNumber || reservation.id, { amount });
   const { url } = await mint({
     amount,
     transactionReferenceId: referenceId,

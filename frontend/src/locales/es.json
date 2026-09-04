@@ -662,7 +662,12 @@
     "voziaEndBody": "Tu conversación terminará.",
     "voziaEndCancel": "Cancelar",
     "voziaEndConfirm": "Cerrar el chat",
-    "ok": "OK"
+    "ok": "OK",
+    "payScanToPay": "Escanea para pagar con tu teléfono",
+    "payScanHint": "Apunta la cámara al código. Puedes terminar de pagar en tu teléfono, aquí te esperamos.",
+    "payShowQr": "Mostrar código de pago",
+    "payLinkBusy": "Preparando…",
+    "payQrAlt": "Código QR de pago"
   },
   "planner": {
     "title": "Planner",
@@ -1695,7 +1700,7 @@
     "sending": "Enviando…",
     "sent": "Enviado a {{email}}.",
     "dismiss": "Ocultar"
-  },
+  },
   "citationDocs": {
     "title": "Documentos de respaldo",
     "intro": "Correspondencia, comprobantes de pago y documentación de disputa archivados con esta multa. Solo se guardan y se exportan — nunca se envían a lectura automática.",

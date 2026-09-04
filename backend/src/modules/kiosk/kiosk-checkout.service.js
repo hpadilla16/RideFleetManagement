@@ -35,6 +35,9 @@ import { customerInspectionService } from '../customer-inspection/customer-inspe
 import { settingsService } from '../settings/settings.service.js';
 import { extractLicenseFront } from './kiosk-id-ocr.extract.js';
 import { scopedSettingKey } from '../../lib/module-access.js';
+import { assertKioskPaymentAllowed } from './kiosk-payment-guards.js';
+import { kioskPaymentIntentService } from './kiosk-payment-intent.service.js';
+import { mintHppSession } from '../payment-gateway/ipos-hpp-payment.service.js';
 
 // Default minimum rental age when the pickup location's config doesn't set
 // chargeAgeMin (same source the counter finalize uses). Config hook via env.
@@ -921,6 +924,97 @@ async function sign(sessionId, device, { sectionInitials, signature, signerName,
  * Fase B5 replaces this endpoint with the real payment-link (iPOS HPP) flow
  * + server-side verification, per the spec's MONEY rules.
  */
+/* ───────────── B5 Phase 2: the guest pays on their OWN phone ─────────────
+ *
+ * The kiosk never touches a card. It shows a link and a QR for the tenant's own
+ * hosted payment page, the guest scans it with their phone, and the money settles
+ * into that tenant's merchant account — for International that is iPOS. Nothing
+ * about the card ever reaches the tablet, which is the point: an iPad in a lobby
+ * is the worst possible place to type a card number.
+ *
+ * THREE money rules, each one a bug someone already paid for:
+ *
+ * 1. ONE reference per session, always reused. `ensureIntent` owns it. A second
+ *    mint would put a SECOND live QR into the world, and two different references
+ *    are not duplicates to any dedupe — they settle as two genuine charges. This
+ *    is why mintHppSession now accepts `reuseReferenceId` instead of minting.
+ * 2. FAIL CLOSED when the tenant's gateway is not configured. Never fall back to
+ *    the platform's Authorize.Net: that silently settles this tenant's money into
+ *    the wrong merchant account. The shared mintHppSession already refuses; we do
+ *    not add an escape hatch here.
+ * 3. The kill switch stays in front. `assertKioskPaymentAllowed` is the Phase 1
+ *    gate — flag off by default, a second key in production, a per-transaction
+ *    ceiling, and an auto-expiring window. This endpoint is dark until Hector
+ *    turns it on, and it turns itself back off.
+ *
+ * LATE PAYMENT IS NORMAL, NOT AN EDGE CASE. The HPP minimum expiry is a full DAY,
+ * so a guest can photograph the QR and pay from the parking lot an hour later,
+ * long after the kiosk session was wiped. The reference→session binding lives on
+ * the KioskSession row precisely so that payment can still be resolved home.
+ */
+async function createPaymentLink(sessionId, device) {
+  const session = await getSessionForDevice(sessionId, device);
+  requireInProgress(session);
+  const cs = await loadCheckoutSessionFor(session, device);
+  if (isTerminal(cs.currentStep)) {
+    throw new KioskError(`Checkout is already ${cs.currentStep.toLowerCase()}`, 409, 'CHECKOUT_TERMINAL');
+  }
+  if (!cs.agreementId) throw new KioskError('No agreement linked to this checkout', 409, 'NO_AGREEMENT');
+
+  const [agreement, reservation] = await Promise.all([
+    prisma.rentalAgreement.findUnique({
+      where: { id: cs.agreementId },
+      select: { id: true, balance: true },
+    }),
+    prisma.reservation.findFirst({
+      where: { id: session.reservationId, tenantId: device.tenantId },
+      select: { id: true, tenantId: true, reservationNumber: true },
+    }),
+  ]);
+  if (!agreement || !reservation) throw new KioskError('No agreement linked to this checkout', 409, 'NO_AGREEMENT');
+
+  // RentalAgreement.balance is the unpaid source of truth for this system —
+  // ReservationCharge and estimatedTotal are the rent only. Asking the guest for
+  // anything else would charge a number the counter does not recognise.
+  const amount = Number(agreement.balance || 0);
+  if (!(amount > 0)) {
+    throw new KioskError('Nothing is due on this reservation', 409, 'NOTHING_DUE');
+  }
+
+  // Kill switch FIRST — before a reference is burned or a gateway is called.
+  assertKioskPaymentAllowed({
+    amount,
+    reservationId: reservation.id,
+    deviceId: device.id,
+    locationId: device.locationId || null,
+  });
+
+  const intent = await kioskPaymentIntentService.ensureIntent(sessionId, device);
+  const base = (process.env.PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'http://localhost:4000').replace(/\/$/, '');
+
+  const { url, referenceId } = await mintHppSession({
+    reservation,
+    amount,
+    origin: 'KIOSK',
+    reuseReferenceId: intent.reference,
+    description: `Kiosk check-in ${reservation.reservationNumber || reservation.id}`,
+    buildReturnUrl: (ref) => `${base}/api/kiosk/payment-return?ref=${encodeURIComponent(ref)}`,
+  });
+
+  await recordSessionTelemetry(session, {
+    step: 'PAYMENT',
+    event: intent.reused ? 'PAYMENT_LINK_REUSED' : 'PAYMENT_LINK_CREATED',
+    data: null,
+  });
+  logger.info('[kiosk-checkout] payment link minted', {
+    sessionId: session.id, tenantId: device.tenantId, reused: !!intent.reused, amount,
+  });
+
+  // The URL is what the QR encodes. The kiosk renders it client-side; no image
+  // is generated or stored server-side, so nothing card-adjacent is persisted.
+  return { ok: true, url, reference: referenceId, amount, reused: !!intent.reused };
+}
+
 async function sandboxPayment(sessionId, device) {
   const enabled = String(process.env.KIOSK_PAYMENT_SANDBOX || '') === 'true';
   const prodAllowed = String(process.env.KIOSK_PAYMENT_SANDBOX_ALLOW_PROD || '') === 'true';
@@ -1124,6 +1218,7 @@ export const kioskCheckoutService = {
   getAgreement,
   sign,
   sandboxPayment,
+  createPaymentLink,
   complete,
   getKeyHandoffSettings,
   updateKeyHandoffSettings,

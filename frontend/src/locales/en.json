@@ -662,7 +662,12 @@
     "voziaEndBody": "Your conversation will end.",
     "voziaEndCancel": "Cancel",
     "voziaEndConfirm": "End chat",
-    "ok": "OK"
+    "ok": "OK",
+    "payScanToPay": "Scan to pay with your phone",
+    "payScanHint": "Point your camera at the code. You can finish paying on your phone — we'll wait.",
+    "payShowQr": "Show payment code",
+    "payLinkBusy": "Preparing…",
+    "payQrAlt": "Payment QR code"
   },
   "planner": {
     "title": "Planner",
@@ -1695,7 +1700,7 @@
     "sending": "Sending…",
     "sent": "Sent to {{email}}.",
     "dismiss": "Hide"
-  },
+  },
   "citationDocs": {
     "title": "Supporting documents",
     "intro": "Correspondence, proof of payment and dispute paperwork filed against this citation. These are stored and exported only — they are never sent for automatic reading.",

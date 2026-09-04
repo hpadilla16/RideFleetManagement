@@ -718,12 +718,54 @@ test('F3 remote override: the hard stops are the SAME ones, because it is the sa
   await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
     ...AGENT, conversationId: CONV, reason: 'Scanner glare',
   });
-  // Grant held, but the licence photos are still mandatory when typing by hand.
+  // Photos are still mandatory — but a REMOTE agent has no camera, and the guest
+  // already photographed the licence into this session. Without photos on file
+  // the remote path is refused exactly like the counter's.
   await assert.rejects(
     () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
       ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' },
     }),
     (e) => e.status === 422 && e.code === 'MISSING_PHOTO',
-    'typing the licence in does not excuse photographing it',
+    'with nothing on file, a remote verify is refused like any other',
   );
+});
+
+test('F3 remote override: with photos ALREADY on file the agent types only the fields', async () => {
+  seedDeviceRow(); seedStaff();
+  // The server's own column — stamped by persistIdPhotos when the guest scanned.
+  seedBound({ idPhotosStoredAt: new Date() });
+  seedWorld();
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare on the barcode, two failed scans',
+  });
+  const out = await kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+    ...AGENT,
+    conversationId: CONV,
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+  });
+  // A verdict, not a 422: the remote path is reachable at all, which it was not.
+  assert.ok(out && typeof out.verified === 'boolean', 'a remote verify must return a verdict');
+});
+
+test('F3 remote override: the waiver comes from the SERVER column, never from the caller', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({ idPhotosStoredAt: null });   // nothing on file
+  seedWorld();
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'x',
+  });
+  // Every shape a caller might use to claim the photos exist must be ignored.
+  for (const forged of [
+    { idPhotosStoredAt: new Date() },
+    { photosOnFile: true },
+    { allowPhotosOnFile: true },
+  ]) {
+    await assert.rejects(
+      () => kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+        ...AGENT, conversationId: CONV, fields: { firstName: 'A', lastName: 'B' }, ...forged,
+      }),
+      (e) => e.status === 422 && e.code === 'MISSING_PHOTO',
+      `a caller must not be able to assert photos exist (${Object.keys(forged)[0]})`,
+    );
+  }
 });

@@ -212,7 +212,7 @@ async function unlock(sessionId, device, { userId, pin } = {}) {
  * STAFF_OVERRIDE + assistUserId persisted, Customer write-through, AuditLog,
  * outcome flips back to IN_PROGRESS, grant consumed.
  */
-async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, licenseBackPhoto } = {}) {
+async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, licenseBackPhoto } = {}, opts = {}) {
   const session = await getSessionForDevice(sessionId, device);
   if (!grantIsLive(session)) {
     throw new KioskError('A staff unlock is required (or the grant expired)', 403, 'ASSIST_GRANT_REQUIRED');
@@ -220,7 +220,19 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
   if (!session.reservationId) throw new KioskError('Attach a reservation first', 422, 'NO_RESERVATION_ATTACHED');
 
   // BOTH photos mandatory, validated BEFORE anything is written.
-  if (!licenseFrontPhoto || !licenseBackPhoto) {
+  //
+  // ONE exception, and it is not a relaxation: a REMOTE agent has no camera and
+  // no copy of the licence — they are typing the fields the scanner could not
+  // read, for a guest who already photographed the licence into this session. The
+  // waiver is granted by the SERVER'S OWN column (idPhotosStoredAt, stamped by
+  // persistIdPhotos), never by anything the caller says, and only when that
+  // column proves the photos exist. Standing at the kiosk nothing changes.
+  //
+  // Deliberately NOT the other option: we do not ship the licence images out to
+  // Valet so the agent can echo them back. That would export a government ID to
+  // a second system to satisfy a check the first system can already answer.
+  const photosOnFile = opts.allowPhotosOnFile === true && !!session.idPhotosStoredAt;
+  if (!photosOnFile && (!licenseFrontPhoto || !licenseBackPhoto)) {
     throw new KioskError('Front and back license photos are both required', 422, 'MISSING_PHOTO');
   }
   const photos = [
@@ -587,7 +599,14 @@ async function remoteUnlock(scope, sessionId, body = {}) {
 async function remoteVerifyId(scope, sessionId, body = {}) {
   const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
   assertAgentIdentity(body);
-  return staffVerifyId(session.id, device, body);
+  // The remote agent may supply photos (rare — they would have to have been sent
+  // one), but normally the guest already photographed the licence into this
+  // session and the agent is only typing what the scanner misread. Without this
+  // the remote path was structurally uncallable: the assist-view deliberately
+  // carries no photo URLs, so there was nowhere for an agent to get them, and
+  // every remote verify answered 422. Caught by a third session reading the
+  // contract against the code — my own test had pinned the 422 as correct.
+  return staffVerifyId(session.id, device, body, { allowPhotosOnFile: true });
 }
 
 async function remoteConfirmName(scope, sessionId, body = {}) {

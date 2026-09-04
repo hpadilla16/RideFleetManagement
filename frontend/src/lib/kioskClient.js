@@ -292,6 +292,17 @@ export function sandboxPayment(sessionId) {
   });
 }
 
+// B5 Phase 2 — mint (or REUSE) the tenant's own hosted payment page for this
+// session and get back the URL the kiosk renders as a link and a QR. The guest
+// pays on their own phone; no card data ever touches the tablet. Retrying is
+// SAFE by design: the backend reuses the session's one payment reference rather
+// than minting a second live link, because two links mean two real charges.
+export function createPaymentLink(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/payment-link`, {
+    method: 'POST',
+  });
+}
+
 export function completeSession(sessionId) {
   return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/complete`, {
     method: 'POST',
