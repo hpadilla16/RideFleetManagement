@@ -173,6 +173,22 @@ export async function recordSessionTelemetry(session, { step = null, event, data
 }
 
 async function createSession({ kind } = {}, device) {
+  // A new guest is sitting down, so no OTHER live session on this tablet may
+  // keep a conversation bound. The client releases its own binding on the X, on
+  // reset and on unmount, but all three are lost if the tablet was offline — and
+  // with F3 that leftover binding is WRITE authority over the previous guest's
+  // check-in, reachable for up to the TTL with nobody in front of the kiosk.
+  // This is the cheap control the TTL alone does not give. (QA M3.)
+  await prisma.kioskSession.updateMany({
+    where: {
+      deviceId: device.id,
+      tenantId: device.tenantId,
+      outcome: { in: BINDABLE_OUTCOMES },
+      NOT: { voziaConversationId: null },
+    },
+    data: { voziaConversationId: null, voziaBoundAt: null },
+  }).catch((err) => logger.warn('[kiosk] could not release prior bindings', { err: err?.message }));
+
   const cleanKind = String(kind || '').toUpperCase();
   if (!SESSION_KINDS.includes(cleanKind)) {
     throw new KioskError(`kind must be one of ${SESSION_KINDS.join(', ')}`, 400);

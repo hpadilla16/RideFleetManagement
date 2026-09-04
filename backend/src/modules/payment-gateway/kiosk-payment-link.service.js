@@ -15,7 +15,7 @@ import { getSessionForDevice, requireInProgress, recordSessionTelemetry } from '
 import { loadCheckoutSessionFor, isTerminal } from '../kiosk/kiosk-checkout.service.js';
 import { withKioskPaymentGuard } from '../kiosk/kiosk-payment-guards.js';
 import { kioskPaymentIntentService } from '../kiosk/kiosk-payment-intent.service.js';
-import { mintHppSession } from './ipos-hpp-payment.service.js';
+import { mintHppSession, verifyAndRecordHppReturn } from './ipos-hpp-payment.service.js';
 
 async function createPaymentLink(sessionId, device) {
   const session = await getSessionForDevice(sessionId, device);
@@ -64,12 +64,18 @@ async function createPaymentLink(sessionId, device) {
       reservation,
       amount,
       origin: 'KIOSK',
-      reuseReferenceId: intent.reference,
+      // paymentIntentRef, NOT intent.reference. `reference` is the INTERNAL
+      // form `IPOS:<ref>` — the colon and the extra length both fail the
+      // gateway's own `^[A-Za-z0-9]{1,20}$` check, so every live mint would have
+      // thrown before reaching iPOS. It survived review because the test passed a
+      // hand-written reference the real caller never produces, against a fake
+      // mint that does not validate. (QA B2.)
+      reuseReferenceId: intent.paymentIntentRef,
       description: `Kiosk check-in ${reservation.reservationNumber || reservation.id}`,
       buildReturnUrl: (ref) => `${base}/api/kiosk/payment-return?ref=${encodeURIComponent(ref)}`,
     }),
     // Dry run must never hand back something a screen would render as payable.
-    { dryRunResult: { url: null, referenceId: intent.reference, dryRun: true } },
+    { dryRunResult: { url: null, referenceId: intent.paymentIntentRef, dryRun: true } },
   );
   const { url, referenceId } = minted || {};
 
@@ -89,4 +95,48 @@ async function createPaymentLink(sessionId, device) {
 
 
 
-export const kioskPaymentLinkService = { createPaymentLink };
+export const kioskPaymentLinkService = { createPaymentLink, handlePaymentReturn };
+
+/**
+ * The guest's phone comes back here after paying (QA B3 — this route did not
+ * exist, so a real payment would have landed on a 404 and only surfaced later as
+ * an orphan).
+ *
+ * NEVER trusts the redirect. The browser carries only our own reference; the
+ * amount and the approval are re-read from the gateway before anything is
+ * recorded. The reference resolves back to its kiosk session even after the
+ * session was wiped, which is the whole reason the binding lives on the row.
+ */
+async function handlePaymentReturn(rawRef) {
+  const ref = String(rawRef || '').trim();
+  if (!ref) throw new KioskError('Missing payment reference', 400, 'MISSING_REFERENCE');
+
+  const resolved = await kioskPaymentIntentService.resolveByReference(ref);
+  if (!resolved?.reservationId) {
+    // Cannot be tied to a reservation → the staff queue, never a silent drop.
+    await kioskPaymentIntentService.flagOrphanPayment({
+      reference: ref, tenantId: resolved?.tenantId || null,
+      note: 'HPP return could not be resolved to a kiosk session',
+    }).catch(() => {});
+    throw new KioskError('This payment could not be matched — staff have been notified', 404, 'ORPHAN_PAYMENT');
+  }
+
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: resolved.reservationId },
+    select: { id: true, tenantId: true, reservationNumber: true },
+  });
+  if (!reservation) throw new KioskError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
+
+  const verdict = await verifyAndRecordHppReturn({ reservation, iposRef: ref });
+  if (resolved.kioskSessionId) {
+    await prisma.kioskSession.update({
+      where: { id: resolved.kioskSessionId },
+      data: { paymentIntentState: 'PAID', lastActivityAt: new Date() },
+    }).catch((err) => logger.warn('[kiosk-payment] could not stamp session PAID', { err: err?.message }));
+  }
+  logger.info('[kiosk-payment] hosted page return recorded', {
+    reservationId: reservation.id, duplicate: !!verdict?.duplicate,
+  });
+  return { ok: true, paid: true, duplicate: !!verdict?.duplicate };
+}
+

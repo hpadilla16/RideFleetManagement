@@ -73,13 +73,41 @@ async function mintUniqueIntentRef() {
 
 async function mintInto(session, device, { superseding = null } = {}) {
   const ref = await mintUniqueIntentRef();
-  const updated = await prisma.kioskSession.update({
-    where: { id: session.id },
+  // CONDITIONAL on the ref we believe is there. Two concurrent requests on a
+  // session with no intent both passed the read, both minted, and last-write-wins
+  // dropped the loser — not even into paymentIntentPriorRefs, so a guest who paid
+  // the losing link produced a payment nothing could resolve. `updateMany` with
+  // the expected ref in the WHERE makes the winner decidable in the database
+  // instead of by arrival order; the loser re-reads and reuses. (QA M1.)
+  const claimed = await prisma.kioskSession.updateMany({
+    where: { id: session.id, paymentIntentRef: superseding ?? null },
     data: {
       paymentIntentRef: ref,
       paymentIntentState: 'PENDING',
       paymentIntentCreatedAt: new Date(),
       lastActivityAt: new Date(),
+    },
+  });
+  if (claimed.count === 0) {
+    // Someone else claimed it between our read and our write. Their reference is
+    // the live one; hand it back rather than putting a second QR into the world.
+    const fresh = await prisma.kioskSession.findUnique({ where: { id: session.id } });
+    if (!fresh?.paymentIntentRef) {
+      throw new KioskError('Could not establish a payment reference', 409, 'INTENT_RACE_UNRESOLVED');
+    }
+    logger.warn('[kiosk-payment-intent] concurrent mint lost the race — reusing the winner', {
+      sessionId: session.id, discarded: ref, winner: fresh.paymentIntentRef,
+    });
+    return {
+      paymentIntentRef: fresh.paymentIntentRef,
+      reference: buildGatewayReference(PAYMENT_REFERENCE_PREFIX, fresh.paymentIntentRef),
+      state: fresh.paymentIntentState || 'PENDING',
+      reused: true,
+    };
+  }
+  const updated = await prisma.kioskSession.update({
+    where: { id: session.id },
+    data: {
       // RETAIN the replaced ref — a superseded iPOS link may still be payable.
       ...(superseding
         ? { paymentIntentPriorRefs: { push: superseding } }

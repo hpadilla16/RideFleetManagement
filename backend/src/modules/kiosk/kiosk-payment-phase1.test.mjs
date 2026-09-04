@@ -71,6 +71,23 @@ function delegateStub(rows) {
       rows().push(row);
       return row;
     },
+    updateMany: async ({ where, data } = {}) => {
+      // Models the real semantics this code depends on: a CONDITIONAL write that
+      // reports how many rows it actually claimed. Returning `{count}` is the
+      // whole point — the intent mint decides the winner of a race from it, so a
+      // stub that always claimed would prove the opposite of what the test says.
+      const hit = rows().filter((r) => matches(r, where));
+      for (const row of hit) {
+        for (const [k, v] of Object.entries(data || {})) {
+          if (v && typeof v === 'object' && !(v instanceof Date) && 'push' in v) {
+            row[k] = [...(row[k] || []), ...[].concat(v.push)];
+          } else {
+            row[k] = v;
+          }
+        }
+      }
+      return { count: hit.length };
+    },
     update: async ({ where, data } = {}) => {
       const row = rows().find((r) => matches(r, where));
       if (!row) throw new Error('stub update: no match');

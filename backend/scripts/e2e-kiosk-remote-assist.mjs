@@ -263,8 +263,42 @@ async function run() {
   // that no payable URL is ever produced while the switch is off. (This session
   // has no checkout started, so the refusal arrives before the guard; either way
   // nothing chargeable escapes.)
-  check(payDark.status >= 400, 'payment-link refuses while the kill switch is off', `got ${payDark.status} ${payDark.body?.code}`);
+  // NOT `status >= 400`. That is a tautology on a money endpoint: a 401 from a
+  // route that does not exist satisfies it just as happily as a working guard,
+  // and that is exactly how the first version of this passed while the endpoint
+  // was unreachable. Assert the SPECIFIC refusal, so a misrouted endpoint fails
+  // here instead of reading as a working kill switch. (QA M2.)
+  check(payDark.status !== 401,
+    'payment-link is REACHABLE — a 401 here means the route is misrouted, not guarded',
+    `got ${payDark.status} ${payDark.body?.code}`);
+  check(!!payDark.body?.code,
+    'every refusal carries a code — a bare 401 makes the tablet wipe its own pairing',
+    `got ${JSON.stringify(payDark.body)}`);
   check(!payDark.body?.url, 'and no payable URL is produced — the money property');
+
+  console.log('\n12. The intent race, against REAL Postgres (a mock cannot answer this)');
+  // The mint claims the row with a CONDITIONAL updateMany whose WHERE compares
+  // against NULL. Prisma's NULL semantics are exactly the thing this repo has
+  // been bitten by before, and a fake db answers whatever its author assumed —
+  // so this one assertion has to run against a real database or it proves
+  // nothing. Two concurrent mints on a session with no intent must converge on
+  // ONE reference: two would be two live QRs and two genuine charges.
+  const raceSession = await newSession({ outcome: 'ESCALATED' });
+  const { kioskPaymentIntentService } = await import('../src/modules/kiosk/kiosk-payment-intent.service.js');
+  const dev = { id: world.device.id, tenantId: world.tenantId, locationId: world.loc.id };
+  const [a, b] = await Promise.all([
+    kioskPaymentIntentService.ensureIntent(raceSession.id, dev),
+    kioskPaymentIntentService.ensureIntent(raceSession.id, dev),
+  ]);
+  check(a.paymentIntentRef === b.paymentIntentRef,
+    'two concurrent mints converge on ONE reference — never two live QRs',
+    `got ${a.paymentIntentRef} vs ${b.paymentIntentRef}`);
+  const raceRow = await prisma.kioskSession.findUnique({ where: { id: raceSession.id } });
+  check(raceRow.paymentIntentRef === a.paymentIntentRef,
+    'and the row holds the reference both callers were handed');
+  check(/^[A-Za-z0-9]{1,20}$/.test(raceRow.paymentIntentRef),
+    'the stored reference is gateway-legal — the colon-prefixed form is rejected by iPOS',
+    `got ${raceRow.paymentIntentRef}`);
 
   console.log(`\n${'='.repeat(56)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(56)}`);
   await prisma.$disconnect();

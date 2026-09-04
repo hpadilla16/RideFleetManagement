@@ -41,6 +41,7 @@ import { customerInspectionPublicRouter, customerInspectionRouter } from './modu
 import { citationsRouter, citationsInternalRouter } from './modules/citations/citations.routes.js';
 import { repairOrdersRouter, maintenanceRouter } from './modules/maintenance/maintenance.routes.js';
 import { kioskRouter } from './modules/kiosk/kiosk.routes.js';
+import { kioskPaymentRouter } from './modules/payment-gateway/kiosk-payment.routes.js';
 import { kioskAdminRouter } from './modules/kiosk/kiosk-admin.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
@@ -409,6 +410,11 @@ app.use('/api/maintenance', requireAuth, tenantRateLimit, requireModuleAccess('m
 // covers it). Its paths (/pair, POST /sessions, /sessions/:id/*) never match
 // the admin ones (/devices*, /upsell-rules, /packages, GET /sessions exact),
 // so admin requests fall through to the authed router mounted right below.
+// Payment first: its paths are distinct, and mounting it here — outside the
+// kiosk module — is what keeps the R2 boundary (no gateway client inside
+// src/modules/kiosk) without stranding the route somewhere the tablet cannot
+// reach. A misrouted 401 here unpairs the device, so this mount is load-bearing.
+app.use('/api/kiosk', kioskPaymentRouter);
 app.use('/api/kiosk', kioskRouter);
 app.use('/api/kiosk', requireAuth, tenantRateLimit, requireModuleAccess('kiosk'), kioskAdminRouter);
 
