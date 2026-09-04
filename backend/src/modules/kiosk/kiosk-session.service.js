@@ -839,16 +839,6 @@ export const ASSIST_STEPS = Object.freeze(['WELCOME', 'LOOKUP', 'ID', 'UPSELL', 
 export const ASSIST_TIMELINE_CAP = 200;
 
 /**
- * POST /sessions/:id/vozia-conversation — device-guarded binding of the
- * session to the Valet conversation the shell just received over postMessage.
- * Persists ONLY the conversation id (the secret stays in page memory).
- * null / '' clears the binding (iframe reset/close). Idempotent. Not gated on
- * IN_PROGRESS on purpose: a guest can open Get Help on an ESCALATED session
- * and the agent must still be able to read it.
- */
-/**
- * REPLACES the existing `assistState` in kiosk-session.service.js.
- *
  * What the GUEST is told about their own check-in. Two facts, both from this
  * server's columns — never from what the Valet console claims:
  *
@@ -899,6 +889,14 @@ async function assistState(sessionId, device) {
   return { open, expiresAt, helperName, verifiedBy };
 }
 
+/**
+ * POST /sessions/:id/vozia-conversation — device-guarded binding of the
+ * session to the Valet conversation the shell just received over postMessage.
+ * Persists ONLY the conversation id (the secret stays in page memory).
+ * null / '' clears the binding (iframe reset/close). Idempotent. Not gated on
+ * IN_PROGRESS on purpose: a guest can open Get Help on an ESCALATED session
+ * and the agent must still be able to read it.
+ */
 async function bindVoziaConversation(sessionId, device, { conversationId } = {}) {
   const session = await getSessionForDevice(sessionId, device);
   const raw = conversationId == null ? '' : String(conversationId).trim();

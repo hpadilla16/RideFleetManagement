@@ -273,9 +273,17 @@
    by X" (green, durable). Calm on purpose — reassurance, not alarm. Text colours
    pass AA on the composited grounds (measured 9.3:1 violet, 6.8:1 green). */
 .kio-assist-notice {
-  position: absolute; left: 0; right: 0; top: 14px;
-  margin: 0 auto; width: max-content; max-width: min(720px, calc(100% - 32px));
-  z-index: 85; pointer-events: none;
+  /* BELOW the bar, and never reaching the corners. The first placement (top:14px)
+     landed ON the 79px kiosk bar: it hid the EN/ES toggle and the Help button,
+     and in portrait it sat over the chat overlay's close ✕ (top:10, right:10,
+     ~44px). Measured with puppeteer in review at 768×1024 and 1024×768.
+     top:84 clears the bar; left/right:72 keep the pill ≥72px from either edge,
+     so the ✕ (which ends at 54px from the right) is never under it, at any
+     width. The agent toast also lives at top:84 for ~2.5s — while it does, it
+     paints over this pill and then goes; the pill is the durable one. */
+  position: absolute; left: 72px; right: 72px; top: 84px;
+  margin: 0 auto; width: max-content; max-width: min(720px, calc(100% - 144px));
+  z-index: 84; pointer-events: none;
   display: flex; align-items: center; gap: 10px;
   padding: 10px 18px; border-radius: 999px;
   font-size: 15px; font-weight: 600; line-height: 1.35; text-align: left;

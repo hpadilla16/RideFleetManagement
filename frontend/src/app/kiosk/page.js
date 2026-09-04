@@ -318,9 +318,15 @@ export default function KioskPage() {
   // depend on catching a transient grant inside any window at all. That was the
   // real fix; the cadence is a courtesy for the "right now" line.
   useEffect(() => {
+    // Gated on the session existing, full stop. An earlier version also checked
+    // session.outcome — but `session` is only ever written at creation and never
+    // refreshed client-side, so that gate could never fire and the comment
+    // promising it lied. The honest lifecycle: the poll lives exactly as long as
+    // the session object does, and resetAll (idle, Start over, the DONE
+    // countdown) clears it. The durable "confirmed by" line is MEANT to stay
+    // visible through DONE; it goes with the reset.
     const sid = session?.id;
-    const live = sid && session?.outcome !== 'COMPLETED' && session?.outcome !== 'ABANDONED';
-    if (!live) { setAssistNotice(null); return undefined; }
+    if (!sid) { setAssistNotice(null); return undefined; }
     let stop = false;
     const tick = async () => {
       try {
@@ -335,7 +341,7 @@ export default function KioskPage() {
     tick();
     const id = setInterval(tick, 8000);
     return () => { stop = true; clearInterval(id); };
-  }, [session?.id, session?.outcome]);
+  }, [session?.id]);
 
   const postVoziaState = useCallback((screenName, errorCode = null) => {
     if (!vozia?.host || !voziaIdentityRef.current.conversationId) return;
