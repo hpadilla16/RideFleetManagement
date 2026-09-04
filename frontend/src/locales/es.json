@@ -2123,7 +2123,20 @@
       "expiryDays": "Vigencia del enlace (días, 1-31)",
       "note1": "Cuando la pasarela principal es iPOS, los enlaces de pago del cliente abren la página de pago alojada de Dejavoo ligada al TPN de CloudPOS de arriba, de modo que los pagos por enlace se liquidan en la cuenta de comercio de ESTE tenant.",
       "note2": "Si faltan estas credenciales, los enlaces de pago se rechazan con un mensaje claro — nunca recurren en silencio a Authorize.Net.",
-      "note3": "El token HPP se cifra en reposo y no vuelve a mostrarse; déjelo en blanco para conservar el guardado. Las credenciales de producción las entrega el soporte de Dejavoo."
+      "note3": "El token HPP se cifra en reposo y no vuelve a mostrarse; déjelo en blanco para conservar el guardado. Las credenciales de producción las entrega el soporte de Dejavoo.",
+      "locations": {
+        "title": "Enlaces de pago por sede",
+        "add": "Añadir sede",
+        "intro": "Para tenants con varias sedes: cada entrada liga una sede a su PROPIO TPN de CloudPOS y credenciales. En cuanto exista una entrada, los enlaces se enrutan por sede y una sede sin entrada se rechaza — un enlace nunca se genera con el TPN de otra sede. Deje esto vacío para seguir usando las credenciales del tenant de arriba en todas las sedes.",
+        "enabled": "Activada",
+        "remove": "Quitar",
+        "location": "Sede",
+        "locationPlaceholder": "Elija la sede…",
+        "label": "Etiqueta (opcional)",
+        "labelPlaceholder": "ej. Mostrador LAX",
+        "clearCredential": "Borrar la credencial guardada al guardar",
+        "note": "Las credenciales de cada entrada se cifran en reposo y no vuelven a mostrarse — en blanco conserva el valor guardado, por fila. El par API Key + Secret Key debe pertenecer al MISMO merchant que el TPN de la entrada; las consultas de estatus nunca toman prestado el par del tenant."
+      }
     }
   },
   "terminalPicker": {

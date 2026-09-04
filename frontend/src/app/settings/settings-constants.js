@@ -96,7 +96,10 @@ export const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
     tpn: '',
     hppToken: '',
     hasHppToken: false,
-    expiryDays: 3
+    expiryDays: 3,
+    // Per-location payment-link entries (2026-09-04). Empty = tenant-level
+    // credentials serve every branch, exactly as before.
+    locations: []
   }
 };
 

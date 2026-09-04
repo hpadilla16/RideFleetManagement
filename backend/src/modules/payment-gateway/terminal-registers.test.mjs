@@ -46,6 +46,7 @@ import {
   listTerminalRegisters,
 } from './tenant-terminal-config.js';
 import { settingsService } from '../settings/settings.service.js';
+import { resolveTenantHppConfig } from './ipos-hpp-client.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures — Corpusa's real shape: one tenant, several branches, one terminal
@@ -758,6 +759,82 @@ test('a NEW register with no id gets one minted, so the next save can keep its k
 
   const resolved = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_MIA });
   assert.equal(resolved.authKey, 'mia-key-DD');
+});
+
+// ===========================================================================
+// 6b. ipos.locations — the payment-link entries ride the SAME save contract
+// (2026-09-04). Resolution behaviour lives in ipos-hpp-client.test.mjs; what
+// is pinned here is the settings round-trip: encrypted at rest, never echoed,
+// blank-means-keep per row, unsubmitted-means-untouched.
+// ===========================================================================
+
+test('an ipos location entry saves encrypted, reads as booleans, and blank-means-keep holds per row', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'ipos',
+    ipos: {
+      enabled: true,
+      locations: [
+        { locationId: LOC_LAX, label: 'LAX', tpn: '441900002071', hppToken: 'lax-hpp-token', apiKey: 'lax-api', secretKey: 'lax-sec' },
+      ],
+    },
+  }, scope);
+
+  // At rest: ciphertext, all three credentials.
+  const stored = JSON.parse(settingRows.get(terminalConfigSettingKey(TENANT.id)));
+  assert.equal(stored.ipos.locations.length, 1);
+  assert.ok(isSettingSecretEncrypted(stored.ipos.locations[0].hppToken));
+  assert.ok(isSettingSecretEncrypted(stored.ipos.locations[0].apiKey));
+  assert.ok(isSettingSecretEncrypted(stored.ipos.locations[0].secretKey));
+
+  // On read: booleans, never bytes.
+  const read = await settingsService.getPaymentGatewayConfig(scope);
+  assert.equal(read.ipos.locations.length, 1);
+  assert.equal(read.ipos.locations[0].hppToken, '');
+  assert.equal(read.ipos.locations[0].hasHppToken, true);
+  assert.equal(read.ipos.locations[0].hasApiKey, true);
+  assert.equal(read.ipos.locations[0].hasSecretKey, true);
+  const flat = JSON.stringify(read);
+  assert.ok(!flat.includes('lax-hpp-token') && !flat.includes('lax-api') && !flat.includes('lax-sec'));
+
+  // Blank round-trip (the form never gets the credentials back) keeps them.
+  const rowId = read.ipos.locations[0].id;
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'ipos',
+    ipos: {
+      enabled: true,
+      locations: [{ id: rowId, locationId: LOC_LAX, label: 'LAX front desk', tpn: '441900002071', hppToken: '', apiKey: '', secretKey: '' }],
+    },
+  }, scope);
+  const resolved = await resolveTenantHppConfig(TENANT.id, { locationId: LOC_LAX });
+  assert.equal(resolved.source, 'TENANT');
+  assert.equal(resolved.reason, 'LOCATION_CONFIG');
+  assert.equal(resolved.hppToken, 'lax-hpp-token', 'the saved token survived the blank round-trip');
+  assert.equal(resolved.apiKey, 'lax-api');
+  assert.equal(resolved.secretKey, 'lax-sec');
+});
+
+test('a payload with NO ipos.locations key leaves the stored entries alone', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'ipos',
+    ipos: {
+      enabled: true,
+      locations: [{ locationId: LOC_LAX, tpn: '441900002071', hppToken: 'lax-hpp-token' }],
+    },
+  }, scope);
+
+  // An older client saves the ipos block without knowing about locations.
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'ipos',
+    ipos: { enabled: true, tpn: '', hppToken: '' },
+  }, scope);
+
+  const resolved = await resolveTenantHppConfig(TENANT.id, { locationId: LOC_LAX });
+  assert.equal(resolved.hppToken, 'lax-hpp-token', 'the branch\'s links survived a partial save');
 });
 
 // ===========================================================================

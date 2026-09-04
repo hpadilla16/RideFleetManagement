@@ -922,6 +922,43 @@ function SettingsInner({ token, me, logout }) {
     }));
   };
 
+  // Per-location iPOS payment-link entries — same row mechanics as registers.
+  const updateIposLocation = (index, patch) => {
+    setPaymentGatewayConfig((prev) => {
+      const ipos = prev.ipos || {};
+      const rows = Array.isArray(ipos.locations) ? [...ipos.locations] : [];
+      rows[index] = { ...rows[index], ...patch };
+      return { ...prev, ipos: { ...ipos, locations: rows } };
+    });
+  };
+
+  const addIposLocation = () => {
+    setPaymentGatewayConfig((prev) => ({
+      ...prev,
+      ipos: {
+        ...(prev.ipos || {}),
+        // No id: the server mints one on save, same as registers.
+        locations: [...(Array.isArray(prev.ipos?.locations) ? prev.ipos.locations : []), {
+          locationId: '', label: '', tpn: '',
+          hppToken: '', hasHppToken: false,
+          apiKey: '', hasApiKey: false,
+          secretKey: '', hasSecretKey: false,
+          enabled: true
+        }]
+      }
+    }));
+  };
+
+  const removeIposLocation = (index) => {
+    setPaymentGatewayConfig((prev) => ({
+      ...prev,
+      ipos: {
+        ...(prev.ipos || {}),
+        locations: (Array.isArray(prev.ipos?.locations) ? prev.ipos.locations : []).filter((_, i) => i !== index)
+      }
+    }));
+  };
+
   const savePlannerCopilotConfig = async () => {
     const out = await api(scopedSettingsPath('/api/settings/planner-copilot'), {
       method: 'PUT',
@@ -3909,6 +3946,105 @@ function SettingsInner({ token, me, logout }) {
                   />
                 </div>
               </div>
+              <div className="row-between" style={{ marginTop: 14 }}>
+                <h4 style={{ margin: 0 }}>{t('settingsPayments.ipos.locations.title')}</h4>
+                <button type="button" className="button-subtle" onClick={addIposLocation}>
+                  {t('settingsPayments.ipos.locations.add')}
+                </button>
+              </div>
+              <div className="surface-note">{t('settingsPayments.ipos.locations.intro')}</div>
+              {(paymentGatewayConfig.ipos?.locations || []).map((row, index) => (
+                <div key={row.id || `new-${index}`} className="glass card" style={{ padding: 12, marginTop: 8 }}>
+                  <div className="row-between">
+                    <label className="label">
+                      <input
+                        type="checkbox"
+                        checked={row.enabled !== false}
+                        onChange={(e) => updateIposLocation(index, { enabled: e.target.checked })}
+                      />{' '}
+                      {t('settingsPayments.ipos.locations.enabled')}
+                    </label>
+                    <button type="button" className="button-subtle" onClick={() => removeIposLocation(index)}>
+                      {t('settingsPayments.ipos.locations.remove')}
+                    </button>
+                  </div>
+                  <div className="form-grid-2">
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.ipos.locations.location')}</label>
+                      <select
+                        value={row.locationId || ''}
+                        onChange={(e) => updateIposLocation(index, { locationId: e.target.value })}
+                      >
+                        <option value="">{t('settingsPayments.ipos.locations.locationPlaceholder')}</option>
+                        {locations.map((l) => (
+                          <option key={l.id} value={l.id}>{l.code ? `${l.code} — ${l.name}` : l.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.ipos.locations.label')}</label>
+                      <input
+                        value={row.label || ''}
+                        onChange={(e) => updateIposLocation(index, { label: e.target.value })}
+                        placeholder={t('settingsPayments.ipos.locations.labelPlaceholder')}
+                      />
+                    </div>
+                  </div>
+                  <div className="form-grid-2">
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.ipos.tpn')}</label>
+                      <input
+                        value={row.tpn || ''}
+                        onChange={(e) => updateIposLocation(index, { tpn: e.target.value })}
+                        placeholder={t('settingsPayments.ipos.tpnEmptyPlaceholder')}
+                      />
+                    </div>
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.ipos.hppToken')}</label>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={row.hppToken || ''}
+                        onChange={(e) => updateIposLocation(index, { hppToken: e.target.value, clearHppToken: false })}
+                        placeholder={row.hasHppToken ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.tokenEmptyPlaceholder')}
+                      />
+                      {row.hasHppToken ? (
+                        <label className="label">
+                          <input
+                            type="checkbox"
+                            checked={!!row.clearHppToken}
+                            onChange={(e) => updateIposLocation(index, { clearHppToken: e.target.checked, hppToken: '' })}
+                          />{' '}
+                          {t('settingsPayments.ipos.locations.clearCredential')}
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="form-grid-2">
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.ipos.apiKey')}</label>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={row.apiKey || ''}
+                        onChange={(e) => updateIposLocation(index, { apiKey: e.target.value, clearApiKey: false })}
+                        placeholder={row.hasApiKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.apiKeyEmptyPlaceholder')}
+                      />
+                    </div>
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.ipos.secretKey')}</label>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={row.secretKey || ''}
+                        onChange={(e) => updateIposLocation(index, { secretKey: e.target.value, clearSecretKey: false })}
+                        placeholder={row.hasSecretKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.secretKeyEmptyPlaceholder')}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div className="surface-note">{t('settingsPayments.ipos.locations.note')}</div>
               <div className="surface-note">
                 {t('settingsPayments.ipos.note1')}{' '}
                 <strong>{t('settingsPayments.ipos.note2')}</strong>{' '}

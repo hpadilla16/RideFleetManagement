@@ -211,6 +211,88 @@ describe('ipos-hpp-client: tenant config resolution (fail closed, NO env fallbac
   });
 });
 
+// ── Per-location entries (2026-09-04): a LAX link never carries another
+// branch's TPN, and a branch nobody configured refuses with words. ──────────
+describe('ipos-hpp-client: per-location resolution (fail closed, like the registers)', () => {
+  const LAX_TPN = '441900002071';
+  const MCO_TPN = '551900003080';
+  const perLocationConfig = (extra = {}) => fakePrismaWithConfig({
+    ipos: {
+      enabled: true,
+      // The tenant block ALSO carries credentials — the trap this feature
+      // exists for. They must never serve a location once entries exist.
+      tpn: MCO_TPN, hppToken: 'tenant-level-token',
+      locations: [
+        { id: 'hl1', locationId: 'loc-lax', label: 'LAX', tpn: LAX_TPN, hppToken: 'lax-token', apiKey: 'lax-key', secretKey: 'lax-secret' },
+        { id: 'hl2', locationId: 'loc-mco', label: 'MCO', tpn: MCO_TPN, hppToken: 'mco-token' },
+        ...(extra.rows || []),
+      ],
+      ...(extra.block || {}),
+    },
+  });
+
+  it('a location resolves ITS OWN entry — TPN, token and the status pair, never the tenant block\'s', async () => {
+    const lax = await resolveTenantHppConfig('t1', { prismaClient: perLocationConfig(), locationId: 'loc-lax' });
+    assert.equal(lax.source, 'TENANT');
+    assert.equal(lax.reason, 'LOCATION_CONFIG');
+    assert.equal(lax.tpn, LAX_TPN);
+    assert.equal(lax.hppToken, 'lax-token');
+    assert.equal(lax.apiKey, 'lax-key');
+    assert.equal(lax.secretKey, 'lax-secret');
+    assert.equal(lax.locationId, 'loc-lax');
+    assert.ok(hppConfigured(lax));
+
+    const mco = await resolveTenantHppConfig('t1', { prismaClient: perLocationConfig(), locationId: 'loc-mco' });
+    assert.equal(mco.tpn, MCO_TPN);
+    assert.equal(mco.hppToken, 'mco-token');
+    // No pair configured for MCO → empty, NOT the tenant block's pair.
+    assert.equal(mco.apiKey, '');
+    assert.equal(mco.secretKey, '');
+  });
+
+  it('a location with NO entry refuses — the tenant block is not a stand-in', async () => {
+    const mia = await resolveTenantHppConfig('t1', { prismaClient: perLocationConfig(), locationId: 'loc-mia' });
+    assert.equal(mia.source, 'NONE');
+    assert.equal(mia.reason, 'NO_HPP_FOR_LOCATION');
+    assert.equal(mia.tpn, '', 'no credential may escape');
+    assert.equal(hppConfigured(mia), false);
+  });
+
+  it('no location to route by + entries present refuses rather than guessing a merchant', async () => {
+    const noLoc = await resolveTenantHppConfig('t1', { prismaClient: perLocationConfig() });
+    assert.equal(noLoc.source, 'NONE');
+    assert.equal(noLoc.reason, 'HPP_LOCATION_REQUIRED');
+  });
+
+  it('a half-configured entry refuses (INCOMPLETE_LOCATION_CONFIG), a disabled one is invisible', async () => {
+    const prismaClient = perLocationConfig({
+      rows: [
+        { id: 'hl3', locationId: 'loc-sju', tpn: '661900004090', hppToken: '' },
+        { id: 'hl4', locationId: 'loc-off', tpn: '771900005001', hppToken: 'off-token', enabled: false },
+      ],
+    });
+    const sju = await resolveTenantHppConfig('t1', { prismaClient, locationId: 'loc-sju' });
+    assert.equal(sju.source, 'NONE');
+    assert.equal(sju.reason, 'INCOMPLETE_LOCATION_CONFIG');
+
+    const off = await resolveTenantHppConfig('t1', { prismaClient, locationId: 'loc-off' });
+    assert.equal(off.source, 'NONE');
+    assert.equal(off.reason, 'NO_HPP_FOR_LOCATION', 'a disabled entry is no entry');
+  });
+
+  it('a tenant with NO location entries resolves the tenant block exactly as before, location or not', async () => {
+    const prismaClient = fakePrismaWithConfig({
+      ipos: { enabled: true, tpn: MCO_TPN, hppToken: DUMMY_TOKEN, locations: [] },
+    });
+    const withLoc = await resolveTenantHppConfig('t1', { prismaClient, locationId: 'loc-lax' });
+    assert.equal(withLoc.source, 'TENANT');
+    assert.equal(withLoc.reason, 'TENANT_CONFIG');
+    assert.equal(withLoc.tpn, MCO_TPN);
+    const without = await resolveTenantHppConfig('t1', { prismaClient });
+    assert.equal(without.source, 'TENANT');
+  });
+});
+
 function resolvedConfig(overrides = {}) {
   return {
     source: 'TENANT', reason: 'TENANT_CONFIG', tenantId: 't1',
