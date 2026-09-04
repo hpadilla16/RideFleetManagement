@@ -609,16 +609,30 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
       // iPOSpays Hosted Payment Page — customer payment links. The token
       // itself never reaches this read shape; `hasHppToken` says one is on
       // file. The TPN may come from the spin block (same tenant's merchant).
-      ipos: {
-        selected: gateway === 'ipos',
-        enabled: !!cfg?.ipos?.enabled,
-        ready: !!(cfg?.ipos?.hasHppToken && (cfg?.ipos?.tpn || cfg?.spin?.tpn)),
-        environment: cfg?.ipos?.environment || 'production',
-        missing: [
-          ...(!(cfg?.ipos?.tpn || cfg?.spin?.tpn) ? ['CloudPOS TPN'] : []),
-          ...(!cfg?.ipos?.hasHppToken ? ['HPP Auth Token'] : [])
-        ]
-      }
+      ipos: (() => {
+        // With per-location entries (2026-09-04), links route per branch —
+        // ready means at least one branch can mint; tenants with no entries
+        // keep the tenant-level reading unchanged.
+        const locEntries = (Array.isArray(cfg?.ipos?.locations) ? cfg.ipos.locations : [])
+          .filter((l) => l && l.enabled !== false);
+        const readyLocs = locEntries.filter((l) => l.hasHppToken && l.tpn);
+        const tenantReady = !!(cfg?.ipos?.hasHppToken && (cfg?.ipos?.tpn || cfg?.spin?.tpn));
+        return {
+          selected: gateway === 'ipos',
+          enabled: !!cfg?.ipos?.enabled,
+          ready: locEntries.length > 0 ? readyLocs.length > 0 : tenantReady,
+          environment: cfg?.ipos?.environment || 'production',
+          perLocation: locEntries.length > 0,
+          locationsReady: readyLocs.length,
+          locationsConfigured: locEntries.length,
+          missing: locEntries.length > 0
+            ? (readyLocs.length === locEntries.length ? [] : ['Some location entries are missing their CloudPOS TPN or HPP Auth Token'])
+            : [
+              ...(!(cfg?.ipos?.tpn || cfg?.spin?.tpn) ? ['CloudPOS TPN'] : []),
+              ...(!cfg?.ipos?.hasHppToken ? ['HPP Auth Token'] : [])
+            ]
+        };
+      })()
     };
     const active = checks[gateway] || checks.authorizenet;
     res.json({

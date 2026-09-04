@@ -630,7 +630,15 @@ function defaultPaymentGatewayConfig() {
       secretKey: '',
       hasSecretKey: false,
       // Hosted-link expiry in days (iPOSpays accepts 1–31).
-      expiryDays: 3
+      expiryDays: 3,
+      // Per-LOCATION payment-link entries (2026-09-04) — one CloudPOS TPN +
+      // credential set per branch, for multi-location tenants. The moment any
+      // enabled entry exists, link minting resolves per-location and
+      // FAIL-CLOSED (a LAX link never carries another branch's TPN); with
+      // none, the tenant-level fields above keep working exactly as before.
+      // Same blank-means-keep / encrypt-on-write / never-echo contract as the
+      // terminal registers, per row, keyed by id.
+      locations: []
     },
     // PayArc — used for US-mainland car-sharing pickups. Puerto Rico
     // pickups stay on Authorize.Net regardless. Selector lives in
@@ -783,10 +791,82 @@ function iposBlockForRead(ipos = {}) {
     hppToken: '', hasHppToken: !!stored,
     apiKey: '', hasApiKey: !!storedKey,
     secretKey: '', hasSecretKey: !!storedSecret,
+    // Per-location entries carry the same three credentials — stripped the
+    // same way, per row. Without this, the `...ipos` spread above would echo
+    // every branch's ciphertext to the settings page.
+    locations: iposLocationsForRead(ipos?.locations),
   };
   delete out.clearHppToken;
   delete out.clearApiKey;
   delete out.clearSecretKey;
+  return out;
+}
+
+/** Shape the stored ipos.locations rows for a READ — booleans, never bytes. */
+function iposLocationsForRead(locations) {
+  if (!Array.isArray(locations)) return [];
+  return locations.map((raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = String(raw.id || '').trim();
+    if (!id) return null;
+    return {
+      id,
+      locationId: String(raw.locationId || ''),
+      label: String(raw.label || ''),
+      tpn: String(raw.tpn || ''),
+      hppToken: '', hasHppToken: !!(typeof raw.hppToken === 'string' && raw.hppToken.trim()),
+      apiKey: '', hasApiKey: !!(typeof raw.apiKey === 'string' && raw.apiKey.trim()),
+      secretKey: '', hasSecretKey: !!(typeof raw.secretKey === 'string' && raw.secretKey.trim()),
+      // Absent means ON — matches the resolver's reading of the same field.
+      enabled: raw.enabled !== false
+    };
+  }).filter(Boolean);
+}
+
+/**
+ * Normalize ipos.locations for a WRITE — the registers contract, row by row:
+ * blank credential means KEEP that row's stored bytes (raw carry, never
+ * decrypt→re-encrypt), a supplied one encrypts, clear* erases, ids are minted
+ * for new rows, and an unsubmitted key carries the stored array through
+ * untouched so an older settings client cannot delete a branch's links.
+ */
+function normalizeIposLocationsForWrite(payloadLocations, storedLocations) {
+  if (!Array.isArray(payloadLocations)) {
+    return Array.isArray(storedLocations) ? storedLocations : [];
+  }
+  const storedById = new Map(
+    (Array.isArray(storedLocations) ? storedLocations : [])
+      .filter((r) => r && r.id)
+      .map((r) => [String(r.id), r])
+  );
+  const seen = new Set();
+  const out = [];
+  for (const raw of payloadLocations) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = String(raw.id || '').trim() || randomUUID();
+    if (seen.has(id)) continue; // a duplicated id would make blank-means-keep ambiguous
+    seen.add(id);
+    const stored = storedById.get(id);
+    const suppliedToken = String(raw.hppToken || '').trim();
+    const suppliedApiKey = String(raw.apiKey || '').trim();
+    const suppliedSecret = String(raw.secretKey || '').trim();
+    out.push({
+      id,
+      locationId: String(raw.locationId || '').trim(),
+      label: String(raw.label || '').trim(),
+      tpn: String(raw.tpn || '').trim(),
+      hppToken: raw.clearHppToken
+        ? ''
+        : (suppliedToken ? encryptSettingSecret(suppliedToken) : carrySettingSecret(stored?.hppToken)),
+      apiKey: raw.clearApiKey
+        ? ''
+        : (suppliedApiKey ? encryptSettingSecret(suppliedApiKey) : carrySettingSecret(stored?.apiKey)),
+      secretKey: raw.clearSecretKey
+        ? ''
+        : (suppliedSecret ? encryptSettingSecret(suppliedSecret) : carrySettingSecret(stored?.secretKey)),
+      enabled: raw.enabled !== false
+    });
+  }
   return out;
 }
 
@@ -826,7 +906,15 @@ export function derivePaymentCapabilities(cfg = {}) {
       // linkReady = the Send-payment-link mint would not fail closed with
       // GATEWAY_NOT_CONFIGURED for an ipos tenant. hasHppToken is a boolean
       // computed by iposBlockForRead — no token material is consulted here.
-      linkReady: !!(iposEnabled && cfg?.ipos?.hasHppToken)
+      // With per-location entries (2026-09-04) the mint routes per branch, so
+      // ANY complete enabled entry makes links possible somewhere; the
+      // per-reservation refusal still fails closed with words at mint time.
+      linkReady: !!(iposEnabled && (
+        cfg?.ipos?.hasHppToken
+        || (Array.isArray(cfg?.ipos?.locations) && cfg.ipos.locations.some(
+          (l) => l && l.enabled !== false && l.hasHppToken && l.tpn,
+        ))
+      ))
     },
     stripe: { enabled: !!(cfg?.stripe?.enabled && cfg?.stripe?.secretKey) },
     square: { enabled: cfg?.square?.enabled === true },
@@ -1739,6 +1827,10 @@ export const settingsService = {
             ? encryptSettingSecret(newIposSecretKey)
             : carrySettingSecret(storedRaw?.ipos?.secretKey)),
         expiryDays: iposExpiryDaysValue(payload?.ipos?.expiryDays, defaults.ipos.expiryDays),
+        // Per-location entries — registers contract, row by row (see
+        // normalizeIposLocationsForWrite). An unsubmitted key carries the
+        // stored rows; a submitted array replaces them wholesale.
+        locations: normalizeIposLocationsForWrite(payload?.ipos?.locations, storedRaw?.ipos?.locations),
         // Read-shape / command-only fields never belong in the stored blob.
         hasHppToken: undefined,
         clearHppToken: undefined,

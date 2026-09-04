@@ -2123,7 +2123,20 @@
       "expiryDays": "Link expiry (days, 1-31)",
       "note1": "When the Primary Gateway is set to iPOS, customer payment links open the Dejavoo-hosted payment page tied to the CloudPOS TPN above, so link payments settle into THIS tenant's merchant account.",
       "note2": "If these credentials are missing, payment links refuse with a clear message — they never silently fall back to Authorize.Net.",
-      "note3": "The HPP Auth Token is encrypted at rest and never shown again; leave it blank to keep the saved one. Production credentials come from Dejavoo support."
+      "note3": "The HPP Auth Token is encrypted at rest and never shown again; leave it blank to keep the saved one. Production credentials come from Dejavoo support.",
+      "locations": {
+        "title": "Per-location payment links",
+        "add": "Add location entry",
+        "intro": "For tenants with several branches: each entry ties one location to its OWN CloudPOS TPN and credentials. The moment any entry exists, links route per location and a branch without an entry refuses — a link is never minted on another location's TPN. Leave this empty to keep using the tenant-level credentials above for every branch.",
+        "enabled": "Enabled",
+        "remove": "Remove",
+        "location": "Location",
+        "locationPlaceholder": "Pick the branch…",
+        "label": "Label (optional)",
+        "labelPlaceholder": "e.g. LAX front desk",
+        "clearCredential": "Clear the saved credential on save",
+        "note": "Each entry's credentials are encrypted at rest and never shown again — blank keeps the saved value, per row. The API Key + Secret Key pair must belong to the SAME merchant as the entry's TPN; status checks never borrow the tenant-level pair."
+      }
     }
   },
   "terminalPicker": {

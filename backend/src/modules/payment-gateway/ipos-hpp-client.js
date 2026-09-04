@@ -246,17 +246,49 @@ export function extractHppReferenceId(raw = '') {
 }
 
 /**
+ * One per-location payment-link entry, decrypted and trimmed. Rows missing an
+ * id or a locationId are meaningless and dropped. Absent `enabled` means ON —
+ * the same reading as the terminal registers.
+ */
+function normalizeHppLocationEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id || '').trim();
+  const locationId = String(raw.locationId || '').trim();
+  if (!id || !locationId) return null;
+  return {
+    id,
+    locationId,
+    label: String(raw.label || '').trim(),
+    tpn: String(raw.tpn || '').trim(),
+    hppToken: String(decryptSettingSecret(raw.hppToken) || '').trim(),
+    apiKey: String(decryptSettingSecret(raw.apiKey) || '').trim(),
+    secretKey: String(decryptSettingSecret(raw.secretKey) || '').trim(),
+    enabled: raw.enabled !== false,
+  };
+}
+
+/**
  * Resolve a tenant's HPP configuration from the canonical AppSetting row.
  * NEVER throws — a missing row, dead DB, bad JSON or failed decrypt all
  * degrade to `{ source: 'NONE' }`, which callers turn into an explicit
  * fail-closed refusal. There is NO env fallback here on purpose (see header).
+ *
+ * 2026-09-04 — `locationId` routes multi-location tenants: the moment ANY
+ * enabled entry exists under ipos.locations, resolution is per-location and
+ * FAIL-CLOSED, exactly like the terminal registers. A link minted for LAX must
+ * never carry another branch's TPN; a location nobody configured refuses with
+ * words instead of borrowing the tenant block. A tenant with no location
+ * entries resolves off the tenant block, byte for byte as before (IRC).
  */
-export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma } = {}) {
-  const none = (reason) => ({
+export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma, locationId = null } = {}) {
+  const wantLocationId = String(locationId || '').trim();
+  const none = (reason, extra = {}) => ({
     source: 'NONE', reason,
     tenantId: tenantId || null,
     environment: 'production', tpn: '', hppToken: '', apiKey: '', secretKey: '', expiryDays: 3,
     enabled: false, maskedTpn: maskTpn(''),
+    locationId: wantLocationId || null,
+    ...extra,
   });
   if (!tenantId) return none('NO_TENANT_ID');
 
@@ -275,6 +307,39 @@ export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma }
   if (!parsed) return none('NO_CONFIG');
 
   const block = parsed?.ipos && typeof parsed.ipos === 'object' ? parsed.ipos : {};
+
+  const locationEntries = (Array.isArray(block.locations) ? block.locations : [])
+    .map(normalizeHppLocationEntry)
+    .filter(Boolean)
+    .filter((l) => l.enabled);
+  if (locationEntries.length > 0) {
+    if (!wantLocationId) {
+      // No location to route by, several merchants to choose from. Guessing a
+      // TPN is guessing whose account the money settles into.
+      return none('HPP_LOCATION_REQUIRED');
+    }
+    const match = locationEntries.find((l) => l.locationId === wantLocationId);
+    if (!match) return none('NO_HPP_FOR_LOCATION');
+    if (!match.tpn || !match.hppToken) {
+      return none('INCOMPLETE_LOCATION_CONFIG', { maskedTpn: maskTpn(match.tpn) });
+    }
+    return {
+      source: 'TENANT',
+      reason: 'LOCATION_CONFIG',
+      tenantId,
+      environment: String(block.environment || 'production').toLowerCase() === 'sandbox' ? 'sandbox' : 'production',
+      tpn: match.tpn,
+      hppToken: match.hppToken,
+      // The status-check pair is per-merchant like the TPN — NEVER inherited
+      // from the tenant block, which is a different merchant's credential.
+      apiKey: match.apiKey,
+      secretKey: match.secretKey,
+      expiryDays: clampExpiryDays(block.expiryDays, 3),
+      enabled: !!block.enabled,
+      maskedTpn: maskTpn(match.tpn),
+      locationId: wantLocationId,
+    };
+  }
   // The HPP is tied to a CloudPOS TPN; when the operator leaves ipos.tpn blank
   // we fall back to the tenant's OWN spin.tpn (same tenant, same merchant —
   // never a platform value).

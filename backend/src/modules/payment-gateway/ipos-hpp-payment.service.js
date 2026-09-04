@@ -48,12 +48,50 @@ function codedError(message, code) {
 
 export function hppNotConfiguredMessage(resolved = {}) {
   const reason = resolved?.reason || 'NOT_CONFIGURED';
-  const detail = reason === 'INCOMPLETE_CONFIG'
-    ? 'the iPOS payment-link setup is incomplete (both the CloudPOS TPN and the HPP Auth Token are required)'
-    : 'iPOS payment links are not configured for this tenant';
+  let detail;
+  switch (reason) {
+    case 'INCOMPLETE_CONFIG':
+      detail = 'the iPOS payment-link setup is incomplete (both the CloudPOS TPN and the HPP Auth Token are required)';
+      break;
+    // Per-location entries exist, so links route per branch (2026-09-04) —
+    // each of these is a DIFFERENT operator action, and telling an agent
+    // "not configured" when the truth is "not configured for THIS branch"
+    // sends them to overwrite the other branch's credentials.
+    case 'NO_HPP_FOR_LOCATION':
+      detail = 'this pickup location has no payment-link credentials of its own — a link is never minted on another location\'s TPN';
+      break;
+    case 'INCOMPLETE_LOCATION_CONFIG':
+      detail = 'this pickup location\'s payment-link entry is incomplete (both the CloudPOS TPN and the HPP Auth Token are required)';
+      break;
+    case 'HPP_LOCATION_REQUIRED':
+      detail = 'this tenant runs per-location payment links and this reservation carries no pickup location to route by';
+      break;
+    default:
+      detail = 'iPOS payment links are not configured for this tenant';
+  }
   return `Customer payment links are set to iPOS, but ${detail}. `
     + 'Add the CloudPOS TPN and HPP Auth Token under Settings → Payments → iPOS Payment Links. '
     + 'Links are NOT falling back to Authorize.Net: that would settle into the wrong merchant account.';
+}
+
+/**
+ * The pickup location a link must route by. Callers pass reservation objects
+ * of very different shapes; when the field is simply absent we read it rather
+ * than resolving location-less — a multi-location tenant's link minted with
+ * no location would refuse (HPP_LOCATION_REQUIRED) for a reservation that has
+ * a perfectly good pickup location on file.
+ */
+async function reservationLocationId(db, reservation) {
+  if (reservation && 'pickupLocationId' in reservation) return reservation.pickupLocationId || null;
+  try {
+    const row = await db.reservation.findUnique({
+      where: { id: reservation.id },
+      select: { pickupLocationId: true },
+    });
+    return row?.pickupLocationId || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -91,11 +129,15 @@ export async function mintHppSession({
   if (!(Number(amount) > 0)) throw codedError('Nothing is due on this reservation', 'ALREADY_PAID');
   if (typeof buildReturnUrl !== 'function') throw codedError('buildReturnUrl is required', 'VALIDATION');
 
-  const resolved = await resolveConfig(reservation.tenantId || null);
+  // The link routes by the reservation's OWN pickup location: a multi-location
+  // tenant resolves that branch's TPN + token, never another location's.
+  const locationId = await reservationLocationId(db, reservation);
+  const resolved = await resolveConfig(reservation.tenantId || null, { locationId });
   if (!hppConfigured(resolved) && !isHppDryRun()) {
-    logger.warn('[ipos-hpp] payment link refused — tenant HPP config missing (failing closed, NO Auth.Net fallback)', {
+    logger.warn('[ipos-hpp] payment link refused — HPP config missing for this tenant/location (failing closed, NO Auth.Net fallback)', {
       tenantId: reservation.tenantId || null,
       reservationId: reservation.id,
+      locationId,
       reason: resolved?.reason,
     });
     throw codedError(hppNotConfiguredMessage(resolved), 'GATEWAY_NOT_CONFIGURED');
@@ -185,7 +227,11 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
   let mintedAmount = 0;
   try { mintedAmount = Number(JSON.parse(minted.metadata || '{}')?.amount || 0); } catch { mintedAmount = 0; }
 
-  const resolved = await resolveConfig(reservation.tenantId || null);
+  // Same routing as the mint: the status check must authenticate as the SAME
+  // merchant the link was minted on, which is the reservation's own branch.
+  const resolved = await resolveConfig(reservation.tenantId || null, {
+    locationId: await reservationLocationId(db, reservation),
+  });
   const status = await query({ transactionReferenceId: ref }, resolved, deps);
 
   if (!status.approved) {
