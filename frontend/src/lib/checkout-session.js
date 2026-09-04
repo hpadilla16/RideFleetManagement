@@ -52,6 +52,28 @@ export async function mintHandoffToken({ id, token }) {
 // says PHONE, so a counter with no terminal can never be shown a ladder for a
 // device that is not there.
 
+/**
+ * Which terminal registers the agent may choose between at this session's
+ * pickup location (LAX Counter 1 / Counter 2). Names + masked TPNs only —
+ * never a credential. `selectable` is true only when there is a real choice.
+ */
+export async function getTerminalOptions({ id, token }) {
+  return api(`${BASE}/${id}/terminal-options`, { bypassCache: true }, token);
+}
+
+/**
+ * Pin this checkout to one register (null clears the pin). The server
+ * validates the pick against the session's own pickup location, and every
+ * terminal op of the session — clauses, signature, sale, deposit — then runs
+ * on the pinned device.
+ */
+export async function selectTerminalRegister({ id, registerId, token }) {
+  return api(`${BASE}/${id}/terminal-select`, {
+    method: 'POST',
+    body: JSON.stringify({ registerId: registerId || null }),
+  }, token);
+}
+
 export async function getTerminalContract({ id, token }) {
   return api(`${BASE}/${id}/terminal-contract`, {}, token);
 }

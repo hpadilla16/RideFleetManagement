@@ -2126,6 +2126,13 @@
       "note3": "The HPP Auth Token is encrypted at rest and never shown again; leave it blank to keep the saved one. Production credentials come from Dejavoo support."
     }
   },
+  "terminalPicker": {
+    "label": "Terminal",
+    "confirm": "Use this terminal",
+    "autoNote": "This counter has several terminals — confirm which device is in front of the renter.",
+    "incomplete": " — not configured",
+    "error": "Could not select that terminal"
+  },
   "terminalContract": {
     "title": "Step 2 · Contract on the terminal",
     "loading": "Reading the counter's terminal…",

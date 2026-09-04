@@ -251,14 +251,20 @@ function sectionsFor(session) {
 async function loadTerminal(session) {
   const tenantId = session.reservation?.tenantId || null;
   const locationId = session.reservation?.pickupLocationId || null;
-  const resolved = await resolveTenantTerminalConfig(tenantId, { locationId });
+  // The agent's pick for a multi-terminal counter (LAX Counter 1 / Counter 2).
+  // Null resolves by location exactly as before; a stale pick is refused by
+  // the resolver (REGISTER_LOCATION_MISMATCH), never silently substituted.
+  const registerId = session.terminalRegisterId || null;
+  const resolved = await resolveTenantTerminalConfig(tenantId, { locationId, registerId });
   if (resolved.source === 'NONE' && !isSpinDryRun()) {
     logger.error('[terminal-contract] refusing to prompt — no terminal resolved for this counter', {
-      sessionId: session.id, tenantId, locationId, reason: resolved.reason,
+      sessionId: session.id, tenantId, locationId, registerId, reason: resolved.reason,
     });
     throw new CheckoutSessionError(
-      'No payment terminal is configured for this pickup location, so the contract cannot be signed on a terminal. '
-      + 'Configure it in Settings → Payment Gateway, or switch this checkout to the renter\'s phone.',
+      resolved.reason === 'REGISTER_LOCATION_MISMATCH' || resolved.reason === 'NO_REGISTER_FOR_ID'
+        ? 'The terminal picked for this checkout is no longer available at this pickup location. Pick a terminal again.'
+        : 'No payment terminal is configured for this pickup location, so the contract cannot be signed on a terminal. '
+          + 'Configure it in Settings → Payment Gateway, or switch this checkout to the renter\'s phone.',
       409, 'TERMINAL_NOT_CONFIGURED',
     );
   }

@@ -43,6 +43,7 @@ import {
   terminalConfigSettingKey,
   buildTerminalAuditMetadata,
   maskTpn,
+  listTerminalRegisters,
 } from './tenant-terminal-config.js';
 import { settingsService } from '../settings/settings.service.js';
 
@@ -468,6 +469,76 @@ test('an unknown or disabled registerId refuses rather than substituting another
   assert.equal(off.source, 'NONE');
   assert.equal(off.reason, 'NO_REGISTER_FOR_ID');
   assert.notEqual(off.tpn, REG_LAX.tpn, 'the other counter is not a stand-in');
+});
+
+test('a pin does not outrank the counter: registerId from ANOTHER location refuses (2026-09-04)', async () => {
+  // The stale-selection case: a checkout pinned LAX Counter 1, then the
+  // reservation's pickup location was edited to Orlando. Honouring the pin
+  // would charge at Orlando on LAX's device.
+  seed(TENANT, { registers: [storedRegister(REG_LAX), storedRegister(REG_MCO)] });
+
+  const stale = await resolveTenantTerminalConfig(TENANT.id, {
+    locationId: LOC_MCO, registerId: REG_LAX.id,
+  });
+  assert.equal(stale.source, 'NONE');
+  assert.equal(stale.reason, 'REGISTER_LOCATION_MISMATCH');
+  assert.equal(stale.authKey, '', 'no credential may escape');
+
+  // The same pin WITH its own location still resolves — and a pinned register
+  // that carries no location of its own is location-agnostic and pins fine.
+  const fine = await resolveTenantTerminalConfig(TENANT.id, {
+    locationId: LOC_LAX, registerId: REG_LAX.id,
+  });
+  assert.equal(fine.reason, 'REGISTER_PINNED');
+  assert.equal(fine.tpn, REG_LAX.tpn);
+
+  seed(TENANT, { registers: [storedRegister({ ...REG_LAX, locationId: '' }), storedRegister(REG_MCO)] });
+  invalidateTenantTerminalConfig(TENANT.id);
+  const agnostic = await resolveTenantTerminalConfig(TENANT.id, {
+    locationId: LOC_MCO, registerId: REG_LAX.id,
+  });
+  assert.equal(agnostic.reason, 'REGISTER_PINNED');
+  assert.equal(agnostic.tpn, REG_LAX.tpn);
+});
+
+// ===========================================================================
+// 4b. THE AGENT'S SELECTOR READ — listTerminalRegisters (2026-09-04)
+// ===========================================================================
+
+test('listTerminalRegisters carries names and MASKED TPNs only — never a key, never a full TPN', async () => {
+  seed(TENANT, { registers: [storedRegister(REG_LAX), storedRegister(REG_LAX2), storedRegister(REG_MCO)] });
+
+  const { hasRegisters, registers } = await listTerminalRegisters(TENANT.id, { locationId: LOC_LAX });
+
+  assert.equal(hasRegisters, true);
+  assert.deepEqual(registers.map((r) => r.id), [REG_LAX.id, REG_LAX2.id],
+    'scoped to the counter — Orlando\'s device is not on the list');
+  for (const r of registers) {
+    assert.equal(r.complete, true);
+    assert.match(r.maskedTpn, /\*/, 'TPN is masked');
+    const flat = JSON.stringify(r);
+    assert.ok(!flat.includes(REG_LAX.authKey) && !flat.includes(REG_LAX2.authKey), 'no auth key in the payload');
+    assert.ok(!flat.includes(REG_LAX.tpn) && !flat.includes(REG_LAX2.tpn), 'no full TPN in the payload');
+  }
+});
+
+test('listTerminalRegisters: disabled registers are absent, half-configured ones are flagged, legacy tenants list nothing', async () => {
+  seed(TENANT, {
+    registers: [
+      storedRegister(REG_LAX),
+      storedRegister(REG_LAX2, { enabled: false }),
+      storedRegister({ ...REG_MCO, id: 'reg-lax-3', name: 'LAX Counter 3', locationId: LOC_LAX, authKey: '' }, { encrypted: false }),
+    ],
+  });
+  const { registers } = await listTerminalRegisters(TENANT.id, { locationId: LOC_LAX });
+  assert.deepEqual(registers.map((r) => [r.id, r.complete]), [[REG_LAX.id, true], ['reg-lax-3', false]],
+    'the disabled counter is gone; the half-configured one is listed but flagged');
+
+  // A legacy single-terminal tenant (no registers) renders no selector at all.
+  seed(OTHER, { spin: legacySpin() });
+  const legacy = await listTerminalRegisters(OTHER.id, { locationId: LOC_LAX });
+  assert.equal(legacy.hasRegisters, false);
+  assert.deepEqual(legacy.registers, []);
 });
 
 test('two registers at ONE location: the first is used and the ambiguity is logged', async () => {

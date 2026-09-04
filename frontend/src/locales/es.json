@@ -2126,6 +2126,13 @@
       "note3": "El token HPP se cifra en reposo y no vuelve a mostrarse; déjelo en blanco para conservar el guardado. Las credenciales de producción las entrega el soporte de Dejavoo."
     }
   },
+  "terminalPicker": {
+    "label": "Terminal",
+    "confirm": "Usar esta terminal",
+    "autoNote": "Este mostrador tiene varias terminales — confirme cuál es el equipo frente al cliente.",
+    "incomplete": " — sin configurar",
+    "error": "No se pudo seleccionar esa terminal"
+  },
   "terminalContract": {
     "title": "Paso 2 · Contrato en la terminal",
     "loading": "Consultando la terminal del mostrador…",

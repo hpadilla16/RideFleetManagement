@@ -220,6 +220,36 @@ checkoutSessionRouter.post('/:id/terms-token', async (req, res) => {
 // CONTRACT_MODE_NOT_TERMINAL otherwise.
 // ---------------------------------------------------------------------
 
+// GET /:id/terminal-options — which terminal registers the agent may choose
+// between at this session's pickup location (LAX Counter 1 / Counter 2).
+// Names + masked TPNs only, never a credential. Safe to poll; touches no
+// device.
+checkoutSessionRouter.get('/:id/terminal-options', async (req, res) => {
+  try {
+    res.json(await checkoutSessionService.getTerminalOptions({ id: req.params.id }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /:id/terminal-select — pin this checkout to one register (body
+// { registerId }; null clears the pin). Validated against the session's own
+// pickup location, and the resolver re-validates at charge time, so a stale
+// pick can never run on another counter's device. No paymentActions gate —
+// picking WHICH counter's device is the same class of act as putting a
+// clause on its screen.
+checkoutSessionRouter.post('/:id/terminal-select', async (req, res) => {
+  try {
+    res.json(await checkoutSessionService.selectTerminalRegister({
+      id: req.params.id,
+      registerId: req.body?.registerId ?? null,
+      actorUserId: req.user?.id,
+    }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // GET /:id/terminal-contract — the agent's ladder + the mode switch. Safe to
 // poll: it reads, resolves the mode, and touches no device.
 checkoutSessionRouter.get('/:id/terminal-contract', async (req, res) => {

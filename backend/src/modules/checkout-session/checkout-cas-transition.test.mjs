@@ -334,14 +334,16 @@ test('CANCELLED stays legal from wherever the winner left us — the retry commi
 // and finds a blank line stops trusting the whole list, which is the point of
 // having it. So the list is checked, not promised.
 
-test('every line number in the 14-writer inventory still points at what it claims', () => {
+test('every line number in the 15-writer inventory still points at what it claims', () => {
   const here = new URL('.', import.meta.url);
   const svc = readFileSync(new URL('checkout-session.service.js', here), 'utf8').split('\n');
   const comment = svc.join('\n');
 
   // Local entries: "name :READ → :WRITE" inside this file.
+  // 2026-09-04: selectTerminalRegister (the wizard's terminal picker) is the
+  // sixth in-file writer — same unguarded read-modify-write as the others.
   const local = [...comment.matchAll(/^\s*\/\/\s{3}(\w+)\s+:(\d+) → :(\d+)/gm)];
-  assert.equal(local.length, 5, 'expected the 5 in-file writers');
+  assert.equal(local.length, 6, 'expected the 6 in-file writers');
   for (const [, name, readLine, writeLine] of local) {
     assert.match(svc[Number(readLine) - 1], /prisma\.checkoutSession\.findUnique/, `${name} read line ${readLine}`);
     assert.match(svc[Number(writeLine) - 1], /events: appendEvent/, `${name} write line ${writeLine}`);
@@ -359,7 +361,7 @@ test('every line number in the 14-writer inventory still points at what it claim
     }
   }
   assert.equal(externalRefs, 9, 'expected 9 external references (5 + 1 + 1 + 1 + 1)');
-  assert.equal(local.length + externalRefs, 14, 'fourteen writers, all resolving');
+  assert.equal(local.length + externalRefs, 15, 'fifteen writers, all resolving');
 });
 
 // ── CONCURRENT_MODIFICATION — documented client contract, so it gets a test ─

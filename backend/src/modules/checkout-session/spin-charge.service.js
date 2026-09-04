@@ -299,17 +299,19 @@ function terminalNotConfiguredMessage(reason) {
       return 'This tenant has several terminal registers and this payment carries no pickup location to choose between them. Set the reservation\'s pickup location, or pick a register.';
     case 'NO_REGISTER_FOR_ID':
       return 'That terminal register no longer exists or has been disabled. Pick another in Settings → Payment Gateway → Registers.';
+    case 'REGISTER_LOCATION_MISMATCH':
+      return 'The terminal picked for this checkout belongs to a different location now. Pick one of this counter\'s own terminals and retry.';
     default:
       return 'This tenant has no payment terminal configured. Add the SPIn Auth Key and TPN in Settings → Payment Gateway → SPIn Terminal before taking a payment.';
   }
 }
 
-async function loadTenantSpinConfig(tenantId, { sessionId = null, locationId = null } = {}) {
-  const resolved = await resolveTenantTerminalConfig(tenantId, { locationId });
+async function loadTenantSpinConfig(tenantId, { sessionId = null, locationId = null, registerId = null } = {}) {
+  const resolved = await resolveTenantTerminalConfig(tenantId, { locationId, registerId });
 
   if (resolved.source === 'NONE' && !isSpinDryRun()) {
     logger.error('[spin-charge] refusing to charge — no payment terminal resolved for this tenant', {
-      sessionId, tenantId, locationId, reason: resolved.reason,
+      sessionId, tenantId, locationId, registerId, reason: resolved.reason,
     });
     throw new CheckoutSessionError(
       terminalNotConfiguredMessage(resolved.reason),
@@ -432,6 +434,9 @@ async function runChargeSequence({
     // terminal runs this, and makes "no register here" a refusal rather
     // than a charge on another branch's device.
     locationId: session.reservation.pickupLocationId || null,
+    // The agent's pick when this counter runs several devices. Same register
+    // the contract was signed on — one checkout, one terminal.
+    registerId: session.terminalRegisterId || null,
   });
   const refId = `${session.reservation.reservationNumber}-${Date.now().toString(36)}`;
 
@@ -807,6 +812,9 @@ async function runSale({ sessionId, amount, actorUserId }) {
     // terminal runs this, and makes "no register here" a refusal rather
     // than a charge on another branch's device.
     locationId: session.reservation.pickupLocationId || null,
+    // The agent's pick when this counter runs several devices. Same register
+    // the contract was signed on — one checkout, one terminal.
+    registerId: session.terminalRegisterId || null,
   });
   const refId = `${session.reservation.reservationNumber}-SALE-${Date.now().toString(36)}`;
 
@@ -991,6 +999,9 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
     // terminal runs this, and makes "no register here" a refusal rather
     // than a charge on another branch's device.
     locationId: session.reservation.pickupLocationId || null,
+    // The agent's pick when this counter runs several devices. Same register
+    // the sale ran on — one checkout, one terminal.
+    registerId: session.terminalRegisterId || null,
   });
   const depositRefId = `${session.reservation.reservationNumber}-DEP-${Date.now().toString(36)}`;
   const events = [];

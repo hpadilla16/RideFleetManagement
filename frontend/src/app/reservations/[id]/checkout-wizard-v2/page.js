@@ -39,6 +39,7 @@ import {
   paymentStepMode, PAYMENT_STEP_MODES,
   getTerminalContract, runTerminalClause, captureTerminalSignature,
   fallbackTerminalContract, terminalActionsFor,
+  getTerminalOptions, selectTerminalRegister,
 } from '../../../../lib/checkout-session';
 import QRCode from 'qrcode';
 
@@ -1261,6 +1262,75 @@ function Step2PhoneTerms({ session, reservation, token, onSigned }) {
 }
 
 /**
+ * Which terminal at THIS counter (2026-09-04). Renders only when the pickup
+ * location has more than one enabled register (LAX Counter 1 / Counter 2) —
+ * legacy single-terminal tenants and single-register branches see nothing.
+ * The pick is stored on the SESSION, so the contract, the sale and the deposit
+ * all run on the same device. When nothing is picked the backend uses the
+ * location's first register; the picker shows which one that is and nudges the
+ * agent to confirm it is the device in front of the renter.
+ */
+function TerminalPicker({ session, token }) {
+  const { t } = useTranslation();
+  const [info, setInfo] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    try {
+      setInfo(await getTerminalOptions({ id: session.id, token }));
+    } catch {
+      // The selector is a convenience read — it must never block the step.
+    }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session.id]);
+
+  if (!info || !info.selectable) return null;
+
+  const current = info.selectedRegisterId || info.options[0]?.id || '';
+  const pick = async (registerId) => {
+    setSaving(true); setError(null);
+    try {
+      setInfo(await selectTerminalRegister({ id: session.id, registerId, token }));
+    } catch (err) {
+      setError(err?.message || t('terminalPicker.error', 'Could not select that terminal'));
+      await load();
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 14px', padding: '8px 12px', background: '#F9FAFB', border: '0.5px solid #E5E7EB', borderRadius: 6 }}>
+      <span style={{ fontSize: 12, color: '#374151', fontWeight: 600 }}>
+        {t('terminalPicker.label', 'Terminal')}
+      </span>
+      <select
+        value={current}
+        disabled={saving}
+        onChange={(e) => pick(e.target.value)}
+        style={{ fontSize: 12.5, padding: '4px 8px', borderRadius: 6, border: '0.5px solid #D1D5DB', background: '#FFFFFF' }}
+      >
+        {info.options.map((o) => (
+          <option key={o.id} value={o.id} disabled={!o.complete}>
+            {o.name} · {o.maskedTpn}{o.complete ? '' : t('terminalPicker.incomplete', ' — not configured')}
+          </option>
+        ))}
+      </select>
+      {!info.selectedRegisterId ? (
+        <>
+          <button style={{ ...ghostBtn, fontSize: 11.5 }} disabled={saving} onClick={() => pick(current)}>
+            {t('terminalPicker.confirm', 'Use this terminal')}
+          </button>
+          <span style={{ fontSize: 11.5, color: '#92400e' }}>
+            {t('terminalPicker.autoNote', 'This counter has several terminals — confirm which device is in front of the renter.')}
+          </span>
+        </>
+      ) : null}
+      {error ? <span style={{ fontSize: 11.5, color: '#B91C1C' }}>{error}</span> : null}
+    </div>
+  );
+}
+
+/**
  * Step 2 on the Dejavoo QD2 — the agent's ladder.
  *
  * The mockup's rule, kept: THIS LADDER IS DRIVEN BY THE TERMINAL'S OWN
@@ -1375,6 +1445,8 @@ function Step2TerminalContract({ session, reservation, token, onSigned, onFellBa
         {t('terminalContract.hint',
           'Hand the QD2 to the renter. This list is driven by the terminal\'s own answers — it is not a timer.')}
       </p>
+
+      <TerminalPicker session={session} token={token} />
 
       {state.clauseLengthError ? (
         <div style={{ ...modalError, marginBottom: 14 }}>{state.clauseLengthError}</div>
@@ -1653,6 +1725,7 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
           ? `Customer already pre-paid. One card tap on the terminal will capture the card on file and place the $${depositAmount.toFixed(2)} security deposit hold.`
           : `Customer taps card once for the $${subtotal.toFixed(2)} rental sale, then enters their phone or email at the terminal. The $${depositAmount.toFixed(2)} deposit hold runs automatically against the saved card — no second tap.`}
       </p>
+      <TerminalPicker session={session} token={token} />
       <div style={{
         margin: '0 0 16px',
         padding: '10px 12px',
