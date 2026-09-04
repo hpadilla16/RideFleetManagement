@@ -6227,6 +6227,13 @@ model KioskSession {
   // VOZIA_BINDING_TTL_MIN. Nothing sweeps it — a stale row is harmless once no
   // code path honours it.
   voziaBoundAt DateTime?
+  // Who Valet SAYS is holding the assist grant. Stamped only by the remote path,
+  // alongside the same pair in the audit metadata, and named "asserted" for the
+  // same reason: RFM cannot see which human is behind the shared service account.
+  // It exists so a SECOND agent picking up the case can see the grant is already
+  // held and by whom, instead of discovering it by being refused.
+  assistAgentRef  String?
+  assistAgentName String?
   // Server-written marker (F1 truth): persistIdPhotos stored at least one
   // LICENSE photo for this session. eventsJson also carries ID_PHOTOS_STORED,
   // but the events endpoint accepts any client-fed name, so the assist-view

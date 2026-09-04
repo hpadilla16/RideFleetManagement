@@ -769,3 +769,46 @@ test('F3 remote override: the waiver comes from the SERVER column, never from th
     );
   }
 });
+
+test('F3 contract: the two TTL constants must not drift apart', async () => {
+  // ASSIST_GRANT_TTL_MIN is duplicated in kiosk-session.service.js (importing it
+  // would create a cycle, since staff-assist imports session). If they diverge,
+  // the console counts down against a deadline the server does not honour.
+  const sess = await import('./kiosk-session.service.js');
+  assert.equal(sess.ASSIST_GRANT_TTL_MIN, ASSIST_GRANT_TTL_MIN,
+    'the assist-view would advertise an expiry the override path does not enforce');
+});
+
+test('F3 contract: the assist block reports an ABSOLUTE expiry and who Valet says holds it', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  const sessionService = await import('./kiosk-session.service.js');
+
+  const before = await sessionService.kioskSessionService.assistView(SCOPE, 'ks1', { conversationId: CONV });
+  assert.deepEqual(before.assist, { open: false, expiresAt: null, heldBy: null },
+    'no grant reads as closed, not as absent');
+
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare on the barcode',
+  });
+  const after = await sessionService.kioskSessionService.assistView(SCOPE, 'ks1', { conversationId: CONV });
+  assert.equal(after.assist.open, true);
+  // An instant, never a duration: a locally counted duration drifts against the
+  // server that actually decides, and eventually lies to the agent.
+  assert.match(after.assist.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(new Date(after.assist.expiresAt).getTime() > Date.now());
+  assert.deepEqual(after.assist.heldBy, { ref: 'valet-agent-77', name: 'Marta Ruiz', assertedByValet: true },
+    'a second agent must see the grant is held, and by whom, before being refused');
+});
+
+test('F3 contract: an EXPIRED grant reads as closed, so the panel never shows a permit that is gone', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({
+    outcome: 'ESCALATED',
+    assistGrantedAt: new Date(Date.now() - (ASSIST_GRANT_TTL_MIN + 1) * 60 * 1000),
+    assistAgentRef: 'valet-agent-77', assistAgentName: 'Marta Ruiz',
+  });
+  const sessionService = await import('./kiosk-session.service.js');
+  const view = await sessionService.kioskSessionService.assistView(SCOPE, 'ks1', { conversationId: CONV });
+  assert.equal(view.assist.open, false, 'past its expiry the grant is closed');
+  assert.ok(view.assist.heldBy, 'but who held it is still visible — useful context, not authority');
+});

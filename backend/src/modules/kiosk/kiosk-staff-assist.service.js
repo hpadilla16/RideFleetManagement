@@ -556,7 +556,12 @@ async function remoteUnlock(scope, sessionId, body = {}) {
   const grantedAt = new Date();
   await prisma.kioskSession.update({
     where: { id: session.id },
-    data: { assistUserId: svc.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt },
+    data: {
+      assistUserId: svc.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt,
+      // So a second agent picking up the case sees the grant is already held,
+      // and by whom, instead of learning it by being refused.
+      assistAgentRef: agent.ref, assistAgentName: agent.name,
+    },
   });
   await prisma.auditLog.create({
     data: {

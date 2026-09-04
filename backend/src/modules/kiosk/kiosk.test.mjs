@@ -1283,7 +1283,11 @@ test('F1 assist-view: truth comes from SERVER columns, never from eventsJson; ex
   db.checkoutSessions.push({ id: 'cs1', tenantId: 't1', reservationId: 'res1', currentStep: 'PAYMENT_PENDING' });
 
   let view = await kioskSessionService.assistView({ tenantId: 't1' }, 'ks1', { conversationId: 'conv-1' });
-  assert.deepEqual(Object.keys(view), ['outcome', 'step', 'truth', 'timeline']);
+  // `assist` joined the contract with F3 (the console must be able to render an
+  // open permission after a reload instead of remembering it). Pinned here so the
+  // shape cannot grow again without someone deciding to.
+  assert.deepEqual(Object.keys(view), ['outcome', 'step', 'truth', 'assist', 'timeline']);
+  assert.deepEqual(Object.keys(view.assist), ['open', 'expiresAt', 'heldBy']);
   assert.deepEqual(view.truth, {
     idVerified: false, idVerifyMethod: null, vehicleAssigned: false,
     checkoutStep: 'PAYMENT_PENDING', paymentIntentState: null, idPhotosStored: false,

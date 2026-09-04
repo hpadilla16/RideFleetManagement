@@ -35,6 +35,11 @@ import { scopedSettingKey } from '../../lib/module-access.js';
 // 2h: longer than any real assisted check-in, far shorter than forever.
 export const VOZIA_BINDING_TTL_MIN = 120;
 
+// Mirrors ASSIST_GRANT_TTL_MIN in kiosk-staff-assist.service.js. Duplicated
+// rather than imported because that module imports THIS one, and a cycle here
+// would break at boot. A test pins the two to the same value.
+export const ASSIST_GRANT_TTL_MIN = 10;
+
 // Outcomes a conversation may still be bound to. ESCALATED belongs here: it is
 // the guest saying "I am stuck", which is when an agent is most needed.
 export const BINDABLE_OUTCOMES = ['IN_PROGRESS', 'ESCALATED'];
@@ -940,6 +945,7 @@ async function assistView(scope = {}, kioskSessionId, { conversationId } = {}) {
       select: {
         tenantId: true, outcome: true, step: true, voziaConversationId: true, voziaBoundAt: true,
         idVerifiedAt: true, idVerifyMethod: true, idPhotosStoredAt: true,
+        assistGrantedAt: true, assistAgentRef: true, assistAgentName: true,
         paymentIntentState: true, reservationId: true, checkoutSessionId: true,
         eventsJson: true,
       },
@@ -977,6 +983,24 @@ async function assistView(scope = {}, kioskSessionId, { conversationId } = {}) {
       paymentIntentState: enumOrNull(session.paymentIntentState),
       idPhotosStored: !!session.idPhotosStoredAt,
     },
+    // The assist grant, so the console can render it after a reload instead of
+    // remembering it. `expiresAt` is an ABSOLUTE server instant, deliberately
+    // not a duration: a duration counted down locally drifts against the server
+    // that actually decides, and a clock that drifts eventually lies to the
+    // agent about whether they still hold the permit. The clock is DISPLAYED
+    // TRUTH, never authority — the server refuses an expired grant whatever the
+    // panel shows. `heldBy` is what Valet asserted, and is named accordingly.
+    assist: (() => {
+      if (!session.assistGrantedAt) return { open: false, expiresAt: null, heldBy: null };
+      const expires = new Date(new Date(session.assistGrantedAt).getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000);
+      return {
+        open: expires.getTime() > Date.now(),
+        expiresAt: expires.toISOString(),
+        heldBy: session.assistAgentRef
+          ? { ref: session.assistAgentRef, name: session.assistAgentName || null, assertedByValet: true }
+          : null,
+      };
+    })(),
     timeline: projectAssistTimeline(session.eventsJson),
   };
 }
