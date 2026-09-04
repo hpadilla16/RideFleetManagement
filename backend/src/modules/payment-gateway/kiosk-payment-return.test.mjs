@@ -156,10 +156,37 @@ test('M1: a P2002 from the mirror means a concurrent return already wrote it —
   // Two returns pass the "no agreement row yet" read together; the partial unique
   // index makes the loser's insert fail. That is the floor working, not a failure.
   const { deps, calls } = fakes();
-  deps.mirrorToAgreement = async () => { const e = new Error('unique'); e.code = 'P2002'; throw e; };
+  // The shape Prisma actually emits for the partial index — measured, not assumed:
+  // the COLUMN LIST, not the index name.
+  deps.mirrorToAgreement = async () => {
+    const e = new Error('Unique constraint failed on the fields: (`rentalAgreementId`,`reference`)');
+    e.code = 'P2002'; e.meta = { modelName: 'RentalAgreementPayment', target: ['rentalAgreementId', 'reference'] };
+    throw e;
+  };
   const out = await kioskPaymentLinkService.handlePaymentReturn('Kmtn9zzQATEST01', deps);
   assert.equal(out.paid, true);
   assert.equal(calls.flags.length, 0, 'the row exists; staff must not be told the ledger failed');
+});
+
+test('M1: a P2002 on some OTHER unique is a real error — flagged and re-thrown, never swallowed', async () => {
+  // If anyone adds another unique to this table, or a cuid collides, the catch
+  // must not read it as "already mirrored". Only our (rentalAgreementId,reference)
+  // index earns that.
+  const { deps, calls } = fakes();
+  deps.mirrorToAgreement = async () => {
+    const e = new Error('Unique constraint failed on the fields: (`id`)');
+    e.code = 'P2002'; e.meta = { modelName: 'RentalAgreementPayment', target: ['id'] };
+    throw e;
+  };
+  await assert.rejects(() => kioskPaymentLinkService.handlePaymentReturn('Kmtn9zzQATEST01', deps), /Unique constraint/);
+  assert.equal(calls.flags.length, 1, 'a foreign unique violation is a ledger failure and staff must see it');
+});
+
+test('M1: a P2002 with NO meta is treated as real — the absence of proof is not proof', async () => {
+  const { deps, calls } = fakes();
+  deps.mirrorToAgreement = async () => { const e = new Error('unique'); e.code = 'P2002'; throw e; };
+  await assert.rejects(() => kioskPaymentLinkService.handlePaymentReturn('Kmtn9zzQATEST01', deps));
+  assert.equal(calls.flags.length, 1);
 });
 
 test('stamp is idempotent: a refreshed return does not move the recorded payment time', async () => {

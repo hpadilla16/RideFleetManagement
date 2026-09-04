@@ -214,7 +214,14 @@ async function handlePaymentReturn(rawRef, deps = {}) {
         // the partial unique index on (rentalAgreementId, reference) now makes
         // the loser's insert fail with P2002. That is the idempotency floor doing
         // its job — the row EXISTS — so it is neither a failure nor a flag.
-        if (String(err?.code) === 'P2002') {
+        // ONLY the unique this block expects. Prisma reports a violation of the
+        // partial index as P2002 with meta.target = ['rentalAgreementId','reference']
+        // (measured against Postgres, 2026-09-04 — the column list, not the index
+        // name). Any other P2002 — a future unique on this table, a cuid collision
+        // — is a real error and must not be swallowed as "already mirrored".
+        const targets = Array.isArray(err?.meta?.target) ? err.meta.target : [];
+        const isOurUnique = String(err?.code) === 'P2002' && targets.includes('reference');
+        if (isOurUnique) {
           logger.info('[kiosk-payment] agreement mirror already written by a concurrent return', {
             reservationId: reservation.id, reference: verdict.reference,
           });
