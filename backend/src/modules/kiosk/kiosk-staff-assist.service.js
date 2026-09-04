@@ -170,7 +170,7 @@ async function unlock(sessionId, device, { userId, pin } = {}) {
   const grantedAt = new Date();
   await prisma.kioskSession.update({
     where: { id: session.id },
-    data: { assistUserId: user.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt },
+    data: { assistUserId: user.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt, assistAgentRef: null, assistAgentName: null },
   });
   await prisma.auditLog.create({
     data: {
@@ -320,7 +320,7 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
       // queryable field that did not.
       idVerifyMethod: opts.remote === true ? 'REMOTE_AGENT_OVERRIDE' : 'STAFF_OVERRIDE',
       // grant consumed; assistUserId stays as the audit trail
-      assistGrantedAt: null,
+      assistGrantedAt: null, assistAgentRef: null, assistAgentName: null,
       // R1: a verified session must not stay name-update eligible — clear
       // the mismatch marker and any outstanding possession code.
       nameMismatchAt: null,
@@ -437,7 +437,7 @@ async function confirmName(sessionId, device, { fields, licensePhoto } = {}, opt
       // R1 hygiene: any outstanding possession code dies with the approval.
       nameUpdateCodeHash: null,
       nameUpdateCodeExpiresAt: null,
-      assistGrantedAt: null, // grant consumed; assistUserId stays for audit
+      assistGrantedAt: null, assistAgentRef: null, assistAgentName: null, // grant consumed; assistUserId stays for audit
       outcome: 'IN_PROGRESS',
       escalatedReason: null,
       endedAt: null,

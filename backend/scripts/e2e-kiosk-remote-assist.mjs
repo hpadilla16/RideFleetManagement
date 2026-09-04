@@ -16,7 +16,7 @@
  *      DATABASE_URL pointing at a database you do not mind seeding into.
  *   3. npm run test:e2e-kiosk-remote-assist
  *
- * It seeds its own disposable tenant on every run and asserts 27 properties.
+ * It seeds its own disposable tenant on every run and asserts 33 properties.
  * A NOTE THE RUN ITSELF TAUGHT US: the module grant is seeded BEFORE the first
  * request on purpose. Effective module access is cached per user inside the
  * backend process, so a grant written to the database after that user has been
@@ -210,6 +210,29 @@ async function run() {
   check(grantedRow.assistUserId === world.svc.id,
     'and the SESSION holds the same actor — one human across the whole chain');
   check(/Glare/.test(audit?.reason || ''), 'the stated reason survives to the audit');
+
+  console.log('\n7b. The guest is told, from the SERVER, that someone holds a permit');
+  // The kiosk asks its own session. The grant above was taken by the service
+  // account, which is not a person — so the guest gets the generic copy, not a
+  // bot's display name. verifiedBy stays null: nothing has been confirmed yet.
+  const told = await call(`/api/kiosk/sessions/${stuck.id}/assist-state`, { deviceToken: world.deviceToken });
+  check(told.status === 200 && told.body?.open === true, 'while the grant is open, the guest is told', `got ${told.status} ${JSON.stringify(told.body)}`);
+  check(told.body?.helperName === null, 'a service account yields NO name — never "VozIA Bot is helping you"');
+  check(told.body?.verifiedBy === null, 'nothing confirmed yet — the durable line must not appear early');
+  check(typeof told.body?.expiresAt === 'string', 'and an ABSOLUTE expiry, never a duration');
+  check(Object.keys(told.body || {}).sort().join() === 'expiresAt,helperName,open,verifiedBy',
+    'exactly the four fields — a guest-facing endpoint carries nothing else', Object.keys(told.body || {}).join());
+  // A VALID device that is not this session's device — the real case, not a bad
+  // token (that is the guard's 401 and proves nothing about scoping).
+  const otherToken = id('devtok2');
+  await prisma.kioskDevice.create({
+    data: {
+      id: id('dev2'), tenantId: world.tenantId, locationId: world.loc.id, name: 'E2E Kiosk 2',
+      status: 'ACTIVE', tokenHash: sha(otherToken),
+    },
+  });
+  const foreign = await call(`/api/kiosk/sessions/${stuck.id}/assist-state`, { deviceToken: otherToken });
+  check(foreign.status === 404, "another VALID device cannot ask about this session — scoped by deviceId, not just by having a token", `got ${foreign.status}`);
 
   console.log('\n8. Hard stops survive going remote');
   const noPhotos = await call(`/api/kiosk/admin/sessions/${stuck.id}/remote-assist/verify-id`, {

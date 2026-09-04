@@ -264,3 +264,32 @@
   .kio-h2 { font-size: 22px; }
   .kio-main { padding: 18px 16px 24px; }
 }
+
+/* The guest is told, on their own screen, that someone touched their check-in.
+
+   IN FLOW, on purpose. Two absolute placements each hid something real, and
+   both were measured with puppeteer: top:14px sat on the 79px kiosk bar and
+   covered EN/ES, Help and (portrait) the chat's close ✕; top:84px cleared the
+   bar and instead covered the five-step progress row (y79–121) for the whole
+   rest of the check-in. A banner that must never obscure anything cannot be
+   absolutely positioned over a layout it does not own. .kio-root is a fixed
+   flex column; in DOM order this sits after the progress row and before the
+   screen, so it displaces content instead of covering it — and .kio-main is
+   flex:1 with overflow-y:auto, so the height is absorbed, not exploded.
+
+   Still ABOVE the chat overlay: same stacking context (.kio-root, z 50), and
+   z 84 beats the overlay's 70. The agent toast (85, ~2.5s) paints over this
+   while it lives; this is the durable one. Calm on purpose — reassurance, not
+   alarm. Text colours measured 9.3:1 violet (AAA), 6.8:1 green (AA). */
+.kio-assist-notice {
+  position: relative; z-index: 84; flex: none;
+  margin: 8px auto 0; width: max-content; max-width: min(720px, calc(100% - 32px));
+  pointer-events: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 18px; border-radius: 999px;
+  font-size: 15px; font-weight: 600; line-height: 1.35; text-align: left;
+  box-shadow: 0 6px 20px -8px rgba(33, 26, 56, .35);
+}
+.kio-assist-notice--now  { background: #efe9fe; border: 1px solid rgba(135, 82, 254, .28); color: #4c1d95; }
+.kio-assist-notice--done { background: #e6f5ec; border: 1px solid rgba(16, 185, 129, .30); color: #065f46; }
+.kio-assist-notice span[aria-hidden="true"] { font-size: 18px; line-height: 1; }

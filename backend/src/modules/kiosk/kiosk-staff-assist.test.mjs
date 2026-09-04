@@ -880,3 +880,109 @@ test('F3 audit: the audited actor is the CALLER, not a service account we went l
   assert.deepEqual(meta.agentAssertedByValet, { ref: 'valet-agent-77', name: 'Marta Ruiz' });
   assert.equal(db.sessions.find((x) => x.id === 'ks1').assistUserId, 'u-admin');
 });
+
+/* ───────── What the GUEST is told about their own check-in ─────────
+ *
+ * Two facts, both from the SERVER, never from what the console claims:
+ *   THE PERMIT — transient: someone holds an assist grant right now.
+ *   THE ACT    — durable: their identity was confirmed by a person, in person or
+ *                remotely (idVerifyMethod), and it outlives the grant.
+ *
+ * QA on the first cut: the notice reported only the permit, and the permit is
+ * consumed the instant the override is applied — so in the routine case it lived
+ * for the agent's typing speed and a 5-second poll never observed it. The guest
+ * learned nothing. These pin the rework.
+ */
+
+async function stateOf(id = 'ks1') {
+  const sessionService = await import('./kiosk-session.service.js');
+  return sessionService.kioskSessionService.assistState(id, DEVICE);
+}
+
+test('assist notice: nothing to say when nobody has touched the check-in', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED' });
+  assert.deepEqual(await stateOf(), { open: false, expiresAt: null, helperName: null, verifiedBy: null });
+});
+
+test('assist notice: THE ACT survives the grant — a remote override is reported after the permit is spent', async () => {
+  // The case the first version lost entirely: unlock → verify in under one poll.
+  seedDeviceRow(); seedStaff();
+  seedBound({ outcome: 'ESCALATED', idPhotosStoredAt: new Date() });
+  seedWorld();
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare, two failed scans',
+  }, { id: 'u-admin', tenantId: 't1', role: 'ADMIN', isServiceAccount: false });
+  await kioskStaffAssistService.remoteVerifyId(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV,
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+  }, { id: 'u-admin', tenantId: 't1', role: 'ADMIN', isServiceAccount: false });
+  const out = await stateOf();
+  assert.equal(out.open, false, 'the grant was consumed by the verify');
+  assert.equal(out.verifiedBy, 'REMOTE', 'but the ACT is durable and says it was remote');
+  assert.equal(out.helperName, 'Ana Admin', 'named by the VERIFIED actor (User.fullName), not by what Valet asserted');
+});
+
+test('assist notice: the name is the VERIFIED actor — never the free text Valet asserted', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    agentRef: 'valet-x', agentName: 'Totally Trustworthy Manager', conversationId: CONV, reason: 'x',
+  }, { id: 'u-admin', tenantId: 't1', role: 'ADMIN', isServiceAccount: false });
+  const out = await stateOf();
+  assert.equal(out.open, true);
+  assert.equal(out.helperName, 'Ana Admin', 'the console does not get to name itself to the guest');
+  assert.notEqual(out.helperName, 'Totally Trustworthy Manager');
+});
+
+test('assist notice: a SERVICE ACCOUNT is not a person — no name, generic copy', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'x',
+  }, ACTOR); // ACTOR is u-svc, isServiceAccount:true, fullName 'VozIA Bot'
+  const out = await stateOf();
+  assert.equal(out.open, true);
+  assert.equal(out.helperName, null, '"VozIA Bot is helping you" would be an official-looking notice naming a robot');
+});
+
+test('assist notice: an IN-PERSON override is reported too, as in-person', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED', idPhotosStoredAt: new Date() });
+  seedWorld();
+  await unlockAsAdmin();
+  await kioskStaffAssistService.staffVerifyId('ks1', DEVICE, {
+    fields: { firstName: 'ROBERTO', lastName: 'DIAZ', dateOfBirth: '1985-04-02', licenseExpiry: '2030-01-01' },
+    licenseFrontPhoto: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    licenseBackPhoto: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+  });
+  const out = await stateOf();
+  assert.equal(out.verifiedBy, 'IN_PERSON');
+  assert.equal(out.helperName, 'Ana Admin');
+});
+
+test('assist notice: the permit closes on its own when it expires — no stale "helping you"', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({
+    outcome: 'ESCALATED', assistUserId: 'u-admin',
+    assistGrantedAt: new Date(Date.now() - (ASSIST_GRANT_TTL_MIN + 1) * 60 * 1000),
+  });
+  const out = await stateOf();
+  assert.equal(out.open, false);
+  assert.equal(out.expiresAt, null);
+});
+
+test('assist notice (M2): a remote agent\'s asserted name dies with the grant — an in-person unlock later must not carry it', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'x',
+  }, ACTOR);
+  // then a real employee at the counter takes over with their PIN
+  await unlockAsAdmin();
+  const row = db.sessions.find((x) => x.id === 'ks1');
+  assert.equal(row.assistAgentName, null, 'the remote assertion must not outlive its own grant');
+  assert.equal(row.assistUserId, 'u-admin');
+  const out = await stateOf();
+  assert.equal(out.helperName, 'Ana Admin', 'and the guest is told about the person actually there');
+});
+
+test('assist notice: a kiosk can only ask about its OWN session', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED', deviceId: 'other-dev' });
+  await assert.rejects(() => stateOf(), (e) => e.status === 404);
+});

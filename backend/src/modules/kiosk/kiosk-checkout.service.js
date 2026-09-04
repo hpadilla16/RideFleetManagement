@@ -1097,7 +1097,7 @@ async function complete(sessionId, device) {
       // person coming to help. There the TTL is what eventually retires it.
       data: {
         outcome: 'COMPLETED', step: 'DONE', endedAt: new Date(), lastActivityAt: new Date(),
-        assistGrantedAt: null, voziaConversationId: null, voziaBoundAt: null,
+        assistGrantedAt: null, assistAgentRef: null, assistAgentName: null, voziaConversationId: null, voziaBoundAt: null,
       },
     });
   }

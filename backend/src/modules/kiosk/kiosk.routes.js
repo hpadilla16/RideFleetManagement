@@ -209,6 +209,14 @@ kioskRouter.post('/sessions/:id/escalate', deviceGuards, ok(
   (req) => kioskSessionService.escalate(req.params.id, req.kioskDevice, req.body || {}),
 ));
 
+// GET /api/kiosk/sessions/:id/assist-state — what the GUEST is told while someone
+// is helping them remotely. Read from the server's grant columns, never from what
+// the console claims: the kiosk must not tell a guest something about their own
+// check-in that the server does not believe.
+kioskRouter.get('/sessions/:id/assist-state', deviceGuards, ok(
+  (req) => kioskSessionService.assistState(req.params.id, req.kioskDevice),
+));
+
 // POST /api/kiosk/sessions/:id/vozia-conversation — { conversationId } (F1
 // remote assist, plan MUST-CHANGE 3). Binds the session to the Valet
 // conversation the shell received over postMessage; null/'' clears it.

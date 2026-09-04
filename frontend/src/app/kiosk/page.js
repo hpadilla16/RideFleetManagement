@@ -23,6 +23,7 @@ import {
   KIOSK_ERR_UNPAIRED,
   acceptOffers,
   assignVehicle,
+  getAssistState,
   attachReservation,
   completeSession,
   createSession,
@@ -50,6 +51,7 @@ import { LicenseScanner } from '../../components/loaner/LicenseScanner';
 import { SignaturePad } from '../../components/kiosk/SignaturePad';
 import { StaffAssistScreen } from '../../components/kiosk/StaffAssistScreen';
 import { NameUpdateFlow } from '../../components/kiosk/NameUpdateFlow';
+import { AssistNotice } from '../../components/kiosk/AssistNotice';
 import { VoziaHelpOverlay } from '../../components/kiosk/VoziaHelpOverlay';
 import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
 import {
@@ -94,6 +96,7 @@ export default function KioskPage() {
   const [verifyResult, setVerifyResult] = useState(null);
   const [vehicle, setVehicle] = useState(null);
   const [offers, setOffers] = useState(null);
+  const [assistNotice, setAssistNotice] = useState(null);
   const [agreement, setAgreement] = useState(null);
   const [payState, setPayState] = useState('IDLE'); // IDLE | PAID | FAILED | DISABLED
   const [doneData, setDoneData] = useState(null);
@@ -195,6 +198,7 @@ export default function KioskPage() {
     setVerifyResult(null);
     setVehicle(null);
     setOffers(null);
+    setAssistNotice(null);
     setAgreement(null);
     setPayState('IDLE');
     setDoneData(null);
@@ -303,6 +307,42 @@ export default function KioskPage() {
    * WELCOME DO map (the guest genuinely has not found their reservation yet), so the very first
    * post — the one fired when the conversation identity arrives — always has something true to say.
    */
+  // Ask the SERVER what the guest should be told about their own check-in, for
+  // as long as a session is live — NOT only while the chat is open. The first
+  // version gated on the chat, so an in-person unlock with no chat never fired,
+  // and a failed unbind (best-effort, tablet offline) silenced the poll while a
+  // remote agent could still act. The gate is the session, which is server truth.
+  //
+  // 8s cadence. Cheap on the server (one PK read + at most one user lookup), and
+  // the DURABLE half of the notice — "your identity was confirmed by X" — does not
+  // depend on catching a transient grant inside any window at all. That was the
+  // real fix; the cadence is a courtesy for the "right now" line.
+  useEffect(() => {
+    // Gated on the session existing, full stop. An earlier version also checked
+    // session.outcome — but `session` is only ever written at creation and never
+    // refreshed client-side, so that gate could never fire and the comment
+    // promising it lied. The honest lifecycle: the poll lives exactly as long as
+    // the session object does, and resetAll (idle, Start over, the DONE
+    // countdown) clears it. The durable "confirmed by" line is MEANT to stay
+    // visible through DONE; it goes with the reset.
+    const sid = session?.id;
+    if (!sid) { setAssistNotice(null); return undefined; }
+    let stop = false;
+    const tick = async () => {
+      try {
+        const out = await getAssistState(sid);
+        if (!stop) setAssistNotice(out && (out.open || out.verifiedBy) ? out : null);
+      } catch {
+        // "We do not know" must read as no claim — never as a false alarm about
+        // the guest's own check-in. Transient; the next tick retries.
+        if (!stop) setAssistNotice(null);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 8000);
+    return () => { stop = true; clearInterval(id); };
+  }, [session?.id]);
+
   const postVoziaState = useCallback((screenName, errorCode = null) => {
     if (!vozia?.host || !voziaIdentityRef.current.conversationId) return;
     // step and stepNumber travel TOGETHER: an overlay repeats the last real
@@ -1039,6 +1079,8 @@ export default function KioskPage() {
       {progress > 0 ? <ProgressSteps t={t} current={progress} /> : null}
 
       {screen === 'BOOT' ? <div className="kio-main center" /> : null}
+      <AssistNotice state={assistNotice} t={t} />
+
       {screen === 'PAIRING' ? (
         <PairingScreen t={t} busy={busy} setBusy={setBusy} onPaired={(device) => { ui.setDevice(device); setScreen('WELCOME'); }} routeFatal={routeFatal} />
       ) : null}

@@ -292,6 +292,14 @@ export function sandboxPayment(sessionId) {
   });
 }
 
+// What the guest is told while someone is helping them from somewhere else. Read
+// from the server's own grant columns — never from what the Valet iframe claims,
+// because the kiosk must not tell a guest something about their own check-in that
+// the server does not believe.
+export function getAssistState(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/assist-state`);
+}
+
 export function completeSession(sessionId) {
   return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/complete`, {
     method: 'POST',

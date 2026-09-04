@@ -839,6 +839,57 @@ export const ASSIST_STEPS = Object.freeze(['WELCOME', 'LOOKUP', 'ID', 'UPSELL', 
 export const ASSIST_TIMELINE_CAP = 200;
 
 /**
+ * What the GUEST is told about their own check-in. Two facts, both from this
+ * server's columns — never from what the Valet console claims:
+ *
+ *  1. THE PERMIT — transient. Someone holds an assist grant right now.
+ *  2. THE ACT — durable. The identity was confirmed by a person, in person or
+ *     remotely. Read from idVerifyMethod, which F1 added to tell the two apart.
+ *
+ * The first version reported only the permit, and the permit is consumed the
+ * instant the override is applied — so in the routine case the notice lived for
+ * the agent's typing speed and a 5-second poll never observed it. The guest
+ * learned nothing. The act is what they need, and it outlives the grant.
+ *
+ * The name is the VERIFIED actor: User.fullName via assistUserId, the identity
+ * this system authenticated. Valet's asserted name belongs in the audit row,
+ * where its provenance travels with it — not on an official-looking notice in
+ * front of a guest. A service account is not a person: it yields null, and the
+ * copy says "someone from our team" rather than a bot's display name.
+ *
+ * Device-scoped: a kiosk can only ask about its own session.
+ */
+async function assistState(sessionId, device) {
+  const session = await getSessionForDevice(sessionId, device);
+
+  const method = String(session.idVerifyMethod || '');
+  const verifiedBy = (method === 'REMOTE_AGENT_OVERRIDE' || method === 'REMOTE_AGENT_NAME_OVERRIDE')
+    ? 'REMOTE'
+    : (method === 'STAFF_OVERRIDE' || method === 'STAFF_NAME_OVERRIDE')
+      ? 'IN_PERSON'
+      : null;
+
+  let open = false;
+  let expiresAt = null;
+  if (session.assistGrantedAt) {
+    const expires = new Date(new Date(session.assistGrantedAt).getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000);
+    open = expires.getTime() > Date.now();
+    expiresAt = open ? expires.toISOString() : null;
+  }
+
+  let helperName = null;
+  if ((open || verifiedBy) && session.assistUserId) {
+    const actor = await prisma.user.findUnique({
+      where: { id: session.assistUserId },
+      select: { fullName: true, isServiceAccount: true },
+    }).catch(() => null);
+    if (actor && !actor.isServiceAccount) helperName = actor.fullName || null;
+  }
+
+  return { open, expiresAt, helperName, verifiedBy };
+}
+
+/**
  * POST /sessions/:id/vozia-conversation — device-guarded binding of the
  * session to the Valet conversation the shell just received over postMessage.
  * Persists ONLY the conversation id (the secret stays in page memory).
@@ -1034,5 +1085,6 @@ export const kioskSessionService = {
   escalate,
   listSessions,
   bindVoziaConversation,
+  assistState,
   assistView,
 };
