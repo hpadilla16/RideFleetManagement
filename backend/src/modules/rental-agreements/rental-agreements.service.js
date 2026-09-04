@@ -5567,11 +5567,12 @@ export const rentalAgreementsService = {
       // RAIL RULE: the Transact client authenticates with the PLATFORM's
       // Transact credentials (env JWT/static token), so it may only touch
       // transactions that ran on the legacy env terminal. A tenant-resolved
-      // SPIn terminal (tenantConfig.spinTpn present) must send the refund
-      // through SPIn with the tenant's own credentials — using the platform
-      // Transact auth against another merchant's transaction is exactly the
-      // cross-merchant call tenant-terminal-config.js exists to prevent.
-      const useSpinRail = routed.rail === 'SPIN' || !!tenantConfig.spinTpn;
+      // SPIn terminal must send the refund through SPIn with the tenant's own
+      // credentials — using the platform Transact auth against another
+      // merchant's transaction is exactly the cross-merchant call
+      // tenant-terminal-config.js exists to prevent. Same discriminator as
+      // every other CNP op: usesSpinCnpRail (payment-gateway/cnp-rail.js).
+      const useSpinRail = routed.rail === 'SPIN' || usesSpinCnpRail(tenantConfig);
 
       if (useSpinRail) {
         if (resolvedTerminal.source === 'NONE') {
