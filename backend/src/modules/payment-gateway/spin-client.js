@@ -1,4 +1,5 @@
 import logger from '../../lib/logger.js';
+import { buildTerminalSaleL3, TERMINAL_L3_SKIP } from './terminal-sale-l3.js';
 
 /**
  * SPIn/iPOSPays REST API client.
@@ -209,6 +210,86 @@ async function spinRequest(method, path, body, tenantConfig = {}) {
   return data;
 }
 
+/**
+ * The Sale body, as a PURE function of its inputs.
+ *
+ * Extracted 2026-09-04 for one reason: scripts/probe-terminal-sale-l3.mjs must
+ * be able to PRINT the exact bytes it is about to charge with, and a probe that
+ * prints a reconstruction of the payload rather than the payload is a probe
+ * that can lie to you. Now there is one builder and both the live sale and the
+ * probe call it.
+ *
+ * What this does NOT include is the common block spinRequest() adds on the way
+ * out — Authkey, Tpn, MerchantNumber, SPInProxyTimeout, and CallbackInfo when a
+ * callback URL is configured. The probe says so where it prints.
+ *
+ * @returns {{body: object, l3Decision: object|null}} l3Decision is null when
+ *          the caller threaded no `level3` at all, which is today's every caller.
+ */
+export function buildSalePayload({
+  amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber,
+  cart, customFields, level3 = null,
+} = {}, tenantConfig = {}) {
+  // ⚠️ `amount` is passed to the L3 builder from HERE, never from the level3
+  // object, so the itemization is always checked against the money that is
+  // actually being charged. A level3.amount that disagreed with the Amount
+  // field would defeat the entire §5.3 invariant.
+  const { payload: l3Payload, decision } = level3
+    ? buildTerminalSaleL3({ ...level3, amount }, tenantConfig)
+    : { payload: {}, decision: null };
+
+  return {
+    body: {
+      Amount: Number(amount),
+      PaymentType: paymentType,
+      ReferenceId: String(referenceId).slice(0, 50),
+      ...(tipAmount ? { TipAmount: Number(tipAmount) } : {}),
+      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
+      // Spread BEFORE `cart` so an explicitly-passed Cart always wins over a
+      // generated one. A caller that hand-built a cart meant it.
+      ...l3Payload,
+      ...(cart ? { Cart: cart } : {}),
+      ...(customFields ? { CustomFields: customFields } : {}),
+      CaptureSignature: false,
+      GetExtendedData: true,
+    },
+    l3Decision: decision,
+  };
+}
+
+/**
+ * Say what happened to the L2/L3 enrichment, every time, before the money moves.
+ *
+ * Counts and totals only — NEVER charge names or the payload, which carry
+ * renter PII (autorental-validation.js says the same thing about the response
+ * side). A refusal is a WARN because it is the case worth noticing: either the
+ * amount legitimately is not the agreement total, or a charge row does not
+ * reconcile and we would otherwise never learn about it.
+ */
+function logL3Decision(decision, context = {}) {
+  if (!decision || !decision.enabled) return;
+  if (decision.skipped === TERMINAL_L3_SKIP.BUILDER_REFUSED) {
+    logger.warn('[spin-client] terminal L2/L3 REFUSED — sending the sale payload unchanged', {
+      ...context, reason: decision.reason, ...(decision.detail || {}),
+    });
+    return;
+  }
+  if (!decision.applied) {
+    logger.info('[spin-client] terminal L2/L3 not applied', { ...context, skipped: decision.skipped });
+    return;
+  }
+  logger.info('[spin-client] terminal L2/L3 attached to sale', {
+    ...context,
+    envelope: decision.envelope,
+    lineItemCount: decision.lineItemCount,
+    taxAmount: decision.taxAmount,
+    lineTotal: decision.lineTotal,
+    excludedDeposits: decision.excludedDeposits,
+    autoRental: decision.autoRental,
+    rentalClassId: decision.rentalClassId,
+  });
+}
+
 export const spinClient = {
   /**
    * Process a sale (charge).
@@ -223,22 +304,37 @@ export const spinClient = {
    * historically returned the iPOS token; we keep that and let the
    * downstream Transact CNP hold fall back to card-present if no
    * token comes back.
+   *
+   * 2026-09-04 — OPTIONAL `level3`. Level 2 / Level 3 data is what moves a
+   * card-present rental to the lower auto-rental interchange, and RFM has had
+   * the itemization all along. It rides here ONLY when:
+   *   • the caller threads a `level3` object (nobody does yet — see below), AND
+   *   • the tenant has the spinL3* flags on, which ALL DEFAULT OFF.
+   * With no `level3`, buildSalePayload produces the pre-2026-09-04 body field
+   * for field; that equivalence is asserted in terminal-sale-l3.test.mjs and is
+   * the reason this could be added to a live money path at all.
+   *
+   * ⚠️ GetExtendedData stays, untouched and unconditional. It is what returns
+   * the iPOS token that the deposit pre-auth is placed against
+   * (checkout-session/spin-charge.service.js: sale → extractCardOnFile → CNP
+   * PreAuth on that token). Adding L3 must not cost us the card on file, so
+   * the probe reports token presence at EVERY stage.
+   *
+   * NOT YET THREADED FROM CHECKOUT. spin-charge.service.js owns the live
+   * card-present flow and is being edited by another workstream; passing the
+   * agreement's charges from there is a one-line change and is deliberately
+   * left out of this branch. Until the probe says which fields the gateway
+   * takes, there is nothing to thread it for.
    */
   async sale({
     amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber,
-    cart, customFields,
+    cart, customFields, level3 = null,
   }, tenantConfig) {
-    return spinRequest('POST', 'v2/Payment/Sale', {
-      Amount: Number(amount),
-      PaymentType: paymentType,
-      ReferenceId: String(referenceId).slice(0, 50),
-      ...(tipAmount ? { TipAmount: Number(tipAmount) } : {}),
-      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
-      ...(cart ? { Cart: cart } : {}),
-      ...(customFields ? { CustomFields: customFields } : {}),
-      CaptureSignature: false,
-      GetExtendedData: true,
+    const { body, l3Decision } = buildSalePayload({
+      amount, referenceId, paymentType, tipAmount, invoiceNumber, cart, customFields, level3,
     }, tenantConfig);
+    logL3Decision(l3Decision, { referenceId: String(referenceId).slice(0, 50) });
+    return spinRequest('POST', 'v2/Payment/Sale', body, tenantConfig);
   },
 
   /**

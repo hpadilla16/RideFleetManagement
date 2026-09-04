@@ -1,0 +1,612 @@
+/**
+ * Level 2 / Level 3 on the TERMINAL sale (2026-09-04).
+ *
+ * The contract these tests defend, in order of how much it would cost to break:
+ *
+ *   1. WITH THE FLAGS OFF — which is the shipped default and every caller today
+ *      — the Sale body is byte for byte what it was before this change. This is
+ *      a live money path and that equivalence is the whole permission slip for
+ *      touching it.
+ *   2. GetExtendedData survives every configuration. It is what returns the
+ *      iPOS token the deposit pre-auth is placed against; adding L3 must not
+ *      cost us the card on file.
+ *   3. The §5.3 sum invariant is honoured by FALLING BACK, never by forcing.
+ *   4. RentalClassId is normalized. A raw ACRISS letter code is the documented
+ *      2026-05-23 StatusCode 2201.
+ *
+ * Transport is mocked throughout. Nothing here talks to a gateway.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { spinClient, buildSalePayload } from './spin-client.js';
+import {
+  getTerminalL3Config, buildTerminalSaleL3, buildAutoRentalBlock,
+  L3_ENVELOPE, TERMINAL_L3_SKIP, AUTO_RENTAL_COMMODITY_CODE,
+} from './terminal-sale-l3.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+// ---------------------------------------------------------------------------
+// Fixtures — rows that satisfy the invariant at a realistic amount, plus the
+// two kinds of row the builder must throw away.
+// ---------------------------------------------------------------------------
+const AMOUNT = 118.00;
+const TAX = 12.00;
+const ROWS = [
+  { name: 'Alquiler diario', chargeType: 'DAILY', quantity: 2, rate: 45, total: 90, taxable: true, sortOrder: 1 },
+  { name: 'Collision Damage Waiver', chargeType: 'UNIT', quantity: 1, rate: 20, total: 20, taxable: true, sortOrder: 2 },
+  { name: 'Discount', chargeType: 'UNIT', quantity: 1, rate: -4, total: -4, taxable: false, sortOrder: 3 },
+  { name: 'Security Deposit', chargeType: 'DEPOSIT', quantity: 1, rate: 250, total: 250, sortOrder: 90 },
+  { name: 'Tax', chargeType: 'TAX', quantity: 1, rate: TAX, total: TAX, sortOrder: 99 },
+];
+// 90 + 20 - 4 = 106; 106 + 12 = 118 ✓
+
+const L3IN = { charges: ROWS, taxAmount: TAX, taxRate: 11.5, agreementNumber: 'RA-1001', rentalDays: 2 };
+
+const ON = { spinL3Enabled: true, spinL3LineItems: true };
+const ON_AUTO = { ...ON, spinL3AutoRental: true };
+
+const AUTO_IN = {
+  agreementNumber: 'RA-1001',
+  rentalDays: 2,
+  renterName: 'Ana Pérez',
+  renterMobile: '7875550100',
+  vehicle: { make: 'Toyota', model: 'Corolla', classCode: 'ECAR' },
+  dailyRate: 45,
+  pickupAt: new Date('2026-09-10T14:00:00Z'),
+  returnAt: new Date('2026-09-12T14:00:00Z'),
+  pickupLocation: { address: '1 World Way', city: 'Los Angeles', state: 'CA', country: 'USA', code: 'LAX' },
+  returnLocation: { address: '1 World Way', city: 'Los Angeles', state: 'CA', country: 'USA', code: 'LAX' },
+  rentalDistance: 200,
+};
+
+/** The Sale body as it shipped before this change. Written out, not derived. */
+const LEGACY_BODY = {
+  Amount: 118,
+  PaymentType: 'Credit',
+  ReferenceId: 'REF-1',
+  InvoiceNumber: 'RA-1001',
+  CaptureSignature: false,
+  GetExtendedData: true,
+};
+
+// ===========================================================================
+// 1. The flags are off, and off means NOTHING CHANGED
+// ===========================================================================
+
+test('DEFAULT: every flag in the family is off', () => {
+  const cfg = getTerminalL3Config({});
+  assert.equal(cfg.enabled, false, 'the master switch ships off');
+  assert.equal(cfg.lineItems, false);
+  assert.equal(cfg.headerOnly, false);
+  assert.equal(cfg.autoRental, false);
+  assert.equal(cfg.envelope, L3_ENVELOPE.L3DATA);
+  assert.equal(cfg.summaryCommodityCode, '');
+});
+
+test('no level3 argument at all — the body is byte for byte the pre-change payload', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: 118, referenceId: 'REF-1', invoiceNumber: 'RA-1001' }, {},
+  );
+  assert.deepEqual(body, LEGACY_BODY);
+  assert.equal(l3Decision, null, 'a caller that threads nothing gets no decision to log');
+});
+
+test('level3 threaded but the tenant flag is OFF — still byte for byte the pre-change payload', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: 118, referenceId: 'REF-1', invoiceNumber: 'RA-1001', level3: { ...L3IN, autoRental: AUTO_IN } },
+    {},   // no flags
+  );
+  assert.deepEqual(body, LEGACY_BODY, 'the default tenant is untouched by this feature');
+  assert.equal(l3Decision.enabled, false);
+  assert.equal(l3Decision.skipped, TERMINAL_L3_SKIP.DISABLED);
+});
+
+test('the master flag alone does nothing — lineItems and autoRental are their own switches', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: 118, referenceId: 'REF-1', invoiceNumber: 'RA-1001', level3: { ...L3IN, autoRental: AUTO_IN } },
+    { spinL3Enabled: true },
+  );
+  assert.deepEqual(body, LEGACY_BODY);
+  assert.equal(l3Decision.applied, false);
+  assert.equal(l3Decision.skipped, TERMINAL_L3_SKIP.LINE_ITEMS_DISABLED);
+});
+
+test('flags on but NO charges threaded — not a failure, just nothing to itemize', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: 118, referenceId: 'REF-1', invoiceNumber: 'RA-1001', level3: { charges: [] } }, ON,
+  );
+  assert.deepEqual(body, LEGACY_BODY);
+  assert.equal(l3Decision.skipped, TERMINAL_L3_SKIP.NO_INPUTS);
+});
+
+// ===========================================================================
+// 2. The token contract — the other half of Hector's goal
+// ===========================================================================
+
+test('GetExtendedData and CaptureSignature are identical in EVERY configuration', () => {
+  const configs = [{}, { spinL3Enabled: true }, ON, ON_AUTO, { ...ON_AUTO, spinL3Envelope: 'CART' }];
+  for (const cfg of configs) {
+    const { body } = buildSalePayload(
+      { amount: 118, referenceId: 'REF-1', level3: { ...L3IN, autoRental: AUTO_IN } }, cfg,
+    );
+    assert.equal(body.GetExtendedData, true, 'the iPOS token is what the deposit pre-auth holds against');
+    assert.equal(body.CaptureSignature, false);
+  }
+});
+
+test('the sale response still yields a card-on-file token when L3 is on (dry-run transport)', async () => {
+  const res = await spinClient.sale(
+    { amount: 118, referenceId: 'REF-1', level3: { ...L3IN, autoRental: AUTO_IN } },
+    { ...ON_AUTO, spinDryRun: true },
+  );
+  const cof = spinClient.extractCardOnFile(res);
+  assert.ok(cof, 'no token means the deposit pre-auth has nothing to hold against');
+  assert.ok(cof.token);
+});
+
+// ===========================================================================
+// 3. Real line items, and what must never appear in them
+// ===========================================================================
+
+test('flags on: L3Data carries the CEDP header and the real lines', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'REF-1', invoiceNumber: 'RA-1001', level3: L3IN }, ON,
+  );
+  assert.ok(body.L3Data, 'the CEDP envelope');
+  assert.equal(body.L3Data.Header.TaxAmount, TAX);
+  assert.equal(body.L3Data.Header.LocalTaxFlag, 1);
+  assert.equal(body.L3Data.Header.PurchaseIdFormatCode, '3', 'Auto Rental Agreement Number');
+  assert.equal(body.L3Data.Header.PurchaseIdentifier, 'RA-1001');
+  assert.equal(body.L3Data.Header.LineItemCount, 3);
+  assert.equal(body.L3Data.items.length, 3);
+  assert.equal(l3Decision.applied, true);
+  assert.equal(l3Decision.lineItemCount, 3);
+  assert.equal(l3Decision.excludedDeposits, 1);
+  // Every mandatory CEDP field, on every line.
+  for (const i of body.L3Data.items) {
+    for (const f of ['Description', 'Quantity', 'UnitOfMeasure', 'UnitCost', 'TaxRate', 'DiscountAmount', 'DiscountIndicator', 'ExtLineAmount']) {
+      assert.ok(Object.prototype.hasOwnProperty.call(i, f), `missing ${f}`);
+    }
+  }
+});
+
+test('the DEPOSIT row never becomes a line, and never enters the money', () => {
+  const { body } = buildSalePayload({ amount: AMOUNT, referenceId: 'R', level3: L3IN }, ON);
+  const names = body.L3Data.items.map((i) => i.Description);
+  assert.equal(names.some((n) => /deposit/i.test(n)), false,
+    'deposits ride the separate PreAuth; a line here is double-counted money');
+});
+
+test('the synthesized TAX row never becomes a line — its money is already in the header', () => {
+  const { body } = buildSalePayload({ amount: AMOUNT, referenceId: 'R', level3: L3IN }, ON);
+  assert.equal(body.L3Data.items.some((i) => /^tax$/i.test(i.Description)), false);
+  const sum = body.L3Data.items.reduce((s, i) => s + i.ExtLineAmount, 0);
+  assert.equal(Number(sum.toFixed(2)) + body.L3Data.Header.TaxAmount, AMOUNT, '§5.3, to the cent');
+});
+
+test('a negative row is sent as a discount, and a Spanish name is transliterated', () => {
+  const { body } = buildSalePayload({ amount: AMOUNT, referenceId: 'R', level3: L3IN }, ON);
+  const disc = body.L3Data.items.find((i) => i.ExtLineAmount < 0);
+  assert.equal(disc.DiscountIndicator, true);
+  assert.equal(disc.DiscountAmount, 4);
+  const daily = body.L3Data.items.find((i) => /Alquiler/.test(i.Description));
+  assert.equal(daily.Description, 'Alquiler diario', 'the accent is stripped, not the word');
+  assert.equal(daily.UnitOfMeasure, 'DAY');
+});
+
+// ===========================================================================
+// 3b. Level 2 only — the header, no items
+// ===========================================================================
+
+test('headerOnly: the summary header rides with LineItemCount 0 and NO items', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', invoiceNumber: 'RA-1001', level3: L3IN },
+    { spinL3Enabled: true, spinL3HeaderOnly: true },
+  );
+  assert.equal(body.L3Data.items.length, 0);
+  assert.equal(body.L3Data.Header.LineItemCount, 0,
+    'claiming items we are not sending is the very mismatch the builder refuses');
+  assert.equal(body.L3Data.Header.TaxAmount, TAX);
+  assert.equal(body.L3Data.Header.LocalTaxFlag, 1);
+  assert.equal(body.L3Data.Header.PurchaseIdFormatCode, '3');
+  assert.equal(l3Decision.headerOnly, true);
+  assert.equal(l3Decision.applied, true);
+  assert.equal(l3Decision.lineItemCount, 0);
+});
+
+test('headerOnly derives the tax from the TAX row when none is passed', () => {
+  const { body } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: { charges: ROWS } },
+    { spinL3Enabled: true, spinL3HeaderOnly: true },
+  );
+  assert.equal(body.L3Data.Header.TaxAmount, TAX);
+});
+
+test('headerOnly refuses a tax claim that cannot be true', () => {
+  for (const bad of [-1, AMOUNT + 0.01, 9999]) {
+    const { body, l3Decision } = buildSalePayload(
+      { amount: AMOUNT, referenceId: 'R', level3: { charges: ROWS, taxAmount: bad } },
+      { spinL3Enabled: true, spinL3HeaderOnly: true },
+    );
+    assert.equal('L3Data' in body, false, `taxAmount ${bad} must not go on the wire`);
+    assert.equal(l3Decision.reason, 'TAX_NOT_WITHIN_AMOUNT');
+  }
+});
+
+test('lineItems wins over headerOnly — a full L3 block already contains the header', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: L3IN },
+    { spinL3Enabled: true, spinL3HeaderOnly: true, spinL3LineItems: true },
+  );
+  assert.equal(body.L3Data.items.length, 3);
+  assert.equal(l3Decision.headerOnly, false);
+});
+
+test('headerOnly under the CART envelope carries the tax as an Amounts entry', () => {
+  const { body } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: L3IN },
+    { spinL3Enabled: true, spinL3HeaderOnly: true, spinL3Envelope: 'CART' },
+  );
+  assert.equal(body.Cart.Items.length, 0);
+  assert.equal(body.Cart.Total, AMOUNT);
+  assert.equal(body.Cart.Amounts.find((a) => a.Name === 'Tax').Value, TAX);
+});
+
+// ===========================================================================
+// 4. The sum invariant — refuse, do not force
+// ===========================================================================
+
+test('SUM MISMATCH: the body falls back to today\'s payload and says why', () => {
+  const { body, l3Decision } = buildSalePayload(
+    // The amount is not the agreement total — the routine card-on-file case.
+    { amount: 40, referenceId: 'REF-1', invoiceNumber: 'RA-1001', level3: L3IN }, ON,
+  );
+  assert.equal('L3Data' in body, false, 'no half-built block ever goes on the wire');
+  assert.equal('Cart' in body, false);
+  assert.deepEqual(body, { ...LEGACY_BODY, Amount: 40 });
+  assert.equal(l3Decision.skipped, TERMINAL_L3_SKIP.BUILDER_REFUSED);
+  assert.equal(l3Decision.reason, 'SUM_MISMATCH');
+  assert.equal(l3Decision.detail.deltaCents, -7800, 'the detail is actionable, not a boolean');
+});
+
+test('a deposit-only amount refuses too — that is CORRECT, not a bug', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: 250, referenceId: 'R', level3: { charges: [ROWS[3]], taxAmount: 0 } }, ON,
+  );
+  assert.equal('L3Data' in body, false);
+  assert.equal(l3Decision.reason, 'NO_LINE_ITEMS');
+});
+
+test('the amount checked against the lines is the SALE amount, never one hidden in level3', () => {
+  const { body } = buildSalePayload(
+    // A level3.amount that disagrees must not be able to satisfy the invariant.
+    { amount: 40, referenceId: 'R', level3: { ...L3IN, amount: AMOUNT } }, ON,
+  );
+  assert.equal('L3Data' in body, false);
+  assert.equal(body.Amount, 40);
+});
+
+// ===========================================================================
+// 5. The Cart envelope — SPIn's own structure, with the fields it demanded
+// ===========================================================================
+
+test('CART envelope: Price on every item, a non-empty Amounts list, Total = the amount', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: L3IN }, { ...ON, spinL3Envelope: 'CART' },
+  );
+  assert.equal('L3Data' in body, false, 'one envelope at a time');
+  assert.ok(body.Cart);
+  assert.equal(l3Decision.envelope, L3_ENVELOPE.CART);
+  // "Price field is required for Items in Cart's Items List" — the gateway, 2026-05-22.
+  for (const i of body.Cart.Items) {
+    assert.equal(typeof i.Price, 'number');
+    assert.equal(i.CommodityCode, AUTO_RENTAL_COMMODITY_CODE);
+  }
+  // "List of Amounts required in Cart and it must contain at least one Amount".
+  assert.ok(body.Cart.Amounts.length >= 1);
+  assert.equal(body.Cart.Total, AMOUNT);
+  const total = body.Cart.Amounts.find((a) => a.Name === 'Total');
+  assert.equal(total.Value, AMOUNT, 'the totals row and the money agree by construction');
+  const tax = body.Cart.Amounts.find((a) => a.Name === 'Tax');
+  assert.equal(tax.Value, TAX, 'the tax figure IS the Level 2 datum');
+});
+
+test('an explicitly-passed Cart wins over a generated one', () => {
+  const mine = { Items: [{ Name: 'mine' }], Total: 1 };
+  const { body } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', cart: mine, level3: L3IN },
+    { ...ON, spinL3Envelope: 'CART' },
+  );
+  assert.deepEqual(body.Cart, mine, 'a caller that hand-built a cart meant it');
+});
+
+// ===========================================================================
+// 6. The AutoRental block — the half with four 2201s behind it
+// ===========================================================================
+
+test('autoRental flag OFF: the block is absent even when the inputs are threaded', () => {
+  const { body, l3Decision } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: { ...L3IN, autoRental: AUTO_IN } }, ON,
+  );
+  assert.equal('AutoRental' in body, false);
+  assert.equal(l3Decision.autoRental, false);
+  assert.ok(body.L3Data, 'the two halves are independent switches');
+});
+
+test('autoRental ON: the NESTED shape, under the body key SPIn actually wanted', () => {
+  const { body } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: { ...L3IN, autoRental: AUTO_IN } }, ON_AUTO,
+  );
+  // cc4efdd8: the key is `AutoRental`, not `RentalData`.
+  assert.ok(body.AutoRental);
+  assert.equal('RentalData' in body, false);
+  // 02af6407: a FLAT object crashed their parser with HTTP 500.
+  for (const k of ['AutoRentalAgreement', 'AutoRentalRenter', 'AutoRentalVehicle',
+    'AutoRentalPricing', 'AutoRentalPickup', 'AutoRentalReturn', 'AutoRentalDistance']) {
+    assert.equal(typeof body.AutoRental[k], 'object', `${k} must be a nested sub-object`);
+  }
+  assert.ok(body.AutoRental.AutoRentalAgreement.AutoRentalAdjustment,
+    'AutoRentalAdjustment nests inside AutoRentalAgreement');
+});
+
+test('RentalClassId is NORMALIZED — an ACRISS letter code is the documented 2201', () => {
+  const cases = [
+    ['ECAR', '9999'], ['SFAR', '9999'], ['', '9999'], [null, '9999'],
+    ['0001', '0001'], ['0012', '0012'], ['0032', '0032'], ['9999', '9999'],
+    ['0033', '9999'], ['0000', '9999'], ['12', '9999'], ['00123', '9999'],
+  ];
+  for (const [raw, want] of cases) {
+    const block = buildAutoRentalBlock({ vehicle: { classCode: raw } });
+    assert.equal(block.AutoRentalVehicle.RentalClassId, want, `${JSON.stringify(raw)} → ${want}`);
+  }
+});
+
+test('a numericClassCode, when a vehicle has one, is preferred over the ACRISS letters', () => {
+  const block = buildAutoRentalBlock({ vehicle: { numericClassCode: '0007', classCode: 'ECAR' } });
+  assert.equal(block.AutoRentalVehicle.RentalClassId, '0007');
+});
+
+test('ExtraCharges is exactly [\'NoExtraCharge\'] — [] and [\'\'] were both rejected live', () => {
+  const block = buildAutoRentalBlock(AUTO_IN);
+  assert.deepEqual(block.AutoRentalPricing.ExtraCharges, ['NoExtraCharge']);
+});
+
+test('dates are ISO or empty — never an Invalid Date on a parser that returns 500 for shape', () => {
+  const good = buildAutoRentalBlock(AUTO_IN);
+  assert.equal(good.AutoRentalPickup.DateTime, '2026-09-10T14:00:00.000Z');
+  const bad = buildAutoRentalBlock({ pickupAt: 'not a date', returnAt: null });
+  assert.equal(bad.AutoRentalPickup.DateTime, '');
+  assert.equal(bad.AutoRentalReturn.DateTime, '');
+});
+
+test('the AutoRental block carries the location fields, capped as they were on the accepted wire', () => {
+  const block = buildAutoRentalBlock({
+    ...AUTO_IN,
+    pickupLocation: { address: 'x'.repeat(200), city: 'y'.repeat(80), state: 'CA', country: 'USA', code: 'LAX' },
+  });
+  assert.equal(block.AutoRentalPickup.Address.length, 80);
+  assert.equal(block.AutoRentalPickup.City.length, 40);
+  assert.equal(block.AutoRentalPickup.LocationId, 'LAX');
+  assert.equal(block.AutoRentalPickup.RegionCode, 'CA');
+  assert.equal(block.AutoRentalPickup.CountryCode, 'US');
+});
+
+test('a missing renter name degrades to a placeholder, never to an empty required field', () => {
+  assert.equal(buildAutoRentalBlock({}).AutoRentalRenter.RenterName, 'Customer');
+});
+
+// ===========================================================================
+// 7. What actually reaches the wire
+// ===========================================================================
+
+test('spinClient.sale puts the built body on v2/Payment/Sale (transport mocked)', async () => {
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    seen.push({ url, body: JSON.parse(opts.body) });
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ GeneralResponse: { StatusCode: '0000', ResultCode: 0, Message: 'Approved' }, AuthCode: 'X1' }),
+    };
+  };
+  try {
+    await spinClient.sale(
+      { amount: AMOUNT, referenceId: 'REF-9', invoiceNumber: 'RA-1001', level3: { ...L3IN, autoRental: AUTO_IN } },
+      { ...ON_AUTO, spinAuthKey: 'k', spinTpn: '816026434206' },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].url, /v2\/Payment\/Sale$/, 'the SHIPPED rail — no endpoint change on a guess');
+  const sent = seen[0].body;
+  assert.ok(sent.L3Data, 'the L3 block reached the wire');
+  assert.ok(sent.AutoRental);
+  assert.equal(sent.GetExtendedData, true);
+  // The common block spinRequest adds.
+  assert.equal(sent.Tpn, '816026434206');
+  assert.ok(sent.Authkey);
+});
+
+test('with the flags off the wire body is the legacy one, common block aside', async () => {
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    seen.push(JSON.parse(opts.body));
+    return {
+      ok: true, status: 200, headers: { get: () => null },
+      text: async () => JSON.stringify({ GeneralResponse: { StatusCode: '0000', ResultCode: 0 }, AuthCode: 'X' }),
+    };
+  };
+  try {
+    await spinClient.sale({ amount: 118, referenceId: 'REF-1', invoiceNumber: 'RA-1001' },
+      { spinAuthKey: 'k', spinTpn: '816026434206' });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const { Authkey, Tpn, MerchantNumber, SPInProxyTimeout, ...rest } = seen[0];
+  assert.deepEqual(rest, LEGACY_BODY);
+});
+
+// ===========================================================================
+// 8. The probe's money-safety guarantees, asserted as text
+// ===========================================================================
+
+test('the probe exists and keeps every money-safety promise', () => {
+  const probe = fs.readFileSync(path.join(here, '../../../scripts/probe-terminal-sale-l3.mjs'), 'utf8');
+  assert.match(probe, /resolved\.source !== 'TENANT'/, 'never probes on the platform terminal');
+  assert.match(probe, /const APPLY = process\.argv\.includes\('--apply'\)/, 'charging requires --apply');
+  assert.match(probe, /if \(!APPLY\) \{\s*\n\s*console\.log\('     \(dry run — not sent\)'\);/,
+    'the default path prints and returns without sending');
+  assert.match(probe, /const MIN_AMOUNT = 1\.00;/, 'the default amount is the smallest useful one');
+  assert.match(probe, /ABOUT TO CHARGE \$\$\{AMOUNT\.toFixed\(2\)\} on TPN \$\{maskTpn\(resolved\.tpn\)\}/,
+    'says what it is about to charge, and on which terminal, before each stage');
+  assert.match(probe, /async function voidStage/, 'voids each approved stage');
+  assert.match(probe, /VOID DID NOT CONFIRM/, 'a failed void is shouted about');
+  assert.match(probe, /STILL CHARGED/, 'the summary names anything left live');
+  assert.match(probe, /maskTpn\(resolved\.tpn\)/, 'the TPN is masked, never printed raw');
+  assert.equal(/console\.log\([^)]*resolved\.authKey/.test(probe), false, 'the auth key is never printed');
+});
+
+test('the probe reports the token and the validation errors at every stage', () => {
+  const probe = fs.readFileSync(path.join(here, '../../../scripts/probe-terminal-sale-l3.mjs'), 'utf8');
+  const report = probe.slice(probe.indexOf('function report('), probe.indexOf('function explainThrow('));
+  assert.match(report, /extractCardOnFile/, 'the card-on-file half must be provably intact');
+  assert.match(report, /extractValidationErrors/, 'errors arrive INSIDE a 200 OK');
+  assert.match(report, /ARLFlag/, 'the positive signal');
+  assert.match(report, /RAW/, 'a probe that hides the response is not a probe');
+  // The failure path must decode them too — on a rejection they name the field.
+  const thrown = probe.slice(probe.indexOf('function explainThrow('), probe.indexOf('async function main('));
+  assert.match(thrown, /extractValidationErrors/);
+  assert.match(thrown, /2201/);
+});
+
+test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async () => {
+  // Imported, not string-matched: what the rungs actually BUILD is the thing
+  // worth asserting, because that is what gets charged.
+  const { buildStages, stagePayload } = await import('../../../scripts/probe-terminal-sale-l3.mjs');
+  const stages = buildStages({ amount: 1.00, agreementNumber: 'PROBE-T', taxRate: 11.5 });
+  assert.equal(stages.length, 6);
+  const p = stages.map((s) => stagePayload(s, 'REF').body);
+
+  // 1 — the control is today's payload and nothing else.
+  assert.deepEqual(p[0], {
+    Amount: 1, PaymentType: 'Credit', ReferenceId: 'REF', InvoiceNumber: 'PROBE-T',
+    CaptureSignature: false, GetExtendedData: true,
+  });
+
+  // 2 — adds the header, and ONLY the header.
+  assert.deepEqual(Object.keys(p[1]).filter((k) => !(k in p[0])), ['L3Data']);
+  assert.equal(p[1].L3Data.items.length, 0);
+  assert.equal(p[1].L3Data.Header.LineItemCount, 0, 'never claim items we are not sending');
+  assert.equal(p[1].L3Data.Header.TaxAmount, 0.10);
+
+  // 3 — same envelope, now with exactly one line.
+  assert.equal(p[2].L3Data.items.length, 1);
+  assert.equal(p[2].L3Data.Header.LineItemCount, 1);
+
+  // 4 — the full itemization; deposit and tax rows are NOT lines.
+  assert.equal(p[3].L3Data.items.length, 4);
+  const names = p[3].L3Data.items.map((i) => i.Description);
+  assert.equal(names.some((n) => /deposit/i.test(n)), false);
+  assert.equal(names.some((n) => /^tax$/i.test(n)), false);
+  assert.equal(p[3].L3Data.items.some((i) => i.UnitOfMeasure === 'DAY'), true);
+  assert.equal(p[3].L3Data.items.some((i) => i.UnitOfMeasure === 'EA'), true);
+  assert.equal(p[3].L3Data.items.some((i) => i.DiscountIndicator === true), true);
+  // The multi-quantity path must actually be exercised — a row that fails to
+  // reconcile collapses to Quantity 1 and silently stops testing it.
+  const daily = p[3].L3Data.items.find((i) => i.UnitOfMeasure === 'DAY');
+  assert.equal(daily.Quantity, 2);
+  assert.equal(Number((daily.Quantity * daily.UnitCost).toFixed(2)), daily.ExtLineAmount);
+  assert.equal('AutoRental' in p[3], false, 'stage 4 must not smuggle in stage 5\'s block');
+
+  // 5 — adds the AutoRental block, and only that.
+  assert.deepEqual(Object.keys(p[4]).filter((k) => !(k in p[3])), ['AutoRental']);
+  assert.deepEqual(p[4].L3Data, p[3].L3Data, 'the lines are held constant so the block is on trial alone');
+  assert.equal(p[4].AutoRental.AutoRentalVehicle.RentalClassId, '9999');
+
+  // 6 — the other envelope, same lines.
+  assert.equal('L3Data' in p[5], false);
+  assert.ok(p[5].Cart);
+  assert.equal(p[5].Cart.Items.length, 4);
+  assert.equal(p[5].Cart.Total, 1);
+
+  // Every rung is the same money, and every rung keeps the token flag.
+  for (const b of p) {
+    assert.equal(b.Amount, 1, 'no rung may charge more than --amount');
+    assert.equal(b.GetExtendedData, true);
+  }
+});
+
+test('the ladder refuses to build rungs it cannot make reconcile', async () => {
+  const { buildStages, syntheticCharges } = await import('../../../scripts/probe-terminal-sale-l3.mjs');
+  // Every amount the ladder will accept must produce rows that satisfy §5.3 —
+  // otherwise a live stage silently sends the CONTROL payload and the operator
+  // records a meaningless pass after tapping a card.
+  for (const amount of [1.00, 1.01, 1.37, 2.50, 5.00, 118.00, 407.35]) {
+    const stages = buildStages({ amount, agreementNumber: 'PROBE-T', taxRate: 11.5 });
+    for (const s of stages.slice(2)) {
+      const { l3Decision } = (await import('../../../scripts/probe-terminal-sale-l3.mjs')).stagePayload(s, 'R');
+      assert.equal(l3Decision.applied, true, `amount ${amount}, stage ${s.n}: ${l3Decision.skipped} ${l3Decision.reason}`);
+    }
+  }
+  // And below the floor it throws rather than building a cart that cannot work.
+  assert.throws(() => syntheticCharges(0.10), /too small/);
+});
+
+test('the probe builds its payload with the SAME function the live sale uses', () => {
+  const probe = fs.readFileSync(path.join(here, '../../../scripts/probe-terminal-sale-l3.mjs'), 'utf8');
+  assert.match(probe, /import \{ spinClient, buildSalePayload \}/,
+    'a probe that prints a reconstruction can lie to you');
+  const client = fs.readFileSync(path.join(here, 'spin-client.js'), 'utf8');
+  const sale = client.slice(client.indexOf('  async sale('), client.indexOf('  async auth('));
+  assert.match(sale, /buildSalePayload\(/, 'and sale() must use it too, or they can drift');
+});
+
+test('importing the probe does NOT run it — a script that charges cards must not charge on import', async () => {
+  const probe = fs.readFileSync(path.join(here, '../../../scripts/probe-terminal-sale-l3.mjs'), 'utf8');
+  assert.match(probe, /const invokedDirectly = process\.argv\[1\]/);
+  assert.match(probe, /if \(invokedDirectly\) \{/);
+  // If the guard were missing, importing it in the tests above would have tried
+  // to reach a database and a terminal. It did not.
+  const m = await import('../../../scripts/probe-terminal-sale-l3.mjs');
+  assert.equal(typeof m.buildStages, 'function');
+});
+
+// ===========================================================================
+// 9. The decision object is what gets logged — counts and money, never PII
+// ===========================================================================
+
+test('the decision carries no charge names, no renter, no payload', () => {
+  const { decision } = buildTerminalSaleL3(
+    { amount: AMOUNT, ...L3IN, autoRental: AUTO_IN }, ON_AUTO,
+  );
+  const blob = JSON.stringify(decision);
+  for (const pii of ['Alquiler', 'Pérez', 'Perez', '7875550100', 'World Way', 'Corolla']) {
+    assert.equal(blob.includes(pii), false, `${pii} must never reach a log line`);
+  }
+  assert.equal(decision.lineItemCount, 3);
+  assert.equal(decision.rentalClassId, '9999');
+});
+
+test('spin-client logs the decision but never the payload', () => {
+  const client = fs.readFileSync(path.join(here, 'spin-client.js'), 'utf8');
+  const fn = client.slice(client.indexOf('function logL3Decision('), client.indexOf('export const spinClient'));
+  assert.match(fn, /logger\.warn/, 'a refusal is worth noticing');
+  // Strip comments and the human-readable message strings; what is left is the
+  // code that chooses what data goes into the log.
+  const code = fn.replace(/\/\/.*$/gm, '').replace(/'[^']*'/g, "''");
+  for (const forbidden of ['body', 'payload', 'items', 'charges', 'Description', 'renter']) {
+    assert.equal(code.includes(forbidden), false,
+      `counts and totals only — ${forbidden} must not reach a log line`);
+  }
+  // Everything logged comes off the decision object, which test 32 proves is PII-free.
+  assert.equal(/\bdecision\.[A-Za-z]+/.test(code), true);
+});
