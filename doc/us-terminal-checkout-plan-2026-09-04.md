@@ -69,7 +69,7 @@ That is text-on-screen **and** an ink signature back, in one call, driven by our
 than by portal configuration. It is a completely separate code path from the inline
 Sale-Type disclaimer that failed in May.
 
-**This makes Hector's Step 2 buildable** — see §2.10 and §9 Phase 4. It does not make it free:
+**This makes Hector's Step 2 buildable** — see §2.10 and §10 Phase 4. It does not make it free:
 see the length constraint in §2.10 and open question D-20.
 
 Issue #13 (signature capture on the *transaction* via `CaptureSignature: true`) remains
@@ -87,6 +87,17 @@ optimization.
 | D2 | Terminal signing via `/v2/Common/Disclaimer` + `/GetSignature` | Medium (was "large/gated") |
 | D3 | Add a US profile to the shipped session (step order is already correct) | Small |
 | D4 | Pluggable identity ingest at pre-check-in | Small — both code paths already exist |
+
+### 0.4 …and none of it matters unless the merchant account is eligible
+
+AutoRental over SPIn has **account-level prerequisites that no amount of correct code can
+satisfy**: an auto-rental MCC (`7512`/`7513`/`7519`/`3390`), the **TSYS** processor, and terminal
+POS build ≥ `10177`. **Nobody checked any of these in May 2026** — the investigation stopped at
+the payload format bug.
+
+If the MCC is wrong, every field can be perfect and the interchange saving that is the entire
+economic case simply never arrives. If the processor is not TSYS, AutoRental may be unavailable
+outright. **§9 is the checklist, and it runs before any code.**
 
 ---
 
@@ -286,7 +297,7 @@ Characteristics:
 - **No polling.** One long-lived synchronous call held open up to `SPInProxyTimeout` (120 s)
   with a 130 s client `AbortController` backstop (`:36-40`, `:142-143`).
 - **`abort()` and `status()` exist but nothing in the repo calls them.** No cancel button is
-  wired to `AbortTransaction`. This project must wire it (§13 F7).
+  wired to `AbortTransaction`. This project must wire it (§14 F7).
 - **`terminalStatus()` bypasses `spinRequest`** (`:396-401`) — no timeout, no normalization,
   raw `res.json()`, and it does not decode the `Online/Offline/NotFound` enum.
 - Success detection is deliberately permissive (`:169-194`) after a 2026-05-28 incident where
@@ -557,14 +568,14 @@ backend/src/modules/payment-gateway/
   ├── spin-client.js                            ← + autoRentalSale/Auth/Capture, + common.*
   └── tenant-terminal-config.js                 ← + autoRental sub-block (§6.3)
 
-backend/src/modules/identity/                   ← NEW, §11.3
+backend/src/modules/identity/                   ← NEW, §12.3
   └── identity-ingest.service.js                ← one door, pluggable sources
 ```
 
 Design rules:
 
 1. **The builders are pure functions.** In → a loaded agreement graph; out → a plain object.
-   No DB, no fetch. This is what makes §10 work without a terminal.
+   No DB, no fetch. This is what makes §11 work without a terminal.
 2. **`spin-charge.service.js` keeps ownership of the money sequence.** The change swaps *which
    client method* runs — never the sale → tokenize → hold → rollback ordering, never the
    persistence.
@@ -931,7 +942,7 @@ entries carrying `envVar`, `label`, `settingsPath`. Its rule (`:90-93`): *"Addin
 call without adding it here is the bug coming back — the registry IS the inventory."*
 
 The AutoRental path needs **no** new entry: it inherits the tenant's own SPIn credential and
-never falls back to a platform AI-style key. The **identity ingest** in §11 does use it, via
+never falls back to a platform AI-style key. The **identity ingest** in §12 does use it, via
 the already-registered `kiosk-id-ocr` feature. Note `:76-80` says `SPIN_ALLOW_ENV_FALLBACK`
 **"is not the pattern to copy forward."**
 
@@ -1077,15 +1088,85 @@ check while the rail sends cents. **Carrying the pattern forward is part of this
 
 ---
 
-## 9. Build order — smallest shippable slice first
+## 9. Account-level prerequisites — the Phase 0 gate
+
+Source: `https://releases.ipospays.com/reduce-processing-costs-for-auto-rental-merchants`
+(Hector, 2026-09-04).
+
+Everything up to this point is about sending the right bytes. **This section is about whether
+the merchant account is eligible to receive them.** Three account-level conditions govern
+AutoRental over SPIn. None is visible from the API, none is something code can detect or work
+around, and each one independently nullifies the entire project.
+
+### 9.0 A second, independent explanation for why May 2026 failed
+
+The 2026-05 investigation (§0.1) stopped at the `RentalClassId` format bug, because fixing it
+made the terminal render the itemized cart — which looked like progress, and was. But
+**rendering a cart is not the same as qualifying for auto-rental interchange**, and nothing in
+`doc/round-26-followups-2026-05-23.md` records anyone checking the MCC, the processor or the POS
+build. The whole night went on payload format.
+
+So there are now two candidate root causes, and they are not mutually exclusive:
+
+1. the `RentalClassId` format bug — **confirmed, and fixed in code**; and
+2. an ineligible merchant account — **never checked, on any of the three axes below**.
+
+**Treat the `RentalClassId` fix as necessary but possibly not sufficient.** If the account is
+ineligible, restoring `normalizeRentalClassId()` will stop the 2201 and the terminal will
+happily process a transaction that is *still* not identified as auto-rental — the failure
+becomes silent and economic rather than loud and technical. That is a worse failure mode than
+the one we had, and §9.1 is what prevents it.
+
+### 9.1 The verification checklist — Hector runs this before any code is written
+
+A portal read and one email. It gates Phases 1b, 2 and 4.
+
+| # | Verify | Where | If it fails |
+|---|---|---|---|
+| **1** | **MCC is an auto-rental MCC: `7512`, `7513`, `7519` or `3390`** | iPOSpays portal → **Merchants → Search Merchant → Select Merchant (DBA) → Edit Store** | Transactions are **not identified as auto-rental**. Every field in §4 and §5 can be perfect and **the interchange benefit — the entire economic case for this project — never arrives.** Fixable, but an MCC change is an underwriting-level change to the merchant record, not a toggle: it goes through Dejavoo and takes as long as it takes |
+| **2** | **Processor is TSYS** | **Not visible in the portal — ask Dejavoo** (D-0) | **Potential hard blocker, not a checkbox.** Dejavoo's own certification material also names **RS2, EPX, Elavon and Fiserv Rapid Connect**, and a merchant sitting on any of those may have **no AutoRental support at all**. If IRC is not on TSYS, Phases 1b/2/4 may be unbuildable regardless of how correct our code is, and the honest fallback is the existing `v2/Payment` rail carrying whatever L2/L3 that processor does accept |
+| **3** | **Terminal POS build ≥ `10177`** | On the device itself | AutoRental is unavailable on that terminal. Lowest-risk of the three and self-service to fix — but it is **per device**, so a second terminal (§7) must be checked separately, and a field swap or RMA can silently regress it |
+
+**Order of operations: run #2 first.** It is the one that can end the project, it costs one
+email, and there is no point auditing MCCs on an account that cannot transact AutoRental at all.
+
+### 9.2 Two account settings that are not blockers but must be right
+
+| # | Setting | Detail |
+|---|---|---|
+| **4** | **`AgreementReferenceNumber` accepts up to 26 characters** | RFM's format is `RA-YYYYMMDDHHMMSS-NNNN` — **22 characters** (`rental-agreements.service.js:192-196`); the release note's own example, `RA-2026-0041188`, is 15. **Both fit with room to spare.** Stated explicitly so nobody truncates defensively: a truncated agreement number is a broken join between the card statement and the rental record, which is precisely the chargeback evidence the L3 data exists to provide. **Do not slice this field** |
+| **5** | **Receipt toggle "Auto Rental Details" = Yes/No** | **S.T.E.A.M → Edit Parameters → Select Merchant → Edit Parameter → Receipt.** Controls whether the agreement number prints on the customer receipt. **Recommend Yes** — the printed agreement number is what lets a counter agent tie a disputed card charge to a rental without opening RFM, and it is the customer-visible half of the same evidence trail |
+
+### 9.3 What this changes about the build order
+
+- **Phase 1a is unaffected and should proceed regardless.** Real L3 line items on the existing
+  Transact CNP path (§10) improve data quality on transactions that already run today; they do
+  not depend on auto-rental interchange, on the MCC, or on the processor. Another reason it is
+  the right first slice.
+- **Phases 1b, 2 and 4 do not start until §9.1 passes**, because a green result there is the
+  difference between "we shipped an interchange optimization" and "we shipped risk for no
+  benefit".
+- **If §9.1 #2 fails, the project's shape changes entirely**: it becomes a merchant-account
+  conversation with Dejavoo, and the engineering fallback is Phase 1a plus whatever L2/L3 the
+  incumbent processor accepts on the existing rail. Say that to Hector plainly rather than
+  building toward a benefit that cannot land.
+
+---
+
+## 10. Build order — smallest shippable slice first
 
 Every phase is independently revertible and behind `autoRental.enabled` per tenant.
 
-### Phase 0 — Paper (no code)
-Confirm D-1 (host), **D-17 (is this TPN provisioned for AutoRental + L2/L3)**, D-18 (does the
-processor allow Void Auth), D-5 (`RegionCode`/`CountryCode`/`LocationId` semantics), and D-20
-(`Disclaimer.Title` length). Get H-1 (signing model) and H-2 (inspection default) from Hector.
-**Do not start Phase 1b without D-17.**
+### Phase 0 — Paper and portal (no code)
+**Run the §9.1 account-eligibility checklist first — MCC, processor, POS build.** It can end or
+reshape the project, and it costs one portal read and one email.
+
+Then confirm D-1 (host), **D-17 (is this TPN provisioned for AutoRental + L2/L3)**, D-18 (does
+the processor allow Void Auth), D-5 (`RegionCode`/`CountryCode`/`LocationId` semantics), and
+D-20 (`Disclaimer.Title` length). Get H-1 (signing model) and H-2 (inspection default) from
+Hector.
+
+**Do not start Phase 1b without D-0 and D-17.**
 
 ### Phase 1a — Real L3 on the rail that needs no terminal *(the true smallest slice)*
 Build `autorental-l3.builder.js` + `autorental-validation.js` (including the flat→nested map)
@@ -1118,7 +1199,7 @@ Ship to IRC only. **The checkout UX is identical to today.** This is the slice a
 touches, and it proves L2/L3 in production with no UX risk.
 
 ### Phase 3 — Pluggable identity ingest at pre-check-in
-§11.3. Fully independent; could ship earlier.
+§12.3. Fully independent; could ship earlier.
 
 ### Phase 4 — Terminal prompts and terminal signing
 `terminal-prompts.service.js` over `/v2/Common/*`, and whichever signing model H-1 selects.
@@ -1131,7 +1212,7 @@ Location-scoped terminals + second-TPN support (§7); ACRISS-numeric class map r
 
 ---
 
-## 10. Test strategy — most of it needs no terminal
+## 11. Test strategy — most of it needs no terminal
 
 Tests are `node:test` + `node:assert/strict`.
 
@@ -1175,9 +1256,9 @@ reservation" as a **manual-void situation** and say so in the runbook.
 
 ---
 
-## 11. Identity capture at pre-check-in
+## 12. Identity capture at pre-check-in
 
-### 11.1 Terminal ID scanning is not available over the API
+### 12.1 Terminal ID scanning is not available over the API
 
 The iPOSpays **Scanner Reader SDK** (https://docs.ipospays.com/scanner-reader-sdk) is an
 **Android SDK for apps that run on the terminal** — Kotlin/Java, `ScannerActivity`,
@@ -1199,7 +1280,7 @@ What *does* move data terminal → integrator, none of which the scanner SDK is 
 `/v2/Common/UserInput`, the only API-callable way to get arbitrary typed data off the screen —
 manual keying, no scan.
 
-### 11.2 RFM already has two working ID paths
+### 12.2 RFM already has two working ID paths
 
 **(a) AAMVA PDF417 barcode parser — `frontend/src/lib/aamva.js`.** `parseAamva(text)` at `:73`,
 element map at `:13-27`, handling both MMDDYYYY (US) and CCYYMMDD date encodings (`:41-59`).
@@ -1235,7 +1316,7 @@ feeds `lib/deposit-rules.js` and therefore the LAX local/non-local deposit tier.
 data means the deposit is decided on real data instead of the conservative "undeterminable ⇒
 LOCAL" default.
 
-### 11.3 The design: one door, pluggable sources
+### 12.3 The design: one door, pluggable sources
 
 **This is the architecturally important part, and it is what keeps the terminal-app decision
 cheap and reversible.**
@@ -1290,7 +1371,7 @@ including `dateOfBirthEnc` (encrypted `encf:v1`; when set, `dateOfBirth` is null
 **Phase 3 ships sources `OCR_PHOTO`, `AAMVA_BARCODE` and `MANUAL` behind this door.**
 `TERMINAL_SCAN` is a later addition that changes nothing else.
 
-### 11.4 Terminal ID scanning — a later accelerator, not a dependency
+### 12.4 Terminal ID scanning — a later accelerator, not a dependency
 
 **It is buildable, and the gate is DvStore.** The Scanner Reader SDK's own prerequisites are a
 **DvStore listing, a valid TPN, and merchant onboarding** — a custom app is published to
@@ -1306,7 +1387,7 @@ path; SPIn semi-integration is.
    already does this in JS and could be ported, which lowers this considerably.)
 3. Build and secure a **terminal→RFM transport**: per-device auth, TLS, replay protection, and
    **reservation pairing** — the terminal must know *which* reservation a scan belongs to.
-   There is no documented supported channel (§11.1), so this is entirely ours.
+   There is no documented supported channel (§12.1), so this is entirely ours.
 4. **DvStore listing and approval**, on Dejavoo's schedule, before a single device can install
    it.
 5. Ongoing updates pushed through the store to physical devices in the field, with a rollback
@@ -1324,14 +1405,14 @@ path; SPIn semi-integration is.
 - The customer is already standing at the terminal, which they are not necessarily standing at
   a tablet.
 
-**Recommendation:** ship §11.3 now with OCR and barcode-on-device sources. Open the DvStore
+**Recommendation:** ship §12.3 now with OCR and barcode-on-device sources. Open the DvStore
 conversation with Dejavoo in parallel (D-25/26/27) so the option stays live. If it is
 straightforward, `TERMINAL_SCAN` becomes a new source behind an existing door and everything
-else is unchanged — which is exactly what §11.3 exists to guarantee.
+else is unchanged — which is exactly what §12.3 exists to guarantee.
 
 ---
 
-## 12. Money invariants — inherited, not re-litigated
+## 13. Money invariants — inherited, not re-litigated
 
 **M-1 — Never a silent fallback.** `source` is always reported and logged; a `NONE` resolution
 fails the operation **before** any provider call (`tenant-terminal-config.js:64-66`). A
@@ -1382,23 +1463,23 @@ bug #44. The plan reuses the existing finalize path precisely so this cannot be 
 best-effort and can fail while `transition()` still returns 200
 (`checkout-session.service.js:895-904`). Preserve the four-valued verdict (`page.js:273-299`).
 
-**M-11 — Identity data is advisory until a human confirms it.** §11.3. No OCR or scan result is
+**M-11 — Identity data is advisory until a human confirms it.** §12.3. No OCR or scan result is
 ever written straight to a legal record.
 
 ---
 
-## 13. Step machine, failure states, and fallbacks
+## 14. Step machine, failure states, and fallbacks
 
 | Hector | Session step | What runs |
 |---|---|---|
-| 1 Verify info | `CONFIRMING` | Agent confirms renter details (prefilled per §11) |
+| 1 Verify info | `CONFIRMING` | Agent confirms renter details (prefilled per §12) |
 | 2 Initial + sign | `TC_PENDING` → `TC_SIGNED` | Per `signingMode`: PHONE (today), TERMINAL (`Disclaimer` × N + `GetSignature`), or HYBRID. Guard: `tcCompletedAt` |
 | 3 Payment + tokenize | `PAYMENT_PENDING` → `PAID` | `AutoRental/Sale`, token persisted. Guard: `paymentCompletedAt` |
 | 4 Deposit capture | inside the same step | `AutoRental/Auth` using the step-3 token |
-| — Inspection | `INSPECTION_HANDOFF` → `INSPECTION_IN_PROGRESS` → `CUSTOMER_SIGN_PENDING` | Agent-led or customer-led (§13.2) |
+| — Inspection | `INSPECTION_HANDOFF` → `INSPECTION_IN_PROGRESS` → `CUSTOMER_SIGN_PENDING` | Agent-led or customer-led (§14.2) |
 | — Close | `FINALIZING` → `CLOSED` | Guard: `customerSignedAt` |
 
-### 13.1 Failure states
+### 14.1 Failure states
 
 **Every failure falls back to today's flow, never to a different money rail** (M-3), and every
 fallback is a human decision.
@@ -1421,11 +1502,11 @@ fallback is a human decision.
 | F14 | Session abandoned with an open hold | Nightly sweep (scheduler:6-13) | Record outstanding work — never stamp released. `STRANDED_DEPOSIT_HOLD` | Staff releases via the ops queue |
 | F15 | `Disclaimer` / `GetSignature` fails or is unsupported | Phase 1b experiment, or a live `ResultCode ≠ 0` | Set `signingMode: 'PHONE'`; do not ship terminal signing | Today's phone signing (`POST /:id/terms-token`, routes:190) — fully shipped |
 | F16 | Section text too long for `Disclaimer.Title` | Build-time length check against the confirmed cap (D-20) | Refuse to enter TERMINAL mode for that tenant; log which section | HYBRID or PHONE |
-| F17 | Override rewind on a terminal-paid reservation | Manual action | **Hold is not voided by the rewind** (§10) | Manual void; runbook |
+| F17 | Override rewind on a terminal-paid reservation | Manual action | **Hold is not voided by the rewind** (§11) | Manual void; runbook |
 | F18 | Two terminals, wrong one prompts, or `2005` | `2005 Active route not found` = two devices on one TPN | Preflight distinctness check (§7) | Provision a second TPN; location-scoped resolution |
 | F19 | Finalize cascade fails while `transition()` returns 200 | M-10 | Closed card shows `failed`, offers retry | `retryFinalize()` re-POSTs `CLOSED → CLOSED` (`page.js:393-406`) — self-heals only reservations in `['NEW','CONFIRMED']` (`checkout-session.service.js:793`) |
 
-### 13.2 Inspection stays configurable — no change needed
+### 14.2 Inspection stays configurable — no change needed
 
 Already tenant-configurable via AppSetting `tenant:<id>:customerInspectionConfig`, shape
 `{ enabled: boolean, checkinModel: 'AGENT' | 'CUSTOMER' }`, default
@@ -1445,12 +1526,13 @@ desktop" (`:1944`).
 
 ---
 
-## 14. Open questions
+## 15. Open questions
 
 ### For Dejavoo (devsupport@dejavoo.io)
 
 | # | Question |
 |---|---|
+| **D-0** | **THE GATING QUESTION — ask this first, before any other. Which processor is each of our merchant accounts on, and is the MCC already one of the four auto-rental codes (`7512`, `7513`, `7519`, `3390`)?** AutoRental over SPIn is documented as requiring **TSYS**; your certification material also names RS2, EPX, Elavon and Fiserv Rapid Connect, so we need to know whether International Rental Corp (TPN `…9362`, LAX) can transact AutoRental **at all**. This single answer determines whether the AutoRental phases are buildable. If the MCC is wrong, what is the process and timeline to change it? (§9) |
 | D-1 | **Host.** Is AutoRental served from `api.spinpos.net` (where our live traffic goes, and where our 2026-05 AutoRental attempts reached the terminal) as well as `spinpos.net`? Same service? |
 | D-4 | Full semantics of `AutoRentalAdjustment` — when is it required, and what do `AdjustmentAuditIndicatorCode` values `X`/`Y`/`Z` mean? |
 | D-5 | `LocationId`, `RegionCode`, `CountryCode` in Pickup/Return: Dejavoo-assigned, industry codes, or merchant-defined? What happens if each is omitted? |
@@ -1480,6 +1562,7 @@ desktop" (`:1944`).
 
 | # | Question |
 |---|---|
+| **H-0** | **Run the §9.1 checklist against the real LAX / IRC merchant record before we write any code** — MCC is `7512`/`7513`/`7519`/`3390` (Merchants → Search Merchant → Select Merchant (DBA) → Edit Store), processor is TSYS (ask Dejavoo, D-0), terminal POS build ≥ `10177`. Also set the "Auto Rental Details" receipt toggle (§9.2 #5). This is a portal read plus one email, and it decides whether Phases 1b/2/4 happen at all. Nobody checked any of it in May 2026 (§9.0). |
 | **H-1** | **Signing model.** `/v2/Common/Disclaimer` shows text **and returns an ink signature**, so per-section initials on the terminal are technically possible — one call per section. But the text must be short enough for a QD2 screen (D-20), and our sections are not. Options: **(A) HYBRID** — terminal shows a short binding summary per section and captures each initial, with the full text on the printed/emailed agreement; **(B) TERMINAL** — full sections, only if D-20 allows; **(C) PHONE** — status quo. This is a legal call, not an engineering one. |
 | **H-2** | Inspection default for the US profile: agent-led or customer-led? Both already work. |
 | H-3 | Is a **second terminal** at LAX in scope now? Note it needs a **second TPN** — there is no other mechanism (§7). |
@@ -1494,11 +1577,11 @@ desktop" (`:1944`).
 | H-12 | `RentalAgreementPayment` still has **no `gateway` field** (schema:2632; flagged 2026-06-02, never done). Add it in Phase 2? Additive, low risk. Note the existing casing inconsistency: `'ipos'` vs `'SPIN'` vs `'spin'`. |
 | H-13 | The canonical agreement's five `{{INITIALS_*}}` markers (`lib/terms/index.js:43-49`) are a different, older set from the six `TC_SECTIONS` keys. Reconcile before building terminal signing on either? |
 | **H-14** | **Policy: the sale approves but `L2L3ValidationError` is populated.** The customer has paid; the interchange qualification is lost. Recommended: record the payment and raise a `PaymentOpsFlag` naming the fields — never void a good sale over a reporting defect. Confirm. |
-| H-15 | Open the **DvStore** conversation with Dejavoo now (D-25/26/27) so terminal scanning stays a live option, even though §11.3 makes it a later addition rather than a dependency? |
+| H-15 | Open the **DvStore** conversation with Dejavoo now (D-25/26/27) so terminal scanning stays a live option, even though §12.3 makes it a later addition rather than a dependency? |
 
 ---
 
-## 15. Things this plan deliberately does not do
+## 16. Things this plan deliberately does not do
 
 - **No new checkout wizard.** The existing session, state machine and 2 549-line page absorb a
   profile through the `paymentStepMode` seam (§2.2).
@@ -1508,8 +1591,8 @@ desktop" (`:1944`).
 - **No `RegisterId`.** The docs mark it obsolete on every endpoint.
 - **No sandbox re-introduction.** Removed on purpose 2026-05-29 (`spin-client.js:9-18`). Use
   `SPIN_DRY_RUN`.
-- **No terminal-side Android app in this project.** §11.4 documents the cost, the DvStore gate
-  and the real advantages; §11.3 makes adding it later a new source behind an existing door.
+- **No terminal-side Android app in this project.** §12.4 documents the cost, the DvStore gate
+  and the real advantages; §12.3 makes adding it later a new source behind an existing door.
 - **No DvPayLite.** It exists; SPIn semi-integration is our path.
 - **No automatic fallback between transaction families.** M-3.
 - **No re-derivation of the LAX deposit decision.** Frozen at reservation time (M-7).
@@ -1541,7 +1624,7 @@ desktop" (`:1944`).
 | `backend/src/modules/settings/settings.service.js` | The write-only credential contract; `customerInspectionConfig` |
 | `backend/src/lib/setting-secret-crypto.js` | `enci:` AES-256-GCM, dual-read, blank-means-keep |
 | `backend/src/modules/reservations/reservation-pricing.service.js` | Charge groups, the money rollup, `isDepositCharge()` |
-| `backend/src/modules/kiosk/kiosk-id-ocr.extract.js` | Identity source (b) — the field shape §11.3 standardizes on |
+| `backend/src/modules/kiosk/kiosk-id-ocr.extract.js` | Identity source (b) — the field shape §12.3 standardizes on |
 | `frontend/src/lib/aamva.js` | Identity source (a) — AAMVA PDF417 parser, already written |
 | `backend/src/lib/tenant-provider-credential.js` | The per-tenant credential registry |
 | `backend/src/lib/deposit-rules.js` | LAX local/non-local deposit tiers, frozen at booking |
@@ -1564,6 +1647,7 @@ desktop" (`:1944`).
 | `.../RestApi/error-codes-and-messages` | Status codes, the 120 s / 420 s timeouts, and `2005` "two devices used the same TPN" |
 | `.../RestApi/extended-data-for-responses` | `ExtendedDataByApplication`, the `Cust1..3` custom prompts |
 | `docs.ipospays.com/spin-specification/apidocs` | The legacy SOAP/XML API — **integer minor units in the Cart**, the origin of the units confusion; also the portal path to the Auth Key |
+| `releases.ipospays.com/reduce-processing-costs-for-auto-rental-merchants` | **The account-level prerequisites (§9)** — auto-rental MCC `7512`/`7513`/`7519`/`3390`, TSYS processor, POS build ≥ `10177`, the 26-char `AgreementReferenceNumber` limit, and the "Auto Rental Details" receipt toggle |
 | `docs.ipospays.com/scanner-reader-sdk` | Android-only, on-terminal, returns an opaque string; DvStore prerequisite |
 | `docs.ipospays.com/hosted-payment-page/api-docs/*` | The ecom-token system (unrelated to SPIn) |
 | `docs.ipospays.com/transaction-status-check/api-docs/generateAuthToken` | The ISO-admin apiKey/secretKey → JWT system (unrelated to SPIn) |
