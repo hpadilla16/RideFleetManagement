@@ -6220,6 +6220,13 @@ model KioskSession {
   // alone never reaches a session. The per-conversation SECRET is never
   // stored here. Cleared (null) when the iframe resets/closes.
   voziaConversationId String?
+  // When that binding was made. F3 turns the binding into WRITE authority, so it
+  // can no longer live forever: an unreleased binding (tablet offline when the
+  // guest closed the chat) would be a standing permit over someone else's
+  // session. Reads and remote writes both require it to be fresher than
+  // VOZIA_BINDING_TTL_MIN. Nothing sweeps it — a stale row is harmless once no
+  // code path honours it.
+  voziaBoundAt DateTime?
   // Server-written marker (F1 truth): persistIdPhotos stored at least one
   // LICENSE photo for this session. eventsJson also carries ID_PHOTOS_STORED,
   // but the events endpoint accepts any client-fed name, so the assist-view

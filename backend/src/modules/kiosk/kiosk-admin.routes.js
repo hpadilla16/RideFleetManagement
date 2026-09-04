@@ -11,6 +11,7 @@ import logger from '../../lib/logger.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { requireRole } from '../../middleware/auth.js';
 import { kioskDeviceService, KioskError } from './kiosk-device.service.js';
+import { kioskStaffAssistService } from './kiosk-staff-assist.service.js';
 import { kioskSessionService } from './kiosk-session.service.js';
 import { kioskOffersService } from './kiosk-offers.service.js';
 import { kioskCheckoutService } from './kiosk-checkout.service.js';
@@ -80,6 +81,40 @@ kioskAdminRouter.get('/admin/sessions/:kioskSessionId/assist-view', ok(
   (req) => kioskSessionService.assistView(scopeFor(req), req.params.kioskSessionId, {
     conversationId: req.query?.conversationId ? String(req.query.conversationId) : undefined,
   }),
+));
+
+// ── F3: the same assist a staff member gives at the kiosk, given from Valet ──
+//
+// These WRITE, which is why the binding grew a TTL and stopped accepting
+// finished sessions: with F1 a stale binding showed an agent a departed guest's
+// enum codes; here the same stale binding would verify the wrong person's
+// identity. Every hard stop lives in the shared staff-assist implementation, so
+// the counter and the console cannot drift: underage stays a hard stop, an
+// expired licence stays a hard stop, both licence photos stay required, and the
+// grant is still 10 minutes, one session, single use.
+//
+// agentRef/agentName are asserted by Valet and audited AS asserted — RFM cannot
+// see which human is behind the shared service account, and the audit row says
+// so rather than implying a check that did not happen.
+
+// POST /api/kiosk/admin/sessions/:id/remote-assist/unlock
+// { conversationId, agentRef, agentName, reason } → mints the grant.
+kioskAdminRouter.post('/admin/sessions/:kioskSessionId/remote-assist/unlock', ok(
+  (req) => kioskStaffAssistService.remoteUnlock(scopeFor(req), req.params.kioskSessionId, req.body || {}),
+));
+
+// POST /api/kiosk/admin/sessions/:id/remote-assist/verify-id
+// { conversationId, agentRef, agentName, fields, licenseFrontPhoto, licenseBackPhoto }
+// The manual entry itself: the agent types what the scanner could not read.
+kioskAdminRouter.post('/admin/sessions/:kioskSessionId/remote-assist/verify-id', ok(
+  (req) => kioskStaffAssistService.remoteVerifyId(scopeFor(req), req.params.kioskSessionId, req.body || {}),
+));
+
+// POST /api/kiosk/admin/sessions/:id/remote-assist/confirm-name
+// { conversationId, agentRef, agentName } — vouches for the NAME only; the
+// reservation is not rewritten and the other rules stay hard stops.
+kioskAdminRouter.post('/admin/sessions/:kioskSessionId/remote-assist/confirm-name', ok(
+  (req) => kioskStaffAssistService.remoteConfirmName(scopeFor(req), req.params.kioskSessionId, req.body || {}),
 ));
 
 // GET /api/kiosk/sessions?outcome=&deviceId=&locationId=&take= — list + per-outcome counts

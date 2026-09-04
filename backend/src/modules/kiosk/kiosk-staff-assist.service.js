@@ -26,6 +26,7 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { KioskError } from './kiosk-device.service.js';
 import {
+  voziaBindingIsLive,
   getSessionForDevice,
   recordSessionTelemetry,
   registerDeviceLookupMiss,
@@ -456,9 +457,151 @@ async function confirmName(sessionId, device, { fields, licensePhoto } = {}) {
   };
 }
 
+
+/* ─────────────────────────── F3: assisting from Valet ───────────────────────────
+ *
+ * The same assist a staff member gives standing at the kiosk, given by an agent
+ * who is somewhere else. Everything about the grant is REUSED unchanged — the
+ * 10-minute TTL, the binding to one session, the single-use consumption, the
+ * ADMIN_OVERRIDE audit row, and every hard stop underneath. Only the proof of
+ * identity changes, because the current proof is a PIN typed on the tablet and
+ * there is no tablet in front of a remote agent (and Hector's standing rule is
+ * that agents never type PINs).
+ *
+ * WHERE THE AUTHORITY COMES FROM, stated plainly because it is a trust boundary:
+ *   1. The service account is authenticated by RFM, exactly as it is for the
+ *      read-only assist-view.
+ *   2. The conversation binding must be LIVE — the guest opened Get Help on THIS
+ *      session, recently. That is the guest's own consent, and it expires.
+ *   3. `agentRef` / `agentName` are ASSERTED BY VALET and recorded as such. RFM
+ *      cannot verify which human is behind the shared service account, the same
+ *      way it cannot verify which human is holding a kiosk tablet. Calling that
+ *      out in the audit row is honest; silently writing it as if RFM had checked
+ *      it would not be.
+ *
+ * The session's assistUserId is set to the SERVICE ACCOUNT, because a Valet agent
+ * is not an RFM user and inventing one would be worse. The human is named in the
+ * audit metadata, where its provenance can travel with it.
+ */
+
+/** The session a remote agent is entitled to act on, or the same 404 as always. */
+async function resolveRemoteSession(scope, sessionId, conversationId) {
+  if (!scope?.tenantId) {
+    throw new KioskError('A tenant scope is required (super-admins pass ?tenantId=)', 400, 'TENANT_SCOPE_REQUIRED');
+  }
+  const conv = conversationId == null ? '' : String(conversationId).trim();
+  if (!conv) throw new KioskError('conversationId is required', 400, 'CONVERSATION_ID_REQUIRED');
+
+  const session = sessionId
+    ? await prisma.kioskSession.findUnique({ where: { id: String(sessionId) } })
+    : null;
+  // One indistinguishable 404 for unknown / wrong tenant / unbound / expired, so
+  // a caller cannot map the space of sessions by probing.
+  if (!session || session.tenantId !== scope.tenantId || !voziaBindingIsLive(session, conv)) {
+    throw new KioskError('Session not found', 404, 'SESSION_NOT_FOUND');
+  }
+  const device = await prisma.kioskDevice.findFirst({
+    where: { id: session.deviceId, tenantId: scope.tenantId },
+  });
+  if (!device) throw new KioskError('Session not found', 404, 'SESSION_NOT_FOUND');
+  return { session, device };
+}
+
+function assertAgentIdentity({ agentRef, agentName } = {}) {
+  const ref = String(agentRef || '').trim();
+  const name = String(agentName || '').trim();
+  if (!ref || ref.length > 128) {
+    throw new KioskError('agentRef is required (who is acting)', 400, 'AGENT_REF_REQUIRED');
+  }
+  if (!name || name.length > 128) {
+    throw new KioskError('agentName is required (who is acting)', 400, 'AGENT_NAME_REQUIRED');
+  }
+  return { ref, name };
+}
+
+/**
+ * POST /api/kiosk/admin/sessions/:id/remote-assist/unlock
+ * { conversationId, agentRef, agentName, reason } → the same 10-minute,
+ * session-bound, single-use grant `unlock` mints for someone standing there.
+ */
+async function remoteUnlock(scope, sessionId, body = {}) {
+  const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  assertAssistable(session);
+  const agent = assertAgentIdentity(body);
+  const reason = String(body.reason || '').trim();
+  if (!reason) {
+    // A remote override with no stated reason is the one an auditor cannot read
+    // back later. Standing at the kiosk the context is the room; here it is this.
+    throw new KioskError('A reason is required', 400, 'REASON_REQUIRED');
+  }
+
+  const svc = await prisma.user.findFirst({
+    where: { tenantId: scope.tenantId, isServiceAccount: true, isActive: true, role: { in: ASSIST_ROLES } },
+    select: { id: true },
+  });
+  if (!svc) throw new KioskError('No service account is configured for remote assist', 409, 'NO_SERVICE_ACCOUNT');
+
+  const grantedAt = new Date();
+  await prisma.kioskSession.update({
+    where: { id: session.id },
+    data: { assistUserId: svc.id, assistGrantedAt: grantedAt, lastActivityAt: grantedAt },
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: scope.tenantId,
+      reservationId: session.reservationId || null,
+      actorUserId: svc.id,
+      action: 'ADMIN_OVERRIDE',
+      reason: `Remote kiosk assist unlock — ${reason}`,
+      metadata: JSON.stringify({
+        kind: 'kiosk_remote_assist_unlock',
+        kioskSessionId: session.id,
+        deviceId: device.id,
+        conversationId: String(body.conversationId).trim(),
+        // Asserted by Valet, NOT verified by RFM. Named so nobody reading this
+        // row later mistakes it for an identity this system checked.
+        agentAssertedByValet: { ref: agent.ref, name: agent.name },
+        grantExpiresAt: new Date(grantedAt.getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000).toISOString(),
+      }),
+    },
+  }).catch((err) => logger.warn('[kiosk] remote assist audit failed', { err: err?.message }));
+
+  await recordSessionTelemetry(session, { step: null, event: 'REMOTE_ASSIST_GRANTED', data: null });
+  logger.info('[kiosk] remote assist grant', {
+    sessionId: session.id, tenantId: scope.tenantId, agentRef: agent.ref,
+  });
+  return {
+    ok: true,
+    grantedAt: grantedAt.toISOString(),
+    expiresAt: new Date(grantedAt.getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000).toISOString(),
+    ttlMinutes: ASSIST_GRANT_TTL_MIN,
+  };
+}
+
+/**
+ * The two overrides themselves. Both DELEGATE to the functions a staff member
+ * already uses, so the hard stops (underage, expired licence, both photos
+ * required, live grant) are enforced by exactly one implementation and cannot
+ * drift apart between the counter and the console.
+ */
+async function remoteVerifyId(scope, sessionId, body = {}) {
+  const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  assertAgentIdentity(body);
+  return staffVerifyId(session.id, device, body);
+}
+
+async function remoteConfirmName(scope, sessionId, body = {}) {
+  const { session, device } = await resolveRemoteSession(scope, sessionId, body.conversationId);
+  assertAgentIdentity(body);
+  return confirmName(session.id, device, body);
+}
+
 export const kioskStaffAssistService = {
   listAssistStaff,
   unlock,
   staffVerifyId,
   confirmName,
+  remoteUnlock,
+  remoteVerifyId,
+  remoteConfirmName,
 };
