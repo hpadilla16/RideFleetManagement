@@ -16,7 +16,7 @@
  *      DATABASE_URL pointing at a database you do not mind seeding into.
  *   3. npm run test:e2e-kiosk-remote-assist
  *
- * It seeds its own disposable tenant on every run and asserts 41 properties.
+ * It seeds its own disposable tenant on every run and asserts 42 properties.
  * A NOTE THE RUN ITSELF TAUGHT US: the module grant is seeded BEFORE the first
  * request on purpose. Effective module access is cached per user inside the
  * backend process, so a grant written to the database after that user has been
