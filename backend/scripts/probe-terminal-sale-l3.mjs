@@ -440,6 +440,22 @@ export function buildStages({
       cfg: on({ spinL3LineItems: true, spinL3AutoRental: true }),
       endpoint: 'AutoRental',
     },
+    {
+      n: 8,
+      name: 'the AutoRental endpoint with ITS OWN envelope (top-level CEDP + Level3LineItems.Group)',
+      why: 'rung 7 sent L3Data there and got the ASP.NET HTTP 500 - wrong envelope, not wrong data',
+      args: () => {
+        const a = withLines(many.rows, many.taxAmount, 2);
+        a.level3.autoRental = autoRentalInputs(agreementNumber, 2);
+        return a;
+      },
+      cfg: on({
+        spinL3LineItems: true,
+        spinL3AutoRental: true,
+        spinL3Envelope: L3_ENVELOPE.AUTORENTAL,
+      }),
+      endpoint: 'AutoRental',
+    },
   ];
 }
 

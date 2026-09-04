@@ -520,7 +520,7 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   // worth asserting, because that is what gets charged.
   const { buildStages, stagePayload } = await import('../../../scripts/probe-terminal-sale-l3.mjs');
   const stages = buildStages({ amount: 1.00, agreementNumber: 'PROBE-T', taxRate: 11.5 });
-  assert.equal(stages.length, 7);
+  assert.equal(stages.length, 8);
   const p = stages.map((s) => stagePayload(s, 'REF').body);
 
   // 1 — the control is today's payload and nothing else.
@@ -710,4 +710,39 @@ test('voidWithRetry gives up immediately on a gateway refusal', async () => {
   } finally {
     spinClient.void = original;
   }
+});
+
+// ── The AutoRental endpoint's own envelope (learned live, 2026-09-04) ───────
+// /v2/AutoRental/Sale answered HTTP 500 "An error has occurred." to a body
+// carrying L3Data — the ASP.NET crash signature, same as commit 02af6407. Its
+// spec puts the CEDP summary at the TOP LEVEL and the lines under
+// Level3LineItems.Group; L3Data is the Transact rail's envelope.
+test('the AUTORENTAL envelope puts CEDP at the top level, not inside L3Data', () => {
+  const { body } = buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: { ...L3IN, autoRental: AUTO_IN } },
+    { ...ON_AUTO, spinL3Envelope: 'AUTORENTAL' },
+  );
+  assert.equal('L3Data' in body, false, 'L3Data belongs to the Transact rail');
+  assert.equal('Cart' in body, false);
+  assert.ok(body.Level3LineItems?.Group, 'lines go under Level3LineItems.Group');
+  assert.ok(Array.isArray(body.Level3LineItems.Group));
+  for (const k of ['TaxAmount', 'LocalTaxFlag', 'LineItemCount', 'PurchaseIdFormatCode']) {
+    assert.ok(k in body, `${k} is documented as a TOP-LEVEL required field here`);
+  }
+  assert.equal(typeof body.LocalTaxFlag, 'string',
+    'documented as a string on this endpoint, where the Transact header takes a number');
+  assert.equal(body.LineItemCount, body.Level3LineItems.Group.length,
+    'never claim a count we are not sending');
+  assert.ok(body.AutoRental, 'and the rental block still rides along');
+});
+
+test('the three envelopes are mutually exclusive', () => {
+  const mk = (env) => buildSalePayload(
+    { amount: AMOUNT, referenceId: 'R', level3: L3IN },
+    { ...ON_AUTO, spinL3Envelope: env },
+  ).body;
+  const l3 = mk('L3DATA'); const cart = mk('CART'); const ar = mk('AUTORENTAL');
+  assert.ok(l3.L3Data && !l3.Cart && !l3.Level3LineItems);
+  assert.ok(cart.Cart && !cart.L3Data && !cart.Level3LineItems);
+  assert.ok(ar.Level3LineItems && !ar.L3Data && !ar.Cart);
 });
