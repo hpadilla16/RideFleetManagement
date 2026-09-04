@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet — US Terminal Checkout Settings</title>
+<style>
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --brand:#8752FE;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-600:#7440ea; --p-700:#5a26c9; --p-800:#45189e;
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --border-subtle:var(--n-100); --border:var(--n-200); --border-strong:var(--n-300);
+  --text-1:var(--n-900); --text-2:var(--n-700); --text-3:var(--n-600);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --focus:#0b63d6;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--n-50)}
+body{font-family:var(--font-sans);font-size:14px;line-height:1.55;color:var(--text-2);background:var(--n-50);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5{color:var(--text-1);letter-spacing:-.018em;line-height:1.15}
+table{border-collapse:collapse;width:100%}
+button,input,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+.tnum,table,.money,.mono,time{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs)}
+.mono{font-family:var(--font-mono)}
+
+.page-head{max-width:1440px;margin:0 auto;padding:44px 32px 20px}
+.page-head .eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.22);border-radius:var(--r-pill);padding:6px 13px 6px 10px}
+.page-head .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.page-head h1{margin-top:14px;font-size:clamp(28px,3.4vw,42px);font-weight:700;letter-spacing:-.03em}
+.page-head p{margin-top:10px;max-width:920px;color:var(--text-2);font-size:15px}
+.page-head .note{margin-top:14px;max-width:920px;font-size:12.5px;color:var(--text-3);border-left:3px solid var(--n-300);padding-left:12px;line-height:1.6}
+.mock-wrap{max-width:1160px;margin:20px auto 72px;padding:0 32px}
+.mock-label{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:40px 0 10px}
+.mock-label b{color:var(--p-700);font-weight:600}
+.mock-cap{font-size:12.5px;color:var(--text-3);max-width:940px;margin:0 0 14px;line-height:1.6}
+
+.screen{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sh-2);overflow:hidden}
+.mod-head{padding:16px 22px 0;border-bottom:1px solid var(--border-subtle);background:var(--n-0)}
+.mod-title-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.mod-title-row h2{font-size:18px;font-weight:660}
+.mod-title-row .sub{font-size:12.5px;color:var(--text-3)}
+.mod-title-row .right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tenant-scope{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 10px;background:var(--n-25)}
+.tenant-scope b{font-weight:640;color:var(--text-1)}
+.mod-tabs{display:flex;gap:2px;margin-top:14px;overflow-x:auto}
+.mod-tabs a{padding:9px 14px;font-size:13px;font-weight:600;color:var(--text-3);border-bottom:2px solid transparent;white-space:nowrap}
+.mod-tabs a.is-on{color:var(--p-700);border-bottom-color:var(--brand)}
+
+.sect{padding:20px 22px;border-bottom:1px solid var(--border-subtle)}
+.sect:last-child{border-bottom:0}
+.sect > header{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-bottom:4px}
+.sect > header h3{font-size:15px;font-weight:660}
+.sect > header .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.sect > .desc{font-size:12.5px;color:var(--text-3);line-height:1.6;max-width:820px;margin-bottom:16px}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}
+.fld{display:flex;flex-direction:column;gap:5px}
+.fld > label{font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3)}
+.fld .in{border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--n-0);padding:9px 11px;font-size:13px;color:var(--text-1);min-height:40px;display:flex;align-items:center;gap:8px;box-shadow:var(--sh-1);font-variant-numeric:tabular-nums}
+.fld .in.ph{color:var(--n-400);font-style:italic}
+.fld .in.sel{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b4362' stroke-width='1.7' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 10px center;background-size:14px;padding-right:32px;cursor:pointer}
+.fld .in.mask{font-family:var(--font-mono);letter-spacing:.22em;color:var(--text-2)}
+.fld .in.ro{background:var(--n-50);color:var(--text-3);box-shadow:none}
+.fld .hint{font-size:11px;color:var(--text-3);line-height:1.5}
+.fld .hint b{color:var(--text-2);font-weight:640}
+.fld.span2{grid-column:span 2}
+
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:640;line-height:1.4;padding:3px 8px;border-radius:var(--r-xs);white-space:nowrap;border:1px solid transparent}
+.chip i{width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.chip--ok{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.chip--warn{color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)}
+.chip--bad{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.chip--info{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.chip--neutral{color:var(--text-2);background:var(--n-100);border-color:var(--border)}
+.chip--brand{color:var(--p-800);background:var(--p-50);border-color:rgba(135,82,254,.25)}
+
+.toggle{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;color:var(--text-2);cursor:pointer;user-select:none;min-height:40px}
+.toggle .tk{width:34px;height:19px;border-radius:var(--r-pill);background:var(--n-300);position:relative;flex:0 0 auto;transition:.15s}
+.toggle .tk::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:.15s}
+.toggle.on .tk{background:var(--brand)}
+.toggle.on .tk::after{left:auto;right:2px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;font-size:13px;font-weight:620;letter-spacing:-.01em;padding:8px 15px;border-radius:var(--r-sm);border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.btn--primary{background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(56,20,130,.28),0 6px 14px -6px rgba(135,82,254,.55)}
+.btn--secondary{background:var(--n-0);color:var(--text-1);border-color:var(--border-strong);box-shadow:var(--sh-1)}
+.btn--ghost{background:transparent;color:var(--p-700)}
+.btn--danger{background:var(--n-0);color:var(--danger-tx);border-color:var(--danger-bd)}
+.btn--sm{min-height:34px;padding:5px 11px;font-size:12px;border-radius:var(--r-xs)}
+
+.callout{border:1px solid var(--border);border-left-width:3px;border-radius:var(--r-sm);padding:12px 14px;font-size:12px;line-height:1.65;background:var(--n-0);color:var(--text-2);margin-top:14px}
+.callout b{color:var(--text-1);font-weight:660}
+.callout--info{border-left-color:var(--info);background:var(--info-bg);border-color:var(--info-bd);color:#0a4a9e} .callout--info b{color:#083a7d}
+.callout--warn{border-left-color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)} .callout--warn b{color:#6b4204}
+.callout--bad{border-left-color:var(--danger);background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)} .callout--bad b{color:#7a1616}
+.callout--ok{border-left-color:var(--ok);background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)} .callout--ok b{color:#054a38}
+.callout--brand{border-left-color:var(--brand);background:var(--p-50);border-color:rgba(135,82,254,.22);color:var(--p-800)} .callout--brand b{color:var(--p-800)}
+
+/* radio cards */
+.rcards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rc{border:1px solid var(--border);border-radius:var(--r-md);padding:13px 15px;background:var(--n-0);cursor:pointer;display:flex;gap:11px;align-items:flex-start}
+.rc .rd{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--border-strong);flex:0 0 auto;margin-top:2px;display:grid;place-items:center}
+.rc .rd::after{content:"";width:8px;height:8px;border-radius:50%;background:transparent}
+.rc.on{border-color:var(--brand);background:var(--p-50);box-shadow:0 0 0 3px rgba(135,82,254,.08)}
+.rc.on .rd{border-color:var(--brand)}
+.rc.on .rd::after{background:var(--brand)}
+.rc b{display:block;font-size:13px;font-weight:660;color:var(--text-1);margin-bottom:3px}
+.rc small{font-size:11.5px;color:var(--text-3);line-height:1.55;display:block}
+
+/* status strip */
+.status{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:14px 22px;background:var(--n-25);border-bottom:1px solid var(--border-subtle)}
+.st{background:var(--n-0);border:1px solid var(--border-subtle);border-radius:var(--r-md);padding:10px 13px;box-shadow:var(--sh-1)}
+.st .l{font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3)}
+.st .v{font-size:14px;font-weight:660;letter-spacing:-.02em;color:var(--text-1);margin-top:4px;display:flex;align-items:center;gap:7px}
+.st .v small{font-size:11px;color:var(--text-3);font-weight:500}
+
+@media (max-width:900px){.grid2,.grid3,.rcards,.status{grid-template-columns:1fr}.fld.span2{grid-column:auto}}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <span class="eyebrow"><i></i>RideFleet · design only · 2026-09-04</span>
+  <h1>Settings — a US tenant on iPOSpays</h1>
+  <p>Everything a US/iPOS tenant configures for the terminal checkout, in one place. Credentials are <b>write-only, masked, and panel-only</b> — never an env var, never pasted into a chat, never readable back over the wire once saved.</p>
+  <p class="note">
+    Design only — no application code touched. This extends the existing <b>Settings → Payment Gateway</b> page (<span class="mono">frontend/src/app/settings/page.js</span>, SPIn Terminal and iPOS Payment Links sections) rather than adding a new one. The store is unchanged: the <span class="mono">AppSetting</span> row <span class="mono">tenant:&lt;tenantId&gt;:paymentGatewayConfig</span>, read by the one resolver in <span class="mono">tenant-terminal-config.js</span>.
+  </p>
+</div>
+
+<div class="mock-wrap">
+
+  <div class="mock-label">1 · <b>Payment gateway → terminal checkout</b></div>
+
+  <div class="screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <h2>Settings</h2>
+        <span class="sub">Payment Gateway</span>
+        <div class="right">
+          <span class="tenant-scope">Tenant · <b>Rightcars LAX</b></span>
+          <button class="btn btn--secondary btn--sm">Run health check</button>
+          <button class="btn btn--primary btn--sm">Save</button>
+        </div>
+      </div>
+      <div class="mod-tabs">
+        <a>General</a><a>Locations</a><a class="is-on">Payment Gateway</a><a>Fees &amp; Rates</a><a>Check-in</a><a>Notifications</a>
+      </div>
+    </div>
+
+    <div class="status">
+      <div class="st"><div class="l">Active gateway</div><div class="v">iPOS <span class="chip chip--ok"><i></i>Configured</span></div></div>
+      <div class="st"><div class="l">Terminal</div><div class="v">4419&#42;&#42;&#42;&#42;2071 <small>online</small></div></div>
+      <div class="st"><div class="l">Credential source</div><div class="v">TENANT <span class="chip chip--ok"><i></i>not env</span></div></div>
+      <div class="st"><div class="l">Checkout mode</div><div class="v">Terminal <span class="chip chip--brand">US</span></div></div>
+    </div>
+
+    <!-- ===== A · checkout mode ===== -->
+    <div class="sect">
+      <header>
+        <h3>Checkout mode</h3>
+        <div class="right"><span class="chip chip--brand">New</span></div>
+      </header>
+      <p class="desc">Which surface the renter signs the rental agreement on. This is the single switch that turns the US terminal session on, and it is the one an agent falls back <i>from</i> when a terminal is unreachable.</p>
+
+      <div class="rcards">
+        <div class="rc on">
+          <span class="rd"></span>
+          <span>
+            <b>Contract on the terminal</b>
+            <small>Six acknowledgement clauses and the signature are captured on the QD2. Payment and the deposit follow on the same device. <b>Requires a configured terminal</b> — the option is offered but disabled without one.</small>
+          </span>
+        </div>
+        <div class="rc">
+          <span class="rd"></span>
+          <span>
+            <b>Contract on the renter's phone</b>
+            <small>Today's flow for every tenant: a QR to <span class="mono">/sign/:token</span>. Stays available as the per-checkout fallback even when Terminal is selected here.</small>
+          </span>
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-top:14px">
+        <div class="fld">
+          <label>Clause presentation</label>
+          <div class="in sel">One prompt per clause (6 prompts)</div>
+          <span class="hint">The alternative — a single combined prompt with initials moved to the printed receipt — is a weaker audit trail. Pending a QD2 legibility test.</span>
+        </div>
+        <div class="fld">
+          <label>Terminal receipt</label>
+          <div class="in sel">Print on approval</div>
+          <span class="hint">Prints via <span class="mono">/v2/Common/Printer</span>. The emailed agreement PDF is sent regardless.</span>
+        </div>
+      </div>
+
+      <div class="callout callout--warn">
+        <b>Switching this does not migrate sessions in flight.</b> A checkout already at <span class="mono">TC_PENDING</span> keeps the renderer it started with. Changing the mode mid-session would strand a renter halfway through six clauses on a device that is no longer the one being watched.
+      </div>
+    </div>
+
+    <!-- ===== B · terminal ===== -->
+    <div class="sect">
+      <header>
+        <h3>SPIn terminal</h3>
+        <div class="right"><span class="toggle on"><span class="tk"></span>Enabled</span></div>
+      </header>
+      <p class="desc">The physical Dejavoo device this tenant charges through. Auth Key and TPN must <b>both</b> be set — a half-filled pair is refused at the counter rather than paired with another tenant's terminal.</p>
+
+      <div class="grid2">
+        <div class="fld">
+          <label>TPN · terminal profile number</label>
+          <div class="in">4419 8830 5512 2071</div>
+          <span class="hint">Not a secret — an operator has to be able to read it off the device. Masked in logs only.</span>
+        </div>
+        <div class="fld">
+          <label>Auth key</label>
+          <div class="in mask">•••••••••••••••••••• <span class="chip chip--ok" style="margin-left:auto;letter-spacing:0"><i></i>Saved</span></div>
+          <span class="hint"><b>Write-only.</b> Encrypted at rest (AES-256-GCM). Leave blank to keep the saved one; never displayed again.</span>
+        </div>
+        <div class="fld">
+          <label>Merchant number</label>
+          <div class="in">1</div>
+          <span class="hint">Defaults to 1. Only change it if Dejavoo told you to.</span>
+        </div>
+        <div class="fld">
+          <label>Proxy timeout</label>
+          <div class="in">120 <span style="color:var(--text-3);font-size:12px">seconds</span></div>
+          <span class="hint">How long the terminal waits for the renter. This is the countdown the agent watches in step 2.</span>
+        </div>
+        <div class="fld span2">
+          <label>Callback URL</label>
+          <div class="in ro mono" style="font-size:11.5px">https://app.ridefleet.com/api/public/payment-gateway/spin/callback</div>
+          <span class="hint">Read-only. Copy this into your Dejavoo merchant portal.</span>
+        </div>
+      </div>
+
+      <div class="callout callout--bad">
+        <b>One terminal per tenant, today.</b> There is no <span class="mono">Terminal</span> or <span class="mono">Register</span> model in RFM — a terminal exists only as this credential pair, with no per-location or per-register dimension. Two LAX counters on the same tenant will collide on this device. Adding a register list is drawn below as <i>proposed</i>, not shipped.
+      </div>
+
+      <div class="callout callout--warn">
+        <b>Environment is not offered.</b> The SPIn client is hard-coded to <span class="mono">https://api.spinpos.net</span>; the sandbox plumbing was deliberately removed in May so no code path can route a live credential to a test endpoint. The old Sandbox/Production dropdown should come off this page — it implies a choice that does not exist.
+      </div>
+    </div>
+
+    <!-- ===== C · registers (proposed) ===== -->
+    <div class="sect" style="background:var(--n-25)">
+      <header>
+        <h3>Registers</h3>
+        <div class="right"><span class="chip chip--brand">Proposed · phase 3</span></div>
+      </header>
+      <p class="desc">What multi-counter support looks like when it arrives: a named terminal per counter, assigned to a location, so an agent picks their register once and the “Busy” state can say <i>who</i> holds the device.</p>
+
+      <div class="grid3">
+        <div class="fld"><label>Register name</label><div class="in">LAX Counter 1</div></div>
+        <div class="fld"><label>Location</label><div class="in sel">LAX — Airport Blvd</div></div>
+        <div class="fld"><label>TPN</label><div class="in mono" style="font-size:12px">4419&#42;&#42;&#42;&#42;2071</div></div>
+        <div class="fld"><label>Register name</label><div class="in ph">LAX Counter 2</div></div>
+        <div class="fld"><label>Location</label><div class="in sel ph">Select a location…</div></div>
+        <div class="fld"><label>TPN</label><div class="in ph">Add a second terminal</div></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn btn--secondary btn--sm">+ Add register</button></div>
+
+      <div class="callout callout--info">
+        Until this exists, the terminal is resolved per <b>tenant</b>. That is safe (fail-closed, never the wrong merchant) but not sufficient for a two-counter branch. Sequenced deliberately after the single-counter flow is live at LAX — see NOTES §6.
+      </div>
+    </div>
+
+    <!-- ===== D · iPOS credentials ===== -->
+    <div class="sect">
+      <header>
+        <h3>iPOSpays credentials</h3>
+        <div class="right"><span class="toggle on"><span class="tk"></span>Enabled</span></div>
+      </header>
+      <p class="desc">Dejavoo issues <b>three separate credential families</b> and they are not interchangeable. Every one of them is write-only and encrypted at rest; the panel shows only whether a value is on file.</p>
+
+      <div class="grid2">
+        <div class="fld span2">
+          <div class="callout callout--brand" style="margin-top:0">
+            <b>Which credential does what.</b><br>
+            <b>1 · HPP auth token</b> — mints hosted payment links (fallback payments). Sent as the lowercase <span class="mono">token</span> header.<br>
+            <b>2 · API key + secret key</b> — exchanged for a JWT; used for payment-status queries and the Transact card-not-present rail (the deposit hold).<br>
+            <b>3 · Terminal Auth key + TPN</b> — drives the physical QD2. Configured in the section above.<br>
+            A terminal checkout touches <b>all three</b>: the terminal for the sale, Transact for the deposit, HPP only if it falls back.
+          </div>
+        </div>
+        <div class="fld">
+          <label>HPP auth token</label>
+          <div class="in mask">•••••••••••••••• <span class="chip chip--ok" style="margin-left:auto;letter-spacing:0"><i></i>On file</span></div>
+          <span class="hint">iPOSpays portal → Generate Ecom / TOP Merchant Keys.</span>
+        </div>
+        <div class="fld">
+          <label>CloudPOS TPN</label>
+          <div class="in ph">Blank — falls back to the terminal TPN above</div>
+          <span class="hint">Only set this if Dejavoo gave you a different TPN for e-commerce.</span>
+        </div>
+        <div class="fld">
+          <label>API key</label>
+          <div class="in mask">•••••••••••••••• <span class="chip chip--ok" style="margin-left:auto;letter-spacing:0"><i></i>On file</span></div>
+          <span class="hint">Merchant API Key. With the secret key, mints the JWT.</span>
+        </div>
+        <div class="fld">
+          <label>Secret key</label>
+          <div class="in mask">•••••••••••••••• <span class="chip chip--ok" style="margin-left:auto;letter-spacing:0"><i></i>On file</span></div>
+          <span class="hint">Merchant Secret Key.</span>
+        </div>
+        <div class="fld">
+          <label>Payment link expiry</label>
+          <div class="in">3 <span style="color:var(--text-3);font-size:12px">days</span></div>
+          <span class="hint">1–31. Applies to fallback payment links only.</span>
+        </div>
+        <div class="fld">
+          <label>Send Level 2 / Level 3 data</label>
+          <div class="in"><span class="toggle on" style="min-height:auto"><span class="tk"></span>On</span><span class="chip chip--ok" style="margin-left:auto"><i></i>Recommended</span></div>
+          <span class="hint">Itemised line data lowers interchange on commercial cards. Off only if Dejavoo asks you to disable it while debugging.</span>
+        </div>
+      </div>
+
+      <div class="callout callout--bad">
+        <b>Panel only. Never anywhere else.</b> These are live payment credentials. They are not accepted over chat, not read from environment variables for a configured tenant, and not echoed back after saving — a save returns booleans and a masked TPN, and the audit log records <i>that</i> a key changed, never the key. The platform-env fallback that keeps the first live merchant running writes a warning naming the tenant on every single charge, so the migration backlog is visible in the logs instead of in a chargeback.
+      </div>
+    </div>
+
+    <!-- ===== E · inspection ===== -->
+    <div class="sect">
+      <header>
+        <h3>Inspection responsibility</h3>
+        <div class="right"><span class="chip chip--neutral">Existing setting</span></div>
+      </header>
+      <p class="desc">Unchanged by the terminal work — the same tenant setting the wizard already reads. It decides whether step 5 is a walkthrough the agent runs or a link the renter gets.</p>
+
+      <div class="rcards">
+        <div class="rc on">
+          <span class="rd"></span>
+          <span>
+            <b>Agent decides per checkout</b>
+            <small>Step 5 offers both: send the link, or do the walkthrough now. The agent picks based on the queue behind them. This is the setting <b>ON</b> state.</small>
+          </span>
+        </div>
+        <div class="rc">
+          <span class="rd"></span>
+          <span>
+            <b>Always agent-led</b>
+            <small>No choice screen. Straight to the walk-around on the agent's phone or this tablet. The setting <b>OFF</b> state — exactly today's flow.</small>
+          </span>
+        </div>
+      </div>
+
+      <div class="callout callout--brand">
+        <b>One US-specific consequence.</b> On the terminal path the renter has already signed the agreement in step 2, so the second signature at the end of an agent-led inspection is redundant. It should be raised only when the walkthrough finds <b>new</b> damage — in which case that single acknowledgement goes back to the QD2 rather than to a phone.
+      </div>
+    </div>
+
+    <!-- ===== F · deposit policy ===== -->
+    <div class="sect">
+      <header>
+        <h3>Security deposit policy</h3>
+        <div class="right"><span class="chip chip--neutral">Location scope</span></div>
+      </header>
+      <p class="desc">The amount is resolved per reservation, not fixed here. This panel shows the rules that can <b>raise</b> it — no rule ever lowers a configured deposit, and there is no generic platform default.</p>
+
+      <div class="grid2">
+        <div class="fld">
+          <label>Standard deposit</label>
+          <div class="in">$300.00</div>
+          <span class="hint">The location's baseline. A reservation carrying its own amount wins over this.</span>
+        </div>
+        <div class="fld">
+          <label>Debit-card deposit</label>
+          <div class="in">$500.00</div>
+          <span class="hint">Applied only when the sale reveals a <b>DEBIT</b> card. Debit holds tie up real balances and refund slowly. A value <i>lower</i> than the standard amount is ignored.</span>
+        </div>
+        <div class="fld">
+          <label>Non-local renter deposit</label>
+          <div class="in">$450.00</div>
+          <span class="hint">Decided at reservation-create and frozen on the pricing snapshot. Re-evaluated at the counter only for reservations that predate the rule.</span>
+        </div>
+        <div class="fld">
+          <label>Local states</label>
+          <div class="in">CA</div>
+          <span class="hint">Matched against the renter's licence state and address state.</span>
+        </div>
+        <div class="fld">
+          <label>Hold expires after</label>
+          <div class="in ro">7 <span style="color:var(--text-3);font-size:12px">days</span></div>
+          <span class="hint">Platform constant today. Surfaced read-only so an operator can see it without reading code.</span>
+        </div>
+        <div class="fld">
+          <label>Deposit waiver</label>
+          <div class="in sel">Manager approval + reason required</div>
+          <span class="hint">A waived deposit is the tenant carrying the risk. It belongs in the audit log with a name attached.</span>
+        </div>
+      </div>
+
+      <div class="callout callout--ok">
+        <b>No hardcoded default, on purpose.</b> The generic $500 hold was removed in May: a reservation that does not price a deposit now holds <b>$0</b> rather than charging the renter for something their booking never included. Leaving every field here blank is a valid configuration and means “no deposit”.
+      </div>
+      <div class="callout callout--warn">
+        <b>Two places say $500 and only one of them is real.</b> The <span class="mono">deposit_post_charges</span> clause text still reads “a security deposit hold of $500”. On the terminal that clause is what the renter <i>initials</i>, so it must render the resolved amount — otherwise they are initialling a number the card never sees. Build blocker, NOTES §7.
+      </div>
+    </div>
+
+    <!-- ===== G · ID capture ===== -->
+    <div class="sect">
+      <header>
+        <h3>ID photo reading</h3>
+        <div class="right"><span class="toggle on"><span class="tk"></span>Enabled</span></div>
+      </header>
+      <p class="desc">Fills pre-check-in from a photo of the licence front. Advisory — a human always confirms before anything is saved.</p>
+
+      <div class="grid2">
+        <div class="fld">
+          <label>Provider key</label>
+          <div class="in mask">•••••••••••••••• <span class="chip chip--ok" style="margin-left:auto;letter-spacing:0"><i></i>On file</span></div>
+          <span class="hint">Per-tenant. Without it, no licence photo leaves this tenant — the capture step reports <span class="mono">OCR_UNAVAILABLE</span> and the form takes over.</span>
+        </div>
+        <div class="fld">
+          <label>Confidence floor</label>
+          <div class="in">70</div>
+          <span class="hint">Below this, nothing is prefilled and the renter is asked to retake or type. A confident-looking wrong value is worse than an empty box.</span>
+        </div>
+        <div class="fld">
+          <label>Attempts per session</label>
+          <div class="in ro">5</div>
+          <span class="hint">Cost cap, not a security gate. Failed reads count.</span>
+        </div>
+        <div class="fld">
+          <label>Attempts per device per hour</label>
+          <div class="in ro">15</div>
+          <span class="hint">The backstop a per-session count cannot provide — a new session is free, a tablet is not.</span>
+        </div>
+      </div>
+
+      <div class="callout callout--info">
+        <b>Terminal-side scanning is not offered here</b> because it is not available. Dejavoo's scanner is an Android SDK for apps installed on the device, not an API operation, and it returns an unparsed string. Shipping it would mean an RFM Android app on every terminal plus AAMVA parsing — a project, not a setting. NOTES §7 keeps it on the list with its real cost.
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

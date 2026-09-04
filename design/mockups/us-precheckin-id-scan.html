@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet — Pre-Check-In ID Capture &amp; Provenance</title>
+<style>
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --brand:#8752FE;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-600:#7440ea; --p-700:#5a26c9; --p-800:#45189e;
+  --gold-50:#fdf6e8; --gold-100:#fbe9c6; --gold-600:#a3660f; --gold-700:#7d4d08;
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --border-subtle:var(--n-100); --border:var(--n-200); --border-strong:var(--n-300);
+  --text-1:var(--n-900); --text-2:var(--n-700); --text-3:var(--n-600);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --focus:#0b63d6;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--n-50)}
+body{font-family:var(--font-sans);font-size:14px;line-height:1.55;color:var(--text-2);background:var(--n-50);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5{color:var(--text-1);letter-spacing:-.018em;line-height:1.15}
+table{border-collapse:collapse;width:100%}
+button,input,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+.tnum,table,.money,.mono,time{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs)}
+.mono{font-family:var(--font-mono)}
+
+.page-head{max-width:1440px;margin:0 auto;padding:44px 32px 20px}
+.page-head .eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.22);border-radius:var(--r-pill);padding:6px 13px 6px 10px}
+.page-head .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.page-head h1{margin-top:14px;font-size:clamp(28px,3.4vw,42px);font-weight:700;letter-spacing:-.03em}
+.page-head p{margin-top:10px;max-width:920px;color:var(--text-2);font-size:15px}
+.page-head .note{margin-top:14px;max-width:920px;font-size:12.5px;color:var(--text-3);border-left:3px solid var(--n-300);padding-left:12px;line-height:1.6}
+.mock-wrap{max-width:1440px;margin:20px auto 72px;padding:0 32px}
+.mock-label{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:40px 0 10px}
+.mock-label b{color:var(--p-700);font-weight:600}
+.mock-cap{font-size:12.5px;color:var(--text-3);max-width:940px;margin:0 0 14px;line-height:1.6}
+
+.screen{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sh-2);overflow:hidden}
+.mod-head{padding:16px 22px 16px;border-bottom:1px solid var(--border-subtle);background:var(--n-0)}
+.mod-title-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.mod-title-row h2{font-size:18px;font-weight:660}
+.mod-title-row .sub{font-size:12.5px;color:var(--text-3)}
+.mod-title-row .right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tenant-scope{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 10px;background:var(--n-25)}
+.tenant-scope b{font-weight:640;color:var(--text-1)}
+
+.body{display:grid;grid-template-columns:340px 1fr;min-height:520px}
+.pane{padding:18px 22px 24px}
+.pane + .pane{border-left:1px solid var(--border-subtle)}
+.pane.side{background:var(--n-25)}
+.pane h3{font-size:14px;font-weight:660;margin-bottom:3px}
+.pane .phint{font-size:12px;color:var(--text-3);margin-bottom:14px;line-height:1.55}
+.sec-h{font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:20px 0 9px;display:flex;align-items:center;gap:8px}
+.sec-h:first-child{margin-top:0}
+.sec-h .rule{flex:1;height:1px;background:var(--border-subtle)}
+
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:640;line-height:1.4;padding:3px 8px;border-radius:var(--r-xs);white-space:nowrap;border:1px solid transparent}
+.chip i{width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.chip--ok{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.chip--warn{color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)}
+.chip--bad{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.chip--info{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.chip--neutral{color:var(--text-2);background:var(--n-100);border-color:var(--border)}
+.chip--brand{color:var(--p-800);background:var(--p-50);border-color:rgba(135,82,254,.25)}
+
+.prov{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:var(--r-xs);border:1px solid transparent;white-space:nowrap}
+.prov i{width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.prov--scan{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.prov--typed{color:var(--text-2);background:var(--n-100);border-color:var(--border)}
+.prov--fix{color:var(--p-800);background:var(--p-100);border-color:rgba(135,82,254,.25)}
+.prov--none{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.prov--conf{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+
+/* license capture card */
+.lic{border:1px solid var(--border-strong);border-radius:var(--r-md);overflow:hidden;background:var(--n-0);box-shadow:var(--sh-1)}
+.lic .img{aspect-ratio:1.586;background:
+  linear-gradient(135deg,#dfe7f5 0%,#eef2fa 40%,#e6ecf7 100%);
+  position:relative;display:grid;place-items:center;border-bottom:1px solid var(--border)}
+.lic .img .fake{width:88%;height:82%;border-radius:7px;background:var(--n-0);border:1px solid var(--n-300);box-shadow:var(--sh-1);padding:9px 11px;display:flex;flex-direction:column;gap:3px}
+.lic .img .fake .hdr{font-family:var(--font-mono);font-size:8px;letter-spacing:.16em;color:#1b3a6b;font-weight:700}
+.lic .img .fake .nm{font-size:11px;font-weight:700;color:var(--n-900);letter-spacing:-.01em}
+.lic .img .fake .ln{font-family:var(--font-mono);font-size:8px;color:var(--n-600);letter-spacing:.05em}
+.lic .img .fake .ph{position:absolute;right:16px;top:24px;width:42px;height:52px;border-radius:4px;background:linear-gradient(160deg,#c9d3e6,#9fb0cc);border:1px solid var(--n-300)}
+.lic .meta{padding:10px 12px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:11.5px;color:var(--text-3)}
+
+/* confidence meter */
+.conf{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--n-0);margin-top:12px}
+.conf .bar{flex:1;height:6px;border-radius:3px;background:var(--n-200);overflow:hidden}
+.conf .bar i{display:block;height:100%;border-radius:3px;background:var(--ok)}
+.conf b{font-family:var(--font-mono);font-size:14px;font-weight:680;color:var(--ok-tx);min-width:34px;text-align:right}
+.conf small{font-size:11px;color:var(--text-3);display:block;line-height:1.4}
+.conf.is-low .bar i{background:var(--warn)} .conf.is-low b{color:var(--warn-tx)}
+.conf .lab{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3);flex:0 0 auto}
+
+/* field rows */
+.frows{border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--n-0)}
+.frow{display:grid;grid-template-columns:160px 1fr 108px auto;gap:10px;align-items:center;padding:0 12px;min-height:46px;border-bottom:1px solid var(--border-subtle)}
+.frow:last-child{border-bottom:0}
+.frow:hover{background:var(--n-25)}
+.frow .k{font-size:11.5px;color:var(--text-3);font-weight:560}
+.frow .k small{display:block;font-size:10px;color:var(--n-400);font-family:var(--font-mono);letter-spacing:.05em}
+.frow .inp{border:1px solid var(--border-strong);border-radius:var(--r-xs);background:var(--n-0);padding:7px 10px;font-size:12.5px;font-weight:600;color:var(--text-1);min-height:36px;display:flex;align-items:center;font-variant-numeric:tabular-nums}
+.frow.is-empty .inp{border-color:var(--danger-bd);background:var(--danger-bg);color:var(--danger-tx);font-weight:560;font-style:italic}
+.frow.is-fix .inp{border-color:rgba(135,82,254,.4);background:var(--p-50)}
+.frow.is-low .inp{border-color:var(--warn-bd);background:var(--warn-bg)}
+.frow .was{font-size:10.5px;color:var(--text-3);font-family:var(--font-mono)}
+.frow .was s{color:var(--n-400)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;font-size:13px;font-weight:620;letter-spacing:-.01em;padding:8px 15px;border-radius:var(--r-sm);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:.15s}
+.btn--primary{background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(56,20,130,.28),0 6px 14px -6px rgba(135,82,254,.55)}
+.btn--secondary{background:var(--n-0);color:var(--text-1);border-color:var(--border-strong);box-shadow:var(--sh-1)}
+.btn--ghost{background:transparent;color:var(--p-700)}
+.btn--danger{background:var(--n-0);color:var(--danger-tx);border-color:var(--danger-bd)}
+.btn--sm{min-height:34px;padding:5px 11px;font-size:12px;border-radius:var(--r-xs)}
+.btn[disabled],.btn.is-dis{opacity:.45;cursor:not-allowed;box-shadow:none}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:16px}
+.btnrow .spacer{flex:1}
+
+.callout{border:1px solid var(--border);border-left-width:3px;border-radius:var(--r-sm);padding:12px 14px;font-size:12px;line-height:1.65;background:var(--n-0);color:var(--text-2)}
+.callout b{color:var(--text-1);font-weight:660}
+.callout--info{border-left-color:var(--info);background:var(--info-bg);border-color:var(--info-bd);color:#0a4a9e}
+.callout--info b{color:#083a7d}
+.callout--warn{border-left-color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.callout--warn b{color:#6b4204}
+.callout--bad{border-left-color:var(--danger);background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.callout--bad b{color:#7a1616}
+.callout--ok{border-left-color:var(--ok);background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.callout--ok b{color:#054a38}
+.callout--brand{border-left-color:var(--brand);background:var(--p-50);border-color:rgba(135,82,254,.22);color:var(--p-800)}
+.callout--brand b{color:var(--p-800)}
+
+.legend{display:flex;gap:16px;flex-wrap:wrap;padding:11px 15px;background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3);margin-bottom:14px}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+
+.gate{border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;background:var(--n-0);margin-bottom:8px;display:flex;align-items:flex-start;gap:10px}
+.gate .ic{font-size:14px;line-height:1.2;flex:0 0 auto}
+.gate b{display:block;font-size:12.5px;font-weight:640;color:var(--text-1)}
+.gate small{font-size:11px;color:var(--text-3);line-height:1.5;display:block}
+.gate.ok{border-color:var(--ok-bd);background:var(--ok-bg)} .gate.ok b{color:var(--ok-tx)}
+.gate.bad{border-color:var(--danger-bd);background:var(--danger-bg)} .gate.bad b{color:var(--danger-tx)}
+.gate.warn{border-color:var(--warn-bd);background:var(--warn-bg)} .gate.warn b{color:var(--warn-tx)}
+
+/* variants row */
+.vrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.vbox{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--n-0);overflow:hidden;box-shadow:var(--sh-1);display:flex;flex-direction:column}
+.vbox > header{padding:11px 15px;border-bottom:1px solid var(--border-subtle);background:var(--n-25);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.vbox > header b{font-size:13px;font-weight:660;color:var(--text-1)}
+.vbox > div{padding:15px;flex:1}
+.vbox.warn > header{background:var(--warn-bg);border-bottom-color:var(--warn-bd)}
+.vbox.bad > header{background:var(--danger-bg);border-bottom-color:var(--danger-bd)}
+.vbox.ok > header{background:var(--ok-bg);border-bottom-color:var(--ok-bd)}
+
+/* phone frame for customer self-serve */
+.phone{width:250px;border:1px solid var(--border-strong);border-radius:22px;background:var(--n-800);padding:9px 9px 20px;box-shadow:var(--sh-2);position:relative;margin:0 auto}
+.phone::after{content:"";position:absolute;left:50%;transform:translateX(-50%);bottom:7px;width:70px;height:4px;border-radius:2px;background:rgba(255,255,255,.22)}
+.phone .scr{background:var(--n-0);border-radius:15px;padding:15px 13px;min-height:330px;display:flex;flex-direction:column}
+.phone h6{font-size:13.5px;font-weight:700;color:var(--text-1);line-height:1.3}
+.phone .es{font-size:11px;color:var(--text-3);font-style:italic;margin-top:2px;line-height:1.35}
+.phone .bd{font-size:11px;color:var(--text-2);line-height:1.5;margin-top:8px}
+.phone .cam{margin-top:12px;border-radius:10px;aspect-ratio:1.3;background:linear-gradient(150deg,#2b3346,#404b63);display:grid;place-items:center;position:relative;overflow:hidden}
+.phone .cam .guide{width:82%;height:70%;border:2px dashed rgba(255,255,255,.55);border-radius:7px}
+.phone .cam .hint{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:9.5px;color:rgba(255,255,255,.8);line-height:1.35}
+.phone .tb{margin-top:12px;border-radius:9px;padding:11px 8px;font-size:12px;font-weight:700;text-align:center;min-height:44px;display:grid;place-items:center}
+.phone .tb.pri{background:var(--brand);color:#fff}
+.phone .tb.sec{background:var(--n-0);color:var(--text-2);border:1px solid var(--border-strong);margin-top:8px}
+.phone .tb .es{display:block;font-weight:500;font-size:9.5px;font-style:italic;opacity:.85;margin-top:1px;color:inherit}
+
+@media (max-width:1080px){.body{grid-template-columns:1fr}.pane+.pane{border-left:0;border-top:1px solid var(--border-subtle)}}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <span class="eyebrow"><i></i>RideFleet · design only · 2026-09-04</span>
+  <h1>Pre-check-in — ID capture and field provenance</h1>
+  <p>Customer information is prefilled from a photo of the driver's licence <b>before</b> the checkout session starts, so the counter is a confirmation, not a typing exercise. The photo is read by the OCR path RFM already ships. The design's whole weight is on the confirmation step: <b>what the machine read, how sure it was, and what a human changed.</b></p>
+  <p class="note">
+    Design only — no application code touched. The extraction is <span class="mono">backend/src/modules/kiosk/kiosk-id-ocr.extract.js</span> (<span class="mono">extractLicenseFront</span> → <span class="mono">{ fields, confidence, notes }</span>), served by <span class="mono">idPhotoExtract()</span> in <span class="mono">kiosk-checkout.service.js</span>, which is <b>advisory by construction — it “stamps NOTHING”</b>. This screen is where advisory becomes confirmed.
+    <br><br>
+    <b>Terminal-side ID scanning is deliberately absent.</b> Dejavoo's Scanner Reader SDK is an Android SDK for apps running <i>on</i> the terminal (<span class="mono">ScannerActivity</span> / <span class="mono">startScan()</span> / <span class="mono">onSuccess(String)</span>), not a REST operation RFM can trigger — and it returns an opaque string rather than parsed licence fields. Hector already demoted a pdf417 scanner in favour of photo + OCR after an iPad re-test. The cost of revisiting it is in NOTES §7.
+  </p>
+</div>
+
+<div class="mock-wrap">
+
+  <!-- ============================================================
+       1 · Agent-assisted capture
+       ============================================================ -->
+  <div class="mock-label">1 · <b>Agent-assisted pre-check-in</b> — the agent fills it in for a customer who did not</div>
+  <p class="mock-cap">Today this is the <b>Staff Pre-Check-In</b> panel behind “Fill In For Customer” on the reservation page — fourteen text inputs and three file pickers. The redesign puts the licence photo first and lets it fill twelve of them, then asks the agent to confirm rather than to type.</p>
+
+  <div class="screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <h2>Staff pre-check-in · RES-849112</h2>
+        <span class="sub">Marcus A. Delgado &middot; pickup 04 Sep 14:20</span>
+        <div class="right">
+          <span class="tenant-scope">LAX · <b>Rightcars LAX</b></span>
+          <span class="chip chip--warn"><i></i>Pre-check-in incomplete</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="pane side">
+        <h3>Licence</h3>
+        <p class="phint">Photograph the front of the licence the customer handed you. Front only — that is what the extractor is trained on.</p>
+
+        <div class="lic">
+          <div class="img">
+            <div class="fake">
+              <span class="hdr">CALIFORNIA · DRIVER LICENSE</span>
+              <span class="nm">DELGADO RIVERA, MARCUS A</span>
+              <span class="ln">DL D1148-3390-2871</span>
+              <span class="ln">DOB 03/14/1988</span>
+              <span class="ln">EXP 03/14/2029</span>
+              <span class="ln">2211 SEPULVEDA BLVD</span>
+              <span class="ln">TORRANCE CA 90503</span>
+              <span class="ph"></span>
+            </div>
+          </div>
+          <div class="meta">
+            <span class="chip chip--ok"><i></i>Front captured</span>
+            <span>1.8 MB · JPEG</span>
+            <button class="btn btn--ghost btn--sm" style="margin-left:auto">Retake</button>
+          </div>
+        </div>
+
+        <div class="conf">
+          <span class="lab">Confidence</span>
+          <span class="bar"><i style="width:91%"></i></span>
+          <b>91</b>
+        </div>
+        <p style="font-size:11px;color:var(--text-3);margin-top:7px;line-height:1.55">
+          The model's own 0–100 score for this read. Below <b>70</b> the screen raises <span class="mono">LOW_CONFIDENCE</span> and every field is treated as unconfirmed until a human touches it.
+        </p>
+
+        <div class="sec-h">Attempts <span class="rule"></span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <span class="chip chip--neutral">1 of 5 used</span>
+          <span class="chip chip--neutral">4 remaining</span>
+        </div>
+        <p style="font-size:11px;color:var(--text-3);margin-top:7px;line-height:1.55">
+          A cost cap, not a security gate — <span class="mono">MAX_ID_EXTRACTS_PER_SESSION = 5</span>, backed by a per-device hourly bucket. Failed reads burn a slot too, so the counter is shown before the agent needs it.
+        </p>
+
+        <div class="sec-h">Other documents <span class="rule"></span></div>
+        <div class="gate ok"><span class="ic">✓</span><span><b>Licence back</b><small>Optional. Captured.</small></span></div>
+        <div class="gate warn"><span class="ic">!</span><span><b>Insurance document</b><small>Not uploaded — optional unless the customer declines coverage.</small></span></div>
+
+        <div class="callout callout--warn" style="margin-top:16px">
+          <b>Retention.</b> The licence image is identity-verification evidence for <i>this</i> rental. It is not a face-match corpus and it is not marketing data. The customer-facing disclosure the kiosk already shows belongs on this panel too.
+        </div>
+      </div>
+
+      <div class="pane">
+        <h3>Confirm what was read</h3>
+        <p class="phint">Every field carries its provenance. Nothing here is saved until you press Complete — the extraction on its own writes nothing.</p>
+
+        <div class="legend">
+          <span><span class="prov prov--scan"><i></i>Scanned</span> read by OCR, not yet confirmed</span>
+          <span><span class="prov prov--conf"><i></i>Confirmed</span> a human checked it</span>
+          <span><span class="prov prov--fix"><i></i>Corrected</span> OCR read it, a human changed it</span>
+          <span><span class="prov prov--typed"><i></i>Typed</span> entered by hand</span>
+          <span><span class="prov prov--none"><i></i>Unread</span> left empty on purpose</span>
+        </div>
+
+        <div class="sec-h">From the licence <span class="chip chip--ok" style="margin-left:auto"><i></i>5 of 6 read</span><span class="rule"></span></div>
+        <div class="frows">
+          <div class="frow">
+            <span class="k">First name<small>firstName</small></span>
+            <span class="inp">MARCUS</span>
+            <span class="was">&nbsp;</span>
+            <span class="prov prov--scan"><i></i>Scanned</span>
+          </div>
+          <div class="frow is-fix">
+            <span class="k">Last name<small>lastName</small></span>
+            <span class="inp">DELGADO RIVERA</span>
+            <span class="was">was <s>DELGADO</s></span>
+            <span class="prov prov--fix"><i></i>Corrected</span>
+          </div>
+          <div class="frow">
+            <span class="k">Date of birth<small>dateOfBirth</small></span>
+            <span class="inp">1988-03-14</span>
+            <span class="was">&nbsp;</span>
+            <span class="prov prov--scan"><i></i>Scanned</span>
+          </div>
+          <div class="frow is-low">
+            <span class="k">Licence number<small>licenseNumber</small></span>
+            <span class="inp">D1148-3390-2871</span>
+            <span class="was" style="color:var(--warn-tx)">check O vs 0</span>
+            <span class="prov prov--scan"><i></i>Scanned</span>
+          </div>
+          <div class="frow">
+            <span class="k">Licence state<small>licenseState</small></span>
+            <span class="inp">CA</span>
+            <span class="was">&nbsp;</span>
+            <span class="prov prov--scan"><i></i>Scanned</span>
+          </div>
+          <div class="frow is-empty">
+            <span class="k">Licence expiry<small>licenseExpiry</small></span>
+            <span class="inp">Glare on the date — type it</span>
+            <span class="was">&nbsp;</span>
+            <span class="prov prov--none"><i></i>Unread</span>
+          </div>
+        </div>
+        <div class="callout callout--info" style="margin-top:10px">
+          <b>An empty field is a feature.</b> The extraction prompt forbids guessing: <i>“If a field is not CLEARLY readable, use null. NEVER guess or invent a value.”</i> A red empty row is the system being honest, so it reads as a normal state — not an error, not a failure banner.
+        </div>
+
+        <div class="sec-h">Not on the licence — ask the customer <span class="rule"></span></div>
+        <div class="frows">
+          <div class="frow"><span class="k">Email<small>email</small></span><span class="inp">m.delgado@example.com</span><span class="was">&nbsp;</span><span class="prov prov--typed"><i></i>Typed</span></div>
+          <div class="frow"><span class="k">Phone<small>phone</small></span><span class="inp">+1 310 555 0148</span><span class="was">&nbsp;</span><span class="prov prov--typed"><i></i>Typed</span></div>
+          <div class="frow"><span class="k">Address line 1<small>address1</small></span><span class="inp">2211 Sepulveda Blvd</span><span class="was">&nbsp;</span><span class="prov prov--typed"><i></i>Typed</span></div>
+          <div class="frow"><span class="k">City / State / ZIP<small>city · state · zip</small></span><span class="inp">Torrance · CA · 90503</span><span class="was">&nbsp;</span><span class="prov prov--typed"><i></i>Typed</span></div>
+          <div class="frow"><span class="k">Country<small>country</small></span><span class="inp">US</span><span class="was">&nbsp;</span><span class="prov prov--typed"><i></i>Typed</span></div>
+        </div>
+        <p style="font-size:11px;color:var(--text-3);margin-top:8px;line-height:1.55">
+          US licences print an address and the model can read it, but RFM's extractor does not request address fields today. Adding them is a prompt change, not an architecture change — flagged in NOTES §7 as an easy win that must not be assumed.
+        </p>
+
+        <div class="sec-h">Rule checks <span class="rule"></span></div>
+        <div class="gate ok"><span class="ic">✓</span><span><b>Age 38 — meets the 21 minimum</b><small>Evaluated against the location's <span class="mono">chargeAgeMin</span> at the pickup date.</small></span></div>
+        <div class="gate warn"><span class="ic">!</span><span><b>Licence expiry not yet known</b><small><span class="mono">LICENSE_EXPIRY_UNREADABLE</span> — must be filled before check-out. The rule compares it to the scheduled return, not to today.</small></span></div>
+        <div class="gate ok"><span class="ic">✓</span><span><b>Name matches the reservation</b><small>Booking short-form ⊆ licence legal name. “Hector Padilla” matches “PADILLA LUNA HECTOR EDUARDO JR”; “Maria González Rivera” does not match “PEDRO GONZALEZ RIVERA”.</small></span></div>
+
+        <div class="btnrow">
+          <button class="btn btn--secondary">Skip the photo — type everything</button>
+          <span class="spacer"></span>
+          <button class="btn btn--ghost">Save draft</button>
+          <button class="btn btn--primary is-dis">Complete pre-check-in</button>
+        </div>
+        <p style="font-size:11px;color:var(--text-3);margin-top:8px">Blocked on one unread required field. The button names what is missing rather than greying out silently.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout callout--brand" style="margin-top:16px">
+    <b>Manual entry is a peer, not a punishment.</b> “Skip the photo — type everything” sits next to the primary action at equal weight and is available from the first render. A customer without their licence in hand, a camera that will not focus, a tenant with no OCR key configured (<span class="mono">503 OCR_UNAVAILABLE</span>) — all land in the same place, which is today's form, working exactly as it does now. The photo path is an accelerator laid over a complete manual flow; it is never a prerequisite.
+  </div>
+
+  <!-- ============================================================
+       2 · Customer self-serve
+       ============================================================ -->
+  <div class="mock-label">2 · <b>Customer self-serve</b> — the same capture, on their own phone</div>
+  <p class="mock-cap">The customer-portal pre-check-in gets the identical extraction and the identical confirmation. Only the framing changes: the customer confirms their <i>own</i> details, so the language is “check this is right”, not “verify the document”.</p>
+
+  <div class="vrow">
+    <div class="vbox">
+      <header><b>1 · Capture</b><span class="chip chip--neutral">EN / ES</span></header>
+      <div>
+        <div class="phone">
+          <div class="scr">
+            <h6>Photograph your licence</h6>
+            <div class="es">Fotografíe su licencia</div>
+            <div class="bd">Front of the card, flat, no glare. We use it only to fill in your details.
+              <div class="es" style="margin-top:5px">El frente de la tarjeta, plana y sin reflejos. La usamos solo para completar sus datos.</div>
+            </div>
+            <div class="cam"><span class="guide"></span><span class="hint">Fit the card inside the frame<br><i>Encuadre la tarjeta</i></span></div>
+            <div class="tb pri">Take photo<span class="es">Tomar foto</span></div>
+            <div class="tb sec">Type my details instead<span class="es">Prefiero escribir mis datos</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vbox ok">
+      <header><b>2 · Confirm</b><span class="chip chip--ok"><i></i>Confidence 91</span></header>
+      <div>
+        <div class="phone">
+          <div class="scr">
+            <h6>Is this right?</h6>
+            <div class="es">¿Es correcto?</div>
+            <div class="bd">We read this from your licence. Tap anything that is wrong.
+              <div class="es" style="margin-top:5px">Leímos esto de su licencia. Toque lo que esté incorrecto.</div>
+            </div>
+            <div class="frows" style="margin-top:11px">
+              <div class="frow" style="grid-template-columns:1fr auto;min-height:38px;padding:0 9px">
+                <span><span class="k" style="font-size:10px">Name / Nombre</span><br><b style="font-size:12px;color:var(--text-1)">MARCUS DELGADO</b></span>
+                <span class="prov prov--scan"><i></i>Scan</span>
+              </div>
+              <div class="frow" style="grid-template-columns:1fr auto;min-height:38px;padding:0 9px">
+                <span><span class="k" style="font-size:10px">Born / Nacimiento</span><br><b style="font-size:12px;color:var(--text-1)">1988-03-14</b></span>
+                <span class="prov prov--scan"><i></i>Scan</span>
+              </div>
+              <div class="frow is-empty" style="grid-template-columns:1fr auto;min-height:38px;padding:0 9px">
+                <span><span class="k" style="font-size:10px">Expires / Vence</span><br><b style="font-size:12px;color:var(--danger-tx);font-style:italic">Tap to add · Toque para añadir</b></span>
+                <span class="prov prov--none"><i></i>—</span>
+              </div>
+            </div>
+            <div class="tb pri" style="margin-top:11px">Yes, continue<span class="es">Sí, continuar</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vbox warn">
+      <header><b>Low confidence</b><span class="chip chip--warn"><i></i>Confidence 54</span></header>
+      <div>
+        <div class="phone">
+          <div class="scr">
+            <h6>We could not read this clearly</h6>
+            <div class="es">No pudimos leerla con claridad</div>
+            <div class="bd">Try again in better light, or type your details — either works.
+              <div class="es" style="margin-top:5px">Inténtelo de nuevo con mejor luz, o escriba sus datos — ambas opciones funcionan.</div>
+            </div>
+            <div class="conf is-low" style="margin-top:11px"><span class="lab">Score</span><span class="bar"><i style="width:54%"></i></span><b>54</b></div>
+            <div class="bd" style="margin-top:9px;font-size:10.5px">Below 70, nothing is prefilled — a confident-looking wrong value is worse than an empty box.
+              <div class="es" style="margin-top:4px">Por debajo de 70 no completamos nada automáticamente.</div>
+            </div>
+            <div class="tb pri" style="margin-top:auto">Retake photo<span class="es">Repetir foto</span></div>
+            <div class="tb sec">Type my details<span class="es">Escribir mis datos</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vbox bad">
+      <header><b>Unavailable</b><span class="chip chip--bad"><i></i>503 · 429</span></header>
+      <div>
+        <div class="phone">
+          <div class="scr">
+            <h6>Let's do this the quick way</h6>
+            <div class="es">Hagámoslo de forma rápida</div>
+            <div class="bd">Photo reading is not available right now. Filling the form takes about a minute.
+              <div class="es" style="margin-top:5px">La lectura de fotos no está disponible. Completar el formulario toma aproximadamente un minuto.</div>
+            </div>
+            <div class="callout callout--info" style="margin-top:11px;font-size:10.5px;line-height:1.5">
+              Same screen for all three causes: OCR not configured for this tenant, the provider failed, or the attempt cap was reached. The customer does not need to know which.
+            </div>
+            <div class="tb pri" style="margin-top:auto">Enter my details<span class="es">Ingresar mis datos</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout callout--bad" style="margin-top:16px">
+    <b>Never show the customer a failure they cannot act on.</b> <span class="mono">OCR_UNAVAILABLE</span> (503), <span class="mono">EXTRACT_FAILED</span> (502) and <span class="mono">EXTRACT_LIMIT</span> (429) are three different problems for an engineer and one problem for a renter: the photo route is closed, the form is open. The staff-side panel does distinguish them, because an agent hitting <span class="mono">OCR_UNAVAILABLE</span> needs to tell an admin to configure a key.
+  </div>
+
+  <!-- ============================================================
+       3 · Provenance downstream
+       ============================================================ -->
+  <div class="mock-label">3 · <b>Where provenance goes</b> — pre-check-in is not the last place it matters</div>
+  <p class="mock-cap">A badge that exists only on the form it was set on is decoration. Provenance is carried onto the checkout session's step 1, so the agent at the counter knows whether the name on the contract was read by a machine or confirmed by a person.</p>
+
+  <div class="vrow" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+    <div class="vbox">
+      <header><b>Pre-check-in</b><span class="chip chip--neutral">set</span></header>
+      <div style="font-size:12.5px;line-height:1.65">
+        Each field records <b>how</b> it got its value and <b>who</b> touched it last. A field the OCR filled and nobody looked at stays <span class="prov prov--scan"><i></i>Scanned</span> — the honest state, and the one worth surfacing later.
+      </div>
+    </div>
+    <div class="vbox">
+      <header><b>Checkout step 1</b><span class="chip chip--brand">read + confirm</span></header>
+      <div style="font-size:12.5px;line-height:1.65">
+        The agent sees the badges and confirms against the physical licence. Confirming promotes <span class="prov prov--scan"><i></i>Scanned</span> to <span class="prov prov--conf"><i></i>Confirmed</span> with the agent's user id. <b>Nothing goes on a signed contract still marked Scanned.</b>
+      </div>
+    </div>
+    <div class="vbox">
+      <header><b>Audit trail</b><span class="chip chip--info">forever</span></header>
+      <div style="font-size:12.5px;line-height:1.65">
+        “The name on this agreement was OCR-read at 09:14 and confirmed by agent M. Ruiz at 14:21” is the sentence that settles a disputed rental. Telemetry stays counts-and-confidence only — <b>never the extracted PII</b>, exactly as <span class="mono">recordSessionTelemetry</span> does today.
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
