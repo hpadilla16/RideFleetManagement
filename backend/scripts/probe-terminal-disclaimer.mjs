@@ -222,6 +222,27 @@ async function main() {
       console.log(`     clause "${clause.key}" — ${clause.body.length} chars`);
       return report(`Disclaimer (${clause.key})`, await spinClient.disclaimer({ title: clause.body }, cfg));
     } },
+    // Added after the 2026-09-04 LAX run. Steps 2-4 all came back
+    // StatusCode 0000 "OK", the terminal DID show the text, and the renter
+    // COULD sign - but no Signature came back: the body was GeneralResponse
+    // and nothing else. Two candidate explanations, and these two steps tell
+    // them apart.
+    //   5  GetSignature alone - is the ink fetched by a SECOND call?
+    //   6  Disclaimer then GetSignature - does the clause's own ink come back
+    //      that way, which is what per-clause initials would need?
+    // If neither returns ink, the remaining suspect is asynchronous delivery
+    // to CallbackInfo - unset on this tenant, so it would have nowhere to
+    // land. That becomes the next thing to configure and retest.
+    { n: 5, name: 'GetSignature alone - does a second call fetch the ink?', run: async () =>
+      report('GetSignature', await spinClient.getSignature(cfg)) },
+    { n: 6, name: 'Disclaimer then GetSignature - does the clause ink come back?', run: async () => {
+      const clause = longestClause();
+      console.log(`     showing "${clause.key}" again - sign it, then watch for the fetch`);
+      const shown = report('Disclaimer (for fetch)', await spinClient.disclaimer({ title: clause.body }, cfg));
+      if (!shown.ok) return shown;
+      console.log('     ...now fetching the signature');
+      return report('GetSignature (after disclaimer)', await spinClient.getSignature(cfg));
+    } },
   ];
 
   for (const step of steps) {
