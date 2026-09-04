@@ -401,6 +401,41 @@ export const spinClient = {
   },
 
   /**
+   * Show text on the terminal and capture an ink signature for it.
+   *
+   * NO MONEY. This is a screen prompt: the renter reads `Title` and signs.
+   * It is the mechanism behind terminal-side contract signing — one call per
+   * clause captures that clause's initials, and the returned PNG is exactly
+   * the artifact AgreementSectionInitial.initialDataUrl already stores, so a
+   * contract signed on the terminal and one signed on a phone persist
+   * identically.
+   *
+   * DELIBERATELY MINIMAL — only `Title` beyond the common block. The
+   * 2026-05-30 lesson recorded on sale() above is that unrecognized fields
+   * make the gateway reject the request with StatusCode 2201 BEFORE the
+   * terminal sees it: nothing appears on screen, nothing lands in the Dejavoo
+   * portal. Do not add fields here without a live test.
+   *
+   * UNPROVEN AGAINST OUR TERMINAL as of 2026-09-04. The May 2026 attempt used
+   * the PORTAL-configured inline disclaimer — a different mechanism, which
+   * never fired on AutoRental. scripts/probe-terminal-disclaimer.mjs is what
+   * proves this one.
+   */
+  async disclaimer({ title }, tenantConfig) {
+    const text = String(title ?? '').trim();
+    if (!text) throw new Error('SPIn disclaimer requires text');
+    return spinRequest('POST', 'v2/Common/Disclaimer', { Title: text }, tenantConfig);
+  },
+
+  /**
+   * Capture an ink signature with no text — the closing signature that follows
+   * the per-clause initials. Nothing beyond the common block. NO MONEY.
+   */
+  async getSignature(tenantConfig) {
+    return spinRequest('POST', 'v2/Common/GetSignature', {}, tenantConfig);
+  },
+
+  /**
    * Summary report.
    */
   async summaryReport(tenantConfig) {
