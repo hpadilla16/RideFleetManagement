@@ -235,7 +235,6 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/reservations/notes-updated-at.test.mjs',
   'src/modules/reservations/reservation-summary-counters.test.mjs',
   'src/modules/reservations/start-rental-compact.test.mjs',
-  'src/modules/tolls/tolls-scoring.test.mjs',
   'src/modules/vehicles/mileage-history.service.test.mjs',
 ]);
 
