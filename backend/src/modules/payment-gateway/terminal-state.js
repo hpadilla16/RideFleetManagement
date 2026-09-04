@@ -95,7 +95,29 @@ export const SPIN_STATUS = Object.freeze({
   TERMINAL_NOT_CONNECTED: '2001',
   TERMINAL_BUSY: '2008',
   GATEWAY_REJECTED: '2201',
+  // 1000 arrives as Message "Canceled" with DetailedMessage "Service Busy".
+  // Proven live at LAX 2026-09-04: a Void sent 19 s after an approved Sale got
+  // this while the terminal was still closing out the sale. It is a BUSY, not
+  // a refusal — the request was well formed and the gateway echoed the amounts
+  // and the RRN back. Treating it as terminal is how a rollback gives up on a
+  // charge it was supposed to reverse.
+  SERVICE_BUSY: '1000',
 });
+
+/**
+ * Is this failure worth waiting out and retrying?
+ *
+ * ONLY these two. A 2201 means the gateway refused the payload — retrying an
+ * identical payload cannot help, and retrying a MONEY call on a guess is how
+ * a customer gets charged twice. Anything not named here is not retried.
+ */
+export function isBusyFailure(err) {
+  const code = statusCodeOf(err);
+  if (code === SPIN_STATUS.TERMINAL_BUSY || code === SPIN_STATUS.SERVICE_BUSY) return true;
+  // 1000 is also used for genuine cancellations; only the busy detail qualifies.
+  const detail = String(err?.spinResponse?.GeneralResponse?.DetailedMessage || '').toLowerCase();
+  return code === SPIN_STATUS.SERVICE_BUSY && detail.includes('busy');
+}
 
 /** Default seconds to wait on a 2008 that arrives with no delay in the body. */
 export const DEFAULT_BUSY_DELAY_SECONDS = 30;

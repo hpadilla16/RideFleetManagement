@@ -653,7 +653,7 @@ async function main() {
 async function voidStage(referenceId, cfg, amount) {
   console.log(`\n  … voiding ${referenceId}`);
   try {
-    const res = await spinClient.void({ referenceId, amount }, cfg);
+    const res = await spinClient.voidWithRetry({ referenceId, amount }, cfg);
     const gr = res?.GeneralResponse || {};
     const ok = String(gr.ResultCode ?? '') === '0' && String(gr.StatusCode ?? '') === '0000';
     console.log(`     void ResultCode ${gr.ResultCode ?? '(none)'} StatusCode ${gr.StatusCode ?? '(none)'} ${gr.Message ?? ''}`);

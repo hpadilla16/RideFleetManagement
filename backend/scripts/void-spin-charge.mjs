@@ -72,7 +72,7 @@ async function main() {
   }
 
   console.log('\n  … voiding');
-  const res = await spinClient.void({ referenceId: REF, amount: AMOUNT, paymentType: PAYMENT_TYPE }, cfg);
+  const res = await spinClient.voidWithRetry({ referenceId: REF, amount: AMOUNT, paymentType: PAYMENT_TYPE }, cfg);
   const gr = res?.GeneralResponse || {};
   const ok = String(gr.ResultCode ?? '') === '0' && String(gr.StatusCode ?? '') === '0000';
   console.log(`     ResultCode ${gr.ResultCode ?? '(none)'}  StatusCode ${gr.StatusCode ?? '(none)'}  ${gr.Message ?? ''}`);
