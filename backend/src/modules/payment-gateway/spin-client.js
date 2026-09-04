@@ -428,6 +428,28 @@ export const spinClient = {
   },
 
   /**
+   * Show text on the terminal WITH buttons, and return which one was pressed.
+   *
+   * NO MONEY. Unlike disclaimer() this one waits for an answer, and unlike
+   * getSignature() the text is on screen AT THE MOMENT of the answer — which
+   * is what makes it a candidate for per-clause acceptance: the renter agrees
+   * while reading the clause, not from memory in front of a blank box.
+   *
+   * `Title` is documented as capped at 250 characters here (Disclaimer has no
+   * documented cap). Our longest TC_SECTIONS body is 245, so they fit — but
+   * that is a fact to re-check whenever the clause text is edited.
+   *
+   * Minimal payload, same 2201 discipline as disclaimer().
+   */
+  async userChoice({ title, options }, tenantConfig) {
+    const text = String(title ?? '').trim();
+    if (!text) throw new Error('SPIn userChoice requires text');
+    const choices = (Array.isArray(options) ? options : []).map((o) => String(o)).filter(Boolean);
+    if (choices.length < 2) throw new Error('SPIn userChoice requires at least two options');
+    return spinRequest('POST', 'v2/Common/UserChoice', { Title: text, ChoiceOptions: choices }, tenantConfig);
+  },
+
+  /**
    * Capture an ink signature with no text — the closing signature that follows
    * the per-clause initials. Nothing beyond the common block. NO MONEY.
    */
