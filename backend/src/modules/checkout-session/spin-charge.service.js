@@ -273,18 +273,46 @@ async function applyLocalRenterDepositRule({ baseAmount, reservationId, sessionI
  *
  * Every resolution logs the source (TENANT vs ENV), the tenant id and a MASKED
  * TPN. The authKey is never logged, here or anywhere else.
+ *
+ * 2026-09-04 — now also carries the reservation's PICKUP LOCATION. A tenant
+ * running per-location registers (Corpusa: five branches, LAX only the first)
+ * resolves to THAT counter's terminal. All three call sites below thread it;
+ * a tenant with no registers ignores it and resolves exactly as before.
  */
-async function loadTenantSpinConfig(tenantId, { sessionId = null } = {}) {
-  const resolved = await resolveTenantTerminalConfig(tenantId);
+
+/**
+ * The counter-facing sentence for a NONE resolution. Split out because there
+ * are now five distinct ways to have no terminal, and an agent who is told
+ * "no terminal configured" when the truth is "no register for THIS location"
+ * will go and overwrite the other branch's credentials trying to fix it —
+ * which is the very collision registers exist to end.
+ */
+function terminalNotConfiguredMessage(reason) {
+  switch (reason) {
+    case 'INCOMPLETE_TENANT_CONFIG':
+      return 'This tenant\'s payment terminal is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → SPIn Terminal before taking a payment.';
+    case 'NO_REGISTER_FOR_LOCATION':
+      return 'No payment terminal is registered for this pickup location. Add a register for this location in Settings → Payment Gateway → Registers — charging on another location\'s terminal is not allowed.';
+    case 'INCOMPLETE_REGISTER':
+      return 'This location\'s register is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → Registers before taking a payment.';
+    case 'AMBIGUOUS_REGISTER_NO_LOCATION':
+      return 'This tenant has several terminal registers and this payment carries no pickup location to choose between them. Set the reservation\'s pickup location, or pick a register.';
+    case 'NO_REGISTER_FOR_ID':
+      return 'That terminal register no longer exists or has been disabled. Pick another in Settings → Payment Gateway → Registers.';
+    default:
+      return 'This tenant has no payment terminal configured. Add the SPIn Auth Key and TPN in Settings → Payment Gateway → SPIn Terminal before taking a payment.';
+  }
+}
+
+async function loadTenantSpinConfig(tenantId, { sessionId = null, locationId = null } = {}) {
+  const resolved = await resolveTenantTerminalConfig(tenantId, { locationId });
 
   if (resolved.source === 'NONE' && !isSpinDryRun()) {
     logger.error('[spin-charge] refusing to charge — no payment terminal resolved for this tenant', {
-      sessionId, tenantId, reason: resolved.reason,
+      sessionId, tenantId, locationId, reason: resolved.reason,
     });
     throw new CheckoutSessionError(
-      resolved.reason === 'INCOMPLETE_TENANT_CONFIG'
-        ? 'This tenant\'s payment terminal is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → SPIn Terminal before taking a payment.'
-        : 'This tenant has no payment terminal configured. Add the SPIn Auth Key and TPN in Settings → Payment Gateway → SPIn Terminal before taking a payment.',
+      terminalNotConfiguredMessage(resolved.reason),
       409, 'TERMINAL_NOT_CONFIGURED',
     );
   }
@@ -292,9 +320,12 @@ async function loadTenantSpinConfig(tenantId, { sessionId = null } = {}) {
   logger.info('[spin-charge] terminal config resolved', {
     sessionId,
     tenantId,
+    locationId,
     source: resolved.source,
     reason: resolved.reason,
     tpn: resolved.maskedTpn,
+    registerId: resolved.registerId || null,
+    registerName: resolved.registerName || '',
   });
 
   return toSpinClientConfig(resolved);
@@ -332,7 +363,7 @@ async function runChargeSequence({
   const session = await prisma.checkoutSession.findUnique({
     where: { id: sessionId },
     include: {
-      reservation: { select: { id: true, reservationNumber: true, tenantId: true } },
+      reservation: { select: { id: true, reservationNumber: true, tenantId: true, pickupLocationId: true } },
       agreement: {
         select: {
           id: true, agreementNumber: true, paidAmount: true, securityDepositAmount: true,
@@ -395,7 +426,13 @@ async function runChargeSequence({
   // No .catch() here on purpose. Swallowing this into {} is exactly how the
   // charge used to fall through to the platform terminal; TERMINAL_NOT_CONFIGURED
   // must reach the wizard.
-  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, { sessionId });
+  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, {
+    sessionId,
+    // The counter the customer is standing at. Decides WHICH register's
+    // terminal runs this, and makes "no register here" a refusal rather
+    // than a charge on another branch's device.
+    locationId: session.reservation.pickupLocationId || null,
+  });
   const refId = `${session.reservation.reservationNumber}-${Date.now().toString(36)}`;
 
   // Track the events we add so we can persist them in one update at the
@@ -677,7 +714,7 @@ async function loadSessionAndAgreement(sessionId, allowedSteps) {
   const session = await prisma.checkoutSession.findUnique({
     where: { id: sessionId },
     include: {
-      reservation: { select: { id: true, reservationNumber: true, tenantId: true } },
+      reservation: { select: { id: true, reservationNumber: true, tenantId: true, pickupLocationId: true } },
       agreement: {
         select: {
           id: true, agreementNumber: true, paidAmount: true, securityDepositAmount: true,
@@ -756,7 +793,13 @@ async function runSale({ sessionId, amount, actorUserId }) {
   // No .catch() here on purpose. Swallowing this into {} is exactly how the
   // charge used to fall through to the platform terminal; TERMINAL_NOT_CONFIGURED
   // must reach the wizard.
-  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, { sessionId });
+  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, {
+    sessionId,
+    // The counter the customer is standing at. Decides WHICH register's
+    // terminal runs this, and makes "no register here" a refusal rather
+    // than a charge on another branch's device.
+    locationId: session.reservation.pickupLocationId || null,
+  });
   const refId = `${session.reservation.reservationNumber}-SALE-${Date.now().toString(36)}`;
 
   // The SALE is the rental owed, NOT the security deposit (a separate pre-auth
@@ -934,7 +977,13 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
   // No .catch() here on purpose. Swallowing this into {} is exactly how the
   // charge used to fall through to the platform terminal; TERMINAL_NOT_CONFIGURED
   // must reach the wizard.
-  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, { sessionId });
+  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, {
+    sessionId,
+    // The counter the customer is standing at. Decides WHICH register's
+    // terminal runs this, and makes "no register here" a refusal rather
+    // than a charge on another branch's device.
+    locationId: session.reservation.pickupLocationId || null,
+  });
   const depositRefId = `${session.reservation.reservationNumber}-DEP-${Date.now().toString(36)}`;
   const events = [];
   const log = (kind, payload) => events.push({ kind, ...payload, at: new Date().toISOString() });

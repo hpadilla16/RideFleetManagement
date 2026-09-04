@@ -11,7 +11,8 @@ import {
   getTenantModuleConfig
 } from '../../lib/module-access.js';
 import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
-import { buildTerminalAuditMetadata } from '../payment-gateway/tenant-terminal-config.js';
+import { buildTerminalAuditMetadata, resolveTenantTerminalConfig } from '../payment-gateway/tenant-terminal-config.js';
+import { paymentGatewayService } from '../payment-gateway/payment-gateway.service.js';
 
 export const settingsRouter = Router();
 
@@ -583,6 +584,50 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
           : `${String(gateway).toUpperCase()} is configured and ready for this tenant`
         : `${String(gateway).toUpperCase()} is missing required credentials for this tenant`,
       checks
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/settings/payment-gateway/terminal-check — { registerId?, locationId? }
+ * (2026-09-04, per-location registers.)
+ *
+ * The Registers panel's per-row "Run health check". Reuses the ONE terminal
+ * check that already exists (paymentGatewayService.checkTerminal → SPIn
+ * TerminalStatus) rather than adding a second way to ask a device if it is
+ * awake; the only new thing is that it says WHICH register it reached.
+ *
+ * Resolution goes through the same resolver the charge path uses, so what the
+ * button probes is exactly what a sale would charge — a health check that
+ * resolves credentials differently from the money path is a health check that
+ * lies. `registerId` pins one row; omitting it falls back to whatever the
+ * resolver would pick for this tenant (the legacy single terminal, for a tenant
+ * that has not adopted registers).
+ *
+ * ADMIN-gated, like the rest of this router. Returns the register identity, a
+ * MASKED TPN and booleans — never a credential.
+ */
+settingsRouter.post('/payment-gateway/terminal-check', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const registerId = req.body?.registerId ? String(req.body.registerId) : null;
+    const locationId = req.body?.locationId ? String(req.body.locationId) : null;
+    const resolved = await resolveTenantTerminalConfig(scope?.tenantId, { registerId, locationId });
+    const result = await paymentGatewayService.checkTerminal({
+      tenantId: scope?.tenantId, registerId, locationId,
+    });
+    res.json({
+      connected: !!result?.connected,
+      error: result?.error || null,
+      source: resolved.source,
+      reason: resolved.reason,
+      registerId: resolved.registerId || null,
+      registerName: resolved.registerName || '',
+      locationId: resolved.locationId || null,
+      tpnMasked: resolved.maskedTpn,
+      terminalStatus: result?.result?.TerminalStatus || null,
     });
   } catch (e) {
     next(e);

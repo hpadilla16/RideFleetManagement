@@ -62,13 +62,21 @@ import { pickInkedSignature } from '../../lib/signature-ink.js';
  * `toSpinClientConfig` still returns `{}` when the resolver reports a
  * non-TENANT source, so the deliberate, logged env fallback is unchanged; what
  * disappears is the silent one.
+ *
+ * 2026-09-04 — takes the agreement's PICKUP LOCATION too. All three paths here
+ * are card-NOT-present (Transact against the token captured at checkout), so no
+ * physical device is occupied — but the credential pair still decides which
+ * MERCHANT ACCOUNT the money lands in, and for a tenant running per-location
+ * registers (Corpusa) that is per branch. Every call site has
+ * `agreement.pickupLocationId` on hand: it is a non-null column, and it names
+ * the same counter whose register ran the original sale.
  */
-async function loadTenantSpinConfig(tenantId) {
+async function loadTenantSpinConfig(tenantId, locationId = null) {
   if (!tenantId) return {};
   try {
-    return toSpinClientConfig(await resolveTenantTerminalConfig(tenantId));
+    return toSpinClientConfig(await resolveTenantTerminalConfig(tenantId, { locationId }));
   } catch (e) {
-    logger.warn?.({ tenantId, err: e?.message }, 'spin tenant config resolve failed; falling back');
+    logger.warn?.({ tenantId, locationId, err: e?.message }, 'spin tenant config resolve failed; falling back');
     return {};
   }
 }
@@ -4983,7 +4991,7 @@ export const rentalAgreementsService = {
     // Route through the iPOSpays Transact API per the docs — this is
     // the documented CNP path for tokenized sales (transactionType 1).
     // Replaces the earlier SPIn-with-Token workaround.
-    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId, agreement.pickupLocationId);
     const customer = agreement.reservation?.customer || {};
     const customerName = [
       agreement.customerFirstName || customer.firstName,
@@ -5093,7 +5101,7 @@ export const rentalAgreementsService = {
     }
 
     const isManual = String(agreement.depositHoldId || '').startsWith('MANUAL-');
-    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId, agreement.pickupLocationId);
     let voidRef = agreement.depositHoldId;
 
     if (!isManual) {
@@ -5190,7 +5198,7 @@ export const rentalAgreementsService = {
       throw new Error('No card on file — cannot reauthorize without a saved iPOS Token');
     }
 
-    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId, agreement.pickupLocationId);
     const customer = agreement.reservation?.customer || {};
     const customerInfo = {
       name: [

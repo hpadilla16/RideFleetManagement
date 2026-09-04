@@ -246,6 +246,10 @@ function SettingsInner({ token, me, logout }) {
   };
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
+  // Per-register health-check results, keyed by register id. Cleared on save so
+  // a green tick from before an edit can never vouch for the edited row.
+  const [paymentGatewayRegisterHealth, setPaymentGatewayRegisterHealth] = useState({});
+  const [paymentGatewayRegisterChecking, setPaymentGatewayRegisterChecking] = useState(null);
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(DEFAULT_PLANNER_COPILOT_CONFIG);
   const [plannerCopilotUsage, setPlannerCopilotUsage] = useState(DEFAULT_PLANNER_COPILOT_USAGE);
   const [telematicsConfig, setTelematicsConfig] = useState(DEFAULT_TELEMATICS_CONFIG);
@@ -402,6 +406,9 @@ function SettingsInner({ token, me, logout }) {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
           ...(value?.spin || {})
         },
+        // Arrays are replaced wholesale, never merged — a spread would leave
+        // rows from a previous tenant's config behind when the scope changes.
+        registers: Array.isArray(value?.registers) ? value.registers : [],
         ipos: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.ipos,
           ...(value?.ipos || {})
@@ -826,11 +833,16 @@ function SettingsInner({ token, me, logout }) {
         ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
         ...(out?.spin || {})
       },
+      // The saved shape comes back with every register's authKey blanked and
+      // `hasAuthKey` set — so the form is immediately in blank-means-keep state
+      // and a second Save cannot wipe what the first one stored.
+      registers: Array.isArray(out?.registers) ? out.registers : [],
       ipos: {
         ...DEFAULT_PAYMENT_GATEWAY_CONFIG.ipos,
         ...(out?.ipos || {})
       }
     });
+    setPaymentGatewayRegisterHealth({});
     setMsg('Payment gateway settings saved');
   };
 
@@ -838,6 +850,62 @@ function SettingsInner({ token, me, logout }) {
     const out = await api(scopedSettingsPath('/api/settings/payment-gateway/health-check'), { method: 'POST' }, token);
     setPaymentGatewayHealth(out);
     setMsg(out?.summary || 'Payment gateway check complete');
+  };
+
+  // Per-row "Run health check" for the Registers table. Hits the ONE terminal
+  // check the platform already has (SPIn TerminalStatus), resolved through the
+  // same resolver a real charge uses — a check that resolves credentials
+  // differently from the money path is a check that lies.
+  //
+  // Only meaningful for a SAVED register: the auth key is write-only, so an
+  // unsaved row has nothing on the server to probe with.
+  const runRegisterHealthCheck = async (register) => {
+    if (!register?.id) {
+      return setMsg(t('settingsPayments.registers.saveBeforeCheck'));
+    }
+    setPaymentGatewayRegisterChecking(register.id);
+    try {
+      const out = await api(scopedSettingsPath('/api/settings/payment-gateway/terminal-check'), {
+        method: 'POST',
+        body: JSON.stringify({ registerId: register.id })
+      }, token);
+      setPaymentGatewayRegisterHealth((prev) => ({ ...prev, [register.id]: out }));
+      setMsg(out?.connected
+        ? t('settingsPayments.registers.checkOk', { tpn: out?.tpnMasked || '' })
+        : t('settingsPayments.registers.checkFailed', { reason: out?.error || out?.reason || '' }));
+    } catch (err) {
+      setPaymentGatewayRegisterHealth((prev) => ({ ...prev, [register.id]: { connected: false, error: err.message } }));
+      setMsg(err.message || t('settingsPayments.registers.checkFailed', { reason: '' }));
+    } finally {
+      setPaymentGatewayRegisterChecking(null);
+    }
+  };
+
+  const updateRegister = (index, patch) => {
+    setPaymentGatewayConfig((prev) => {
+      const rows = Array.isArray(prev.registers) ? [...prev.registers] : [];
+      rows[index] = { ...rows[index], ...patch };
+      return { ...prev, registers: rows };
+    });
+  };
+
+  const addRegister = () => {
+    setPaymentGatewayConfig((prev) => ({
+      ...prev,
+      // No id: the server mints one on save. Minting it here would let two
+      // browser tabs invent the same row twice.
+      registers: [...(Array.isArray(prev.registers) ? prev.registers : []), {
+        name: '', locationId: '', tpn: '', authKey: '', hasAuthKey: false,
+        merchantNumber: '1', callbackUrl: '', proxyTimeout: '', enabled: true
+      }]
+    }));
+  };
+
+  const removeRegister = (index) => {
+    setPaymentGatewayConfig((prev) => ({
+      ...prev,
+      registers: (Array.isArray(prev.registers) ? prev.registers : []).filter((_, i) => i !== index)
+    }));
   };
 
   const savePlannerCopilotConfig = async () => {
@@ -2536,6 +2604,11 @@ function SettingsInner({ token, me, logout }) {
   const activeLocationCount = loadedSettingsSections.locations
     ? locations.filter((location) => location.isActive !== false).length
     : null;
+  // Terminal registers (2026-09-04). `hasEnabledRegisters` mirrors the backend
+  // resolver's own test for "this tenant runs per-counter terminals" — it is
+  // what decides whether the single SPIn card above still governs.
+  const registerRows = Array.isArray(paymentGatewayConfig.registers) ? paymentGatewayConfig.registers : [];
+  const hasEnabledRegisters = registerRows.some((r) => r?.enabled !== false);
   const activeVehicleTypeCount = loadedSettingsSections.vehicleTypes ? vehicleTypes.length : null;
   const onlineRateCount = loadedSettingsSections.rates
     ? rates.filter((rate) => rate.isActive !== false && rate.displayOnline).length
@@ -3472,6 +3545,150 @@ function SettingsInner({ token, me, logout }) {
                 The Auth Key is encrypted at rest and never shown again — leave it blank to keep the saved one.
                 Auth Key <strong>and</strong> TPN must BOTH be set; a half-filled pair is refused at the counter rather than paired with another terminal.
               </div>
+              {/* The legacy single-terminal card stays visible while a tenant is
+                  still on it. Once registers are enabled they supersede it, and
+                  this one line says so rather than leaving two panels that look
+                  equally authoritative about which terminal charges. */}
+              {hasEnabledRegisters ? (
+                <div className="surface-note">{t('settingsPayments.registers.legacySuperseded')}</div>
+              ) : null}
+            </section>
+
+            {/* ── Registers · one terminal per counter ─────────────────── */}
+            <section className="glass card section-card">
+              <div className="row-between">
+                <h3 style={{ margin: 0 }}>{t('settingsPayments.registers.title')}</h3>
+                <button type="button" className="btn btn-secondary" onClick={addRegister}>
+                  {t('settingsPayments.registers.add')}
+                </button>
+              </div>
+              <div className="surface-note">{t('settingsPayments.registers.intro')}</div>
+              {registerRows.length === 0 ? (
+                <div className="surface-note">{t('settingsPayments.registers.empty')}</div>
+              ) : registerRows.map((register, index) => {
+                const health = register.id ? paymentGatewayRegisterHealth[register.id] : null;
+                return (
+                  <div key={register.id || `new-${index}`} className="glass card section-card" style={{ marginTop: 12 }}>
+                    <div className="row-between">
+                      <label className="label">
+                        <input
+                          type="checkbox"
+                          checked={register.enabled !== false}
+                          onChange={(e) => updateRegister(index, { enabled: e.target.checked })}
+                        />{' '}
+                        {t('settingsPayments.registers.enabled')}
+                      </label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={paymentGatewayRegisterChecking === register.id}
+                          onClick={() => runRegisterHealthCheck(register)}
+                        >
+                          {paymentGatewayRegisterChecking === register.id
+                            ? t('settingsPayments.registers.checking')
+                            : t('settingsPayments.registers.runCheck')}
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={() => removeRegister(index)}>
+                          {t('settingsPayments.registers.remove')}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="form-grid-2">
+                      <div className="stack">
+                        <label className="label">{t('settingsPayments.registers.name')}</label>
+                        <input
+                          value={register.name || ''}
+                          onChange={(e) => updateRegister(index, { name: e.target.value })}
+                          placeholder={t('settingsPayments.registers.namePlaceholder')}
+                        />
+                      </div>
+                      <div className="stack">
+                        <label className="label">{t('settingsPayments.registers.location')}</label>
+                        <select
+                          value={register.locationId || ''}
+                          onChange={(e) => updateRegister(index, { locationId: e.target.value })}
+                        >
+                          <option value="">{t('settingsPayments.registers.locationPlaceholder')}</option>
+                          {locations.map((l) => (
+                            <option key={l.id} value={l.id}>{l.code ? `${l.code} — ${l.name}` : l.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-grid-2">
+                      <div className="stack">
+                        <label className="label">{t('settingsPayments.registers.tpn')}</label>
+                        <input
+                          value={register.tpn || ''}
+                          onChange={(e) => updateRegister(index, { tpn: e.target.value })}
+                          placeholder={t('settingsPayments.registers.tpnPlaceholder')}
+                        />
+                      </div>
+                      <div className="stack">
+                        <label className="label">{t('settingsPayments.registers.authKey')}</label>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          value={register.authKey || ''}
+                          onChange={(e) => updateRegister(index, { authKey: e.target.value, clearAuthKey: false })}
+                          placeholder={register.hasAuthKey
+                            ? t('settingsPayments.registers.authKeySaved')
+                            : t('settingsPayments.registers.authKeyEmpty')}
+                        />
+                        {register.hasAuthKey ? (
+                          <label className="label">
+                            <input
+                              type="checkbox"
+                              checked={!!register.clearAuthKey}
+                              onChange={(e) => updateRegister(index, { clearAuthKey: e.target.checked, authKey: '' })}
+                            />{' '}
+                            {t('settingsPayments.registers.clearAuthKey')}
+                          </label>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="form-grid-2">
+                      <div className="stack">
+                        <label className="label">{t('settingsPayments.registers.merchantNumber')}</label>
+                        <input
+                          value={register.merchantNumber || '1'}
+                          onChange={(e) => updateRegister(index, { merchantNumber: e.target.value })}
+                        />
+                      </div>
+                      <div className="stack">
+                        <label className="label">{t('settingsPayments.registers.proxyTimeout')}</label>
+                        <input
+                          type="number"
+                          value={register.proxyTimeout || ''}
+                          onChange={(e) => updateRegister(index, { proxyTimeout: e.target.value })}
+                          placeholder={t('settingsPayments.registers.inheritPlaceholder')}
+                        />
+                      </div>
+                    </div>
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.registers.callbackUrl')}</label>
+                      <input
+                        value={register.callbackUrl || ''}
+                        onChange={(e) => updateRegister(index, { callbackUrl: e.target.value })}
+                        placeholder={t('settingsPayments.registers.inheritPlaceholder')}
+                      />
+                    </div>
+                    {health ? (
+                      <div className="surface-note">
+                        <strong>
+                          {health.connected
+                            ? t('settingsPayments.registers.checkOk', { tpn: health.tpnMasked || '' })
+                            : t('settingsPayments.registers.checkFailed', { reason: health.error || health.reason || '' })}
+                        </strong>
+                        {health.registerName ? ` · ${health.registerName}` : ''}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              <div className="surface-note">{t('settingsPayments.registers.note1')}</div>
+              <div className="surface-note">{t('settingsPayments.registers.note2')}</div>
             </section>
 
             <section className="glass card section-card">
