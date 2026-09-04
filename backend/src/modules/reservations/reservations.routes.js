@@ -2712,15 +2712,27 @@ reservationsRouter.post('/:id/payments/:paymentId/delete', requireCapability('pa
 // on a casual read (and to a grep) — the handler checked nothing. Measured in
 // prod before this change: 43 refunds totalling $9,618.79, 18 of them by
 // AGENTs. This is closing an open hole, not tightening an existing permission.
+// 2026-09-04 (View Payments refund): gateway-aware — the service routes by the
+// ROW's own reference/gateway (SPIn void/return, Transact void by RRN,
+// Auth.Net, PayArc, or a bookkeeping-only negative row) and never crosses
+// gateways. This route additionally REQUIRES a reason: it is the staff-facing
+// refund button, and the reason is what the audit row and the ledger note
+// carry into a dispute. (The VozIA service route carries author+ticketId
+// instead — its contract is unchanged.)
 reservationsRouter.post('/:id/payments/:paymentId/refund', requireCapability('paymentActions'), async (req, res, next) => {
   try {
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A refund reason is required' });
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
-    const row = await rentalAgreementsService.refundPayment(agreementId, req.params.paymentId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.refundPayment(agreementId, req.params.paymentId, { ...(req.body || {}), reason }, req.user?.id || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/cannot|invalid|already|amount/i.test(e.message)) return res.status(400).json({ error: e.message });
+    // A SPIn gateway refusal/decline carries spinStatusCode — surface its
+    // message to the agent (402, payment-level failure) instead of a blank 500.
+    if (e?.spinStatusCode || e?.spinTimeout) return res.status(402).json({ error: e.message });
+    if (/cannot|invalid|already|amount|refund|configured|approved|declined/i.test(e.message)) return res.status(400).json({ error: e.message });
     next(e);
   }
 });

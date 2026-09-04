@@ -14,7 +14,7 @@
  *  - both EN and ES actually render (namespace-merge gotcha guard).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import i18n from '../src/lib/i18n';
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
@@ -81,7 +81,13 @@ const RESERVATION = {
 const PAYMENTS = [
   { id: 'p1', paidAt: '2026-08-28T20:22:00Z', method: 'CARD', amount: 300, reference: 'IPOS:K1a2b3c4d5e6f7g8', status: 'PAID' },
   { id: 'p2', paidAt: '2026-08-26T14:41:00Z', method: 'CASH', amount: 200, reference: 'OTC-1756224061', status: 'PAID' },
-  { id: 'p3', paidAt: '2026-08-20T14:41:00Z', method: 'CARD', amount: 44, reference: 'AUTHNET:120058491022', status: 'PAID' }
+  { id: 'p3', paidAt: '2026-08-20T14:41:00Z', method: 'CARD', amount: 44, reference: 'AUTHNET:120058491022', status: 'PAID' },
+  // SPIn terminal sale: gateway column + "Spin Sale · <refId>" note are the
+  // server-written evidence the refund rail routes on (refund-rails.js).
+  { id: 'p4', paidAt: '2026-08-18T15:00:00Z', method: 'CARD', amount: 150, reference: 'A8K2X9', status: 'PAID', gateway: 'SPIN', notes: 'Spin Sale · RFM-RES1-777' },
+  // AUTH_HOLD: an authorization, not settled money — must never grow a
+  // refund action (Release deposit is the verb for holds).
+  { id: 'p5', paidAt: '2026-08-18T15:05:00Z', method: 'AUTH_HOLD', amount: 250, reference: 'HOLD-AUTH-9912', status: 'PAID' }
 ];
 
 function mockApi({ caps = IPOS_CAPS, capsError = false } = {}) {
@@ -187,8 +193,55 @@ describe('iPOS + SPIn tenant (IRC)', () => {
     render(<ViewPaymentsPage />);
     await screen.findByText('iPOSpays · SPIn terminal');
     const menus = screen.getAllByTitle('More actions');
+    // Menu items render inside each row's <details>, so scope to the row.
+    const authnetRow = menus[2].closest('tr');
     fireEvent.click(menus[2]); // the AUTHNET: legacy row
-    expect(await screen.findByText('Refund to card')).toBeInTheDocument();
+    expect(within(authnetRow).getByText('Refund to card')).toBeInTheDocument();
+  });
+
+  it('SPIn terminal sale row refunds TO THE CARD, requires a reason, and posts amount + reason', async () => {
+    mockApi({ caps: IPOS_CAPS });
+    render(<ViewPaymentsPage />);
+    await screen.findByText('iPOSpays · SPIn terminal');
+
+    const menus = screen.getAllByTitle('More actions');
+    const spinRow = menus[3].closest('tr'); // p4 — gateway:'SPIN' CARD row
+    fireEvent.click(menus[3]);
+    fireEvent.click(within(spinRow).getByText('Refund to card'));
+    const dialog = await screen.findByRole('dialog');
+    // confirmation names the processor + the row's reference
+    expect(within(dialog).getByText('SPIN')).toBeInTheDocument();
+    expect(within(dialog).getByText('RFM-RES1-777')).toBeInTheDocument();
+
+    const submit = screen.getByRole('button', { name: 'Refund' });
+    expect(submit).toBeDisabled(); // no reason yet
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. overcharge at counter, cancelled add-on'), {
+      target: { value: 'customer overcharged' }
+    });
+    expect(submit).not.toBeDisabled();
+    fireEvent.click(submit);
+
+    await waitFor(() => {
+      const call = apiMock.mock.calls.find(([p]) => String(p).includes('/payments/p4/refund'));
+      expect(call).toBeTruthy();
+      const body = JSON.parse(call[1].body);
+      expect(body.amount).toBe(150);
+      expect(body.reason).toBe('customer overcharged');
+    });
+  });
+
+  it('AUTH_HOLD rows get NO refund action — holds are released, not refunded', async () => {
+    mockApi({ caps: IPOS_CAPS });
+    render(<ViewPaymentsPage />);
+    await screen.findByText('iPOSpays · SPIn terminal');
+    const menus = screen.getAllByTitle('More actions');
+    const holdRow = menus[4].closest('tr'); // p5 — the AUTH_HOLD row
+    fireEvent.click(menus[4]);
+    // the overflow renders (copy reference) but no refund item of either kind
+    expect(within(holdRow).getByText('Copy reference')).toBeInTheDocument();
+    expect(within(holdRow).queryByText('Refund to card')).toBeNull();
+    expect(within(holdRow).queryByText('Record refund')).toBeNull();
   });
 });
 
