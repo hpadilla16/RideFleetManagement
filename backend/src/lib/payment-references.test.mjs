@@ -138,6 +138,26 @@ test('M3: the partial unique index exists in the database (Prisma cannot see it)
   );
 });
 
+test('M1b: RentalAgreementPayment has the partial unique index on machine references (agreement ledger floor)', async (t) => {
+  // Sibling of the ReservationPayment index above. Without it two concurrent
+  // kiosk payment-returns both wrote an agreement ledger line: paidAmount doubled
+  // and staff saw a phantom overpayment. Proven against Postgres in review.
+  const prisma = await prismaIfConfigured();
+  if (!prisma) { t.skip(NO_DB_SKIP); return; }
+  let rows;
+  try {
+    rows = await prisma.$queryRawUnsafe(
+      "SELECT indexdef FROM pg_indexes WHERE tablename = 'RentalAgreementPayment' AND indexname = 'RentalAgreementPayment_agreementId_gatewayRef_key'",
+    );
+  } catch (err) {
+    t.skip(`no reachable database: ${err?.message?.split('\n')[0]}`);
+    return;
+  }
+  assert.equal(rows.length, 1, 'RentalAgreementPayment_agreementId_gatewayRef_key is missing — re-apply prisma/migrations/20260911_agreement_payment_gateway_ref_unique');
+  assert.match(String(rows[0].indexdef), /UNIQUE/i);
+  assert.match(String(rows[0].indexdef), /IPOS:/, 'must be the PARTIAL index on machine references, not a blanket unique');
+});
+
 test('M3: KioskSession.paymentIntentRef is UNIQUE in the database (money-path binding)', async (t) => {
   const prisma = await prismaIfConfigured();
   if (!prisma) { t.skip(NO_DB_SKIP); return; }

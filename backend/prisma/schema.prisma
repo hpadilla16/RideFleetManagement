@@ -6352,6 +6352,15 @@ model KioskSession {
   // resolvable is what turns that late payment into a detected, queued item
   // instead of an orphan nobody can trace back to a reservation.
   paymentIntentPriorRefs String[]
+  // B5 Phase 2 — the LINK, not just the reference. Reusing the reference while
+  // minting a fresh hosted-page session on every press still put a SECOND live
+  // link into the world, and a guest who paid both produced a second charge the
+  // reference-based dedupe could not see. Same amount → the stored URL is
+  // returned and nothing is minted. A different amount (the guest went back and
+  // accepted an upsell) means the OLD link would undercharge, so the intent is
+  // superseded — new reference, new link, old one retained as payable-late.
+  paymentIntentUrl    String?
+  paymentIntentAmount Decimal? @db.Decimal(12, 2)
 
   // Bumped by the events endpoint — clean staleness signal for the B5
   // orphaned-money / abandoned-session sweep.

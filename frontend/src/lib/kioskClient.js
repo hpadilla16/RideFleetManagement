@@ -292,6 +292,27 @@ export function sandboxPayment(sessionId) {
   });
 }
 
+// What the guest is told while someone is helping them from somewhere else. Read
+// from the server's own grant columns — never from what the Valet iframe claims,
+// because the kiosk must not tell a guest something about their own check-in that
+// the server does not believe.
+export function getAssistState(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/assist-state`);
+}
+
+// B5 Phase 2 — mint (or REUSE) the tenant's own hosted payment page for this
+// session and get back the URL the kiosk renders as a link and a QR. The guest
+// pays on their own phone; no card data ever touches the tablet. Retrying at
+// the SAME amount returns the SAME stored link — nothing is minted, so there is
+// never a second live link for one guest (two links mean two real charges). If
+// the balance moved, the server supersedes the intent and mints fresh, and the
+// old link stays resolvable in case it is paid late.
+export function createPaymentLink(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/payment-link`, {
+    method: 'POST',
+  });
+}
+
 export function completeSession(sessionId) {
   return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/complete`, {
     method: 'POST',
