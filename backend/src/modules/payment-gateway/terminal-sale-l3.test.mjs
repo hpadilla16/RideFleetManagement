@@ -637,3 +637,68 @@ test('spin-client logs the decision but never the payload', () => {
   // Everything logged comes off the decision object, which test 32 proves is PII-free.
   assert.equal(/\bdecision\.[A-Za-z]+/.test(code), true);
 });
+
+// ── Void retry on a busy terminal (learned live at LAX, 2026-09-04) ─────────
+// A Void sent 19 s after an approved Sale came back 1000 / Canceled /
+// "Service Busy": well-formed request, device still closing out the sale. The
+// caller that needs this most is the rollback, which by definition runs right
+// after a transaction.
+test('a busy failure is retried; a gateway refusal is not', async () => {
+  const { isBusyFailure } = await import('./terminal-state.js');
+  const busy = Object.assign(new Error('Canceled'), {
+    spinStatusCode: '1000',
+    spinResponse: { GeneralResponse: { StatusCode: '1000', DetailedMessage: 'Service Busy' } },
+  });
+  const inUse = Object.assign(new Error('Error'), { spinStatusCode: '2008' });
+  const refused = Object.assign(new Error('Error'), {
+    spinStatusCode: '2201',
+    spinResponse: { GeneralResponse: { StatusCode: '2201', DetailedMessage: 'Invalid request data' } },
+  });
+  assert.equal(isBusyFailure(busy), true, '1000 + "Service Busy" is a wait, not a refusal');
+  assert.equal(isBusyFailure(inUse), true, '2008 is the documented busy');
+  assert.equal(isBusyFailure(refused), false, 'retrying a refused payload is how someone gets charged twice');
+});
+
+test('voidWithRetry waits out a busy terminal and then succeeds', async () => {
+  const { spinClient } = await import('./spin-client.js');
+  let calls = 0;
+  const slept = [];
+  const original = spinClient.void;
+  spinClient.void = async () => {
+    calls += 1;
+    if (calls < 3) {
+      throw Object.assign(new Error('Canceled'), {
+        spinStatusCode: '1000',
+        spinResponse: { GeneralResponse: { StatusCode: '1000', DetailedMessage: 'Service Busy' } },
+      });
+    }
+    return { GeneralResponse: { ResultCode: '0', StatusCode: '0000' }, Voided: true };
+  };
+  try {
+    const out = await spinClient.voidWithRetry(
+      { referenceId: 'R', amount: 1, sleep: async (ms) => { slept.push(ms); } }, {},
+    );
+    assert.equal(out.Voided, true);
+    assert.equal(calls, 3);
+    assert.equal(slept.length, 2, 'waited between each attempt');
+    assert.ok(slept.every((ms) => ms > 0), 'never retries instantly — that is the one answer we know is wrong');
+  } finally {
+    spinClient.void = original;
+  }
+});
+
+test('voidWithRetry gives up immediately on a gateway refusal', async () => {
+  const { spinClient } = await import('./spin-client.js');
+  let calls = 0;
+  const original = spinClient.void;
+  spinClient.void = async () => {
+    calls += 1;
+    throw Object.assign(new Error('Error'), { spinStatusCode: '2201' });
+  };
+  try {
+    await assert.rejects(() => spinClient.voidWithRetry({ referenceId: 'R', amount: 1 }, {}));
+    assert.equal(calls, 1, 'a refused payload is not retried');
+  } finally {
+    spinClient.void = original;
+  }
+});

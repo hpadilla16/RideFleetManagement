@@ -590,7 +590,12 @@ async function runChargeSequence({
           // The gateway refuses a void that does not carry the original
           // amount (2201, proven live 2026-09-04). saleAmount is what we just
           // charged, so it is what we must give back.
-          await spinClient.void({ referenceId: refId, amount: requestedAmount }, tenantConfig);
+          // voidWithRetry, not void: this runs immediately after a
+          // transaction, which is precisely when the terminal answers
+          // "Service Busy" (1000) — proven live 2026-09-04. A rollback that
+          // gives up on the first busy leaves the renter charged for a rental
+          // whose deposit was never held.
+          await spinClient.voidWithRetry({ referenceId: refId, amount: requestedAmount }, tenantConfig);
           log('SPIN_VOID_OK', { referenceId: refId });
           // Mark the payment row as VOID so the agreement's paidAmount
           // recompute drops it.

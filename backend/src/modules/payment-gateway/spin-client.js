@@ -1,4 +1,5 @@
 import logger from '../../lib/logger.js';
+import { isBusyFailure, busyDelaySeconds } from './terminal-state.js';
 import { buildTerminalSaleL3, TERMINAL_L3_SKIP } from './terminal-sale-l3.js';
 
 /**
@@ -404,6 +405,43 @@ export const spinClient = {
       PaymentType: paymentType,
       ReferenceId: String(referenceId).slice(0, 50),
     }, tenantConfig);
+  },
+
+  /**
+   * Void, waiting out a busy terminal instead of giving up on it.
+   *
+   * Proven necessary live at LAX 2026-09-04: a Void sent 19 seconds after an
+   * approved Sale came back `1000 / Canceled / "Service Busy"` — the terminal
+   * was still closing out the sale it had just approved. The request was fine;
+   * the device was not ready.
+   *
+   * That matters because the caller that needs this most is the ROLLBACK: sale
+   * approved, deposit pre-auth failed, now undo the sale. It runs immediately
+   * after a transaction, which is exactly when the terminal is busiest, and if
+   * it gives up on the first busy the renter stays charged for a rental whose
+   * deposit was never held.
+   *
+   * ONLY busy failures are retried (see isBusyFailure). A 2201 is the gateway
+   * refusing the payload — retrying an identical money call on a guess is how
+   * somebody gets charged twice.
+   */
+  async voidWithRetry({ referenceId, amount, paymentType = 'Credit', attempts = 3, sleep = null }, tenantConfig) {
+    const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+    let lastErr = null;
+    for (let i = 0; i < Math.max(1, attempts); i += 1) {
+      try {
+        return await this.void({ referenceId, amount, paymentType }, tenantConfig);
+      } catch (err) {
+        lastErr = err;
+        if (!isBusyFailure(err) || i === attempts - 1) throw err;
+        const secs = busyDelaySeconds(err);
+        logger.warn(`SPIn void busy, waiting ${secs}s before retry ${i + 2}/${attempts}`, {
+          referenceId, spinStatusCode: err?.spinStatusCode,
+        });
+        await wait(secs * 1000);
+      }
+    }
+    throw lastErr;
   },
 
   /**
