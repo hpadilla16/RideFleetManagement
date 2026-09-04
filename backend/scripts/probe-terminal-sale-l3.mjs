@@ -456,6 +456,22 @@ export function buildStages({
       }),
       endpoint: 'AutoRental',
     },
+    {
+      n: 9,
+      name: 'the AutoRental endpoint with the CART envelope - the shape that RENDERED in May',
+      why: 'rungs 7 and 8 both 500d instantly; May 2026 reached the terminal with Cart + AutoRental',
+      args: () => {
+        const a = withLines(many.rows, many.taxAmount, 2);
+        a.level3.autoRental = autoRentalInputs(agreementNumber, 2);
+        return a;
+      },
+      cfg: on({
+        spinL3LineItems: true,
+        spinL3AutoRental: true,
+        spinL3Envelope: L3_ENVELOPE.CART,
+      }),
+      endpoint: 'AutoRental',
+    },
   ];
 }
 
