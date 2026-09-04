@@ -846,6 +846,33 @@ export const ASSIST_TIMELINE_CAP = 200;
  * IN_PROGRESS on purpose: a guest can open Get Help on an ESCALATED session
  * and the agent must still be able to read it.
  */
+/**
+ * What the GUEST is told while someone is helping them from somewhere else.
+ *
+ * Read from the SERVER's own grant columns, never from what Valet claims. If the
+ * console said a permission was open and the server disagreed, the kiosk would be
+ * telling a guest something untrue about their own check-in — and this notice
+ * exists precisely because the remote case removed the one honest signal the
+ * in-person case has: a person standing there, visibly helping.
+ *
+ * Device-scoped: a kiosk can only ask about its own session. Returns the plain
+ * facts, no session data — a guest-facing endpoint has no business carrying more.
+ */
+async function assistState(sessionId, device) {
+  const session = await getSessionForDevice(sessionId, device);
+  if (!session.assistGrantedAt) return { open: false, expiresAt: null, helperName: null };
+  const expires = new Date(new Date(session.assistGrantedAt).getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000);
+  const open = expires.getTime() > Date.now();
+  return {
+    open,
+    expiresAt: open ? expires.toISOString() : null,
+    // Asserted by Valet, shown to the guest as a courtesy — "Marta is helping you"
+    // reads as help, where an unnamed presence reads as surveillance. Null is fine
+    // and the copy handles it; an in-person assist has no name here either.
+    helperName: open ? (session.assistAgentName || null) : null,
+  };
+}
+
 async function bindVoziaConversation(sessionId, device, { conversationId } = {}) {
   const session = await getSessionForDevice(sessionId, device);
   const raw = conversationId == null ? '' : String(conversationId).trim();
@@ -1034,5 +1061,6 @@ export const kioskSessionService = {
   escalate,
   listSessions,
   bindVoziaConversation,
+  assistState,
   assistView,
 };

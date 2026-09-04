@@ -880,3 +880,63 @@ test('F3 audit: the audited actor is the CALLER, not a service account we went l
   assert.deepEqual(meta.agentAssertedByValet, { ref: 'valet-agent-77', name: 'Marta Ruiz' });
   assert.equal(db.sessions.find((x) => x.id === 'ks1').assistUserId, 'u-admin');
 });
+
+/* ───── What the GUEST is told while someone helps them from somewhere else ─────
+ *
+ * An in-person assist announces itself: a person is standing there. Remotely
+ * nothing does, and Hector opened this to three roles — so this notice is the
+ * only thing between "someone is helping me" and "something happened to my
+ * account without my knowing". It reads the SERVER's grant, never Valet's claim.
+ */
+
+test('assist notice: closed when nobody holds a permission', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED' });
+  const sessionService = await import('./kiosk-session.service.js');
+  const out = await sessionService.kioskSessionService.assistState('ks1', DEVICE);
+  assert.deepEqual(out, { open: false, expiresAt: null, helperName: null });
+});
+
+test('assist notice: opens the moment a REMOTE grant is taken, and names the helper', async () => {
+  seedDeviceRow(); seedStaff(); seedBound({ outcome: 'ESCALATED' });
+  const sessionService = await import('./kiosk-session.service.js');
+  await kioskStaffAssistService.remoteUnlock(SCOPE, 'ks1', {
+    ...AGENT, conversationId: CONV, reason: 'Glare on the barcode',
+  }, ACTOR);
+  const out = await sessionService.kioskSessionService.assistState('ks1', DEVICE);
+  assert.equal(out.open, true, 'the guest must be told while it is open');
+  assert.equal(out.helperName, 'Marta Ruiz', '"Marta is helping you" reads as help; an unnamed presence reads as surveillance');
+  assert.match(out.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('assist notice: closes on its own when the permission expires — no stale reassurance', async () => {
+  seedDeviceRow(); seedStaff();
+  seedBound({
+    outcome: 'ESCALATED',
+    assistGrantedAt: new Date(Date.now() - (ASSIST_GRANT_TTL_MIN + 1) * 60 * 1000),
+    assistAgentName: 'Marta Ruiz',
+  });
+  const sessionService = await import('./kiosk-session.service.js');
+  const out = await sessionService.kioskSessionService.assistState('ks1', DEVICE);
+  assert.equal(out.open, false, 'an expired permission must stop claiming someone is there');
+  assert.equal(out.helperName, null, 'and must stop naming them');
+  assert.equal(out.expiresAt, null);
+});
+
+test('assist notice: an IN-PERSON assist opens it too — the guest is told either way', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED' });
+  const sessionService = await import('./kiosk-session.service.js');
+  await unlockAsAdmin();
+  const out = await sessionService.kioskSessionService.assistState('ks1', DEVICE);
+  assert.equal(out.open, true);
+  // No name here, and that is correct: nobody asserted one, and the copy handles it.
+  assert.equal(out.helperName, null);
+});
+
+test('assist notice: a kiosk can only ask about its OWN session', async () => {
+  seedDeviceRow(); seedStaff(); seedSession({ outcome: 'ESCALATED', deviceId: 'other-dev' });
+  const sessionService = await import('./kiosk-session.service.js');
+  await assert.rejects(
+    () => sessionService.kioskSessionService.assistState('ks1', DEVICE),
+    (e) => e.status === 404,
+  );
+});

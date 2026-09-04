@@ -264,3 +264,28 @@
   .kio-h2 { font-size: 22px; }
   .kio-main { padding: 18px 16px 24px; }
 }
+
+/* Someone is helping this guest from somewhere else, and they are told so.
+   Calm on purpose: this is not an error and not a warning. An in-person assist
+   announces itself by a person being there; remotely nothing does, so this is
+   the only signal the guest gets. It should read as reassurance — "you are not
+   alone with this" — not as an alarm about their own check-in.
+   Brand violet at a weight that passes AA on the kiosk's light ground (#8752FE
+   itself fails against white for small text, so the text uses the deep token). */
+.kio-assist-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto 14px;
+  padding: 10px 18px;
+  max-width: 720px;
+  border-radius: 999px;
+  background: rgba(135, 82, 254, .10);
+  border: 1px solid rgba(135, 82, 254, .24);
+  color: #4c1d95;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+}
+.kio-assist-notice span[aria-hidden="true"] { font-size: 18px; line-height: 1; }
