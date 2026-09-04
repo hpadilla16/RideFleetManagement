@@ -51,6 +51,7 @@ import { LicenseScanner } from '../../components/loaner/LicenseScanner';
 import { SignaturePad } from '../../components/kiosk/SignaturePad';
 import { StaffAssistScreen } from '../../components/kiosk/StaffAssistScreen';
 import { NameUpdateFlow } from '../../components/kiosk/NameUpdateFlow';
+import { AssistNotice } from '../../components/kiosk/AssistNotice';
 import { VoziaHelpOverlay } from '../../components/kiosk/VoziaHelpOverlay';
 import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
 import {
@@ -306,35 +307,35 @@ export default function KioskPage() {
    * WELCOME DO map (the guest genuinely has not found their reservation yet), so the very first
    * post — the one fired when the conversation identity arrives — always has something true to say.
    */
-  // While a conversation is open, ask the SERVER whether someone currently holds a
-  // permission over this check-in, and tell the guest if so.
+  // Ask the SERVER what the guest should be told about their own check-in, for
+  // as long as a session is live — NOT only while the chat is open. The first
+  // version gated on the chat, so an in-person unlock with no chat never fired,
+  // and a failed unbind (best-effort, tablet offline) silenced the poll while a
+  // remote agent could still act. The gate is the session, which is server truth.
   //
-  // Why this exists: an in-person assist is self-announcing — there is a person
-  // standing beside you, visibly doing something to your screen. Remotely that
-  // signal is gone, and with three roles able to do it, the difference between
-  // "someone is helping me" and "something happened to my account without my
-  // knowing" is this banner and nothing else.
-  //
-  // Polled only while the chat is actually open (a bound conversation), so an idle
-  // kiosk makes no requests. Server truth only: the console does not get to decide
-  // what the guest is told about their own check-in.
+  // 8s cadence. Cheap on the server (one PK read + at most one user lookup), and
+  // the DURABLE half of the notice — "your identity was confirmed by X" — does not
+  // depend on catching a transient grant inside any window at all. That was the
+  // real fix; the cadence is a courtesy for the "right now" line.
   useEffect(() => {
-    if (!voziaConvActive || !session?.id) { setAssistNotice(null); return undefined; }
+    const sid = session?.id;
+    const live = sid && session?.outcome !== 'COMPLETED' && session?.outcome !== 'ABANDONED';
+    if (!live) { setAssistNotice(null); return undefined; }
     let stop = false;
     const tick = async () => {
       try {
-        const out = await getAssistState(session.id);
-        if (!stop) setAssistNotice(out?.open ? out : null);
+        const out = await getAssistState(sid);
+        if (!stop) setAssistNotice(out && (out.open || out.verifiedBy) ? out : null);
       } catch {
-        // Never surface this to the guest: a failed poll means we do not know, and
-        // "we do not know" must read as no claim rather than as a false alarm.
+        // "We do not know" must read as no claim — never as a false alarm about
+        // the guest's own check-in. Transient; the next tick retries.
         if (!stop) setAssistNotice(null);
       }
     };
     tick();
-    const id = setInterval(tick, 5000);
+    const id = setInterval(tick, 8000);
     return () => { stop = true; clearInterval(id); };
-  }, [voziaConvActive, session?.id]);
+  }, [session?.id, session?.outcome]);
 
   const postVoziaState = useCallback((screenName, errorCode = null) => {
     if (!vozia?.host || !voziaIdentityRef.current.conversationId) return;
@@ -1072,22 +1073,7 @@ export default function KioskPage() {
       {progress > 0 ? <ProgressSteps t={t} current={progress} /> : null}
 
       {screen === 'BOOT' ? <div className="kio-main center" /> : null}
-      {/* Someone is helping this guest from somewhere else, and they are told so.
-          An in-person assist announces itself — a person is standing there. Remotely
-          nothing does, and with three roles able to open a permission, this banner is
-          the only thing between "someone is helping me" and "something happened to my
-          account without my knowing". Rendered above every screen because the guest may
-          be on any of them while it is open. */}
-      {assistNotice?.open ? (
-        <div className="kio-assist-notice" role="status" aria-live="polite">
-          <span aria-hidden="true">👤</span>
-          <span>
-            {assistNotice.helperName
-              ? t('kiosk.assistNoticeNamed', { name: assistNotice.helperName })
-              : t('kiosk.assistNotice')}
-          </span>
-        </div>
-      ) : null}
+      <AssistNotice state={assistNotice} t={t} />
 
       {screen === 'PAIRING' ? (
         <PairingScreen t={t} busy={busy} setBusy={setBusy} onPaired={(device) => { ui.setDevice(device); setScreen('WELCOME'); }} routeFatal={routeFatal} />

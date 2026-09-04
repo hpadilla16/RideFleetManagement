@@ -847,30 +847,56 @@ export const ASSIST_TIMELINE_CAP = 200;
  * and the agent must still be able to read it.
  */
 /**
- * What the GUEST is told while someone is helping them from somewhere else.
+ * REPLACES the existing `assistState` in kiosk-session.service.js.
  *
- * Read from the SERVER's own grant columns, never from what Valet claims. If the
- * console said a permission was open and the server disagreed, the kiosk would be
- * telling a guest something untrue about their own check-in — and this notice
- * exists precisely because the remote case removed the one honest signal the
- * in-person case has: a person standing there, visibly helping.
+ * What the GUEST is told about their own check-in. Two facts, both from this
+ * server's columns — never from what the Valet console claims:
  *
- * Device-scoped: a kiosk can only ask about its own session. Returns the plain
- * facts, no session data — a guest-facing endpoint has no business carrying more.
+ *  1. THE PERMIT — transient. Someone holds an assist grant right now.
+ *  2. THE ACT — durable. The identity was confirmed by a person, in person or
+ *     remotely. Read from idVerifyMethod, which F1 added to tell the two apart.
+ *
+ * The first version reported only the permit, and the permit is consumed the
+ * instant the override is applied — so in the routine case the notice lived for
+ * the agent's typing speed and a 5-second poll never observed it. The guest
+ * learned nothing. The act is what they need, and it outlives the grant.
+ *
+ * The name is the VERIFIED actor: User.fullName via assistUserId, the identity
+ * this system authenticated. Valet's asserted name belongs in the audit row,
+ * where its provenance travels with it — not on an official-looking notice in
+ * front of a guest. A service account is not a person: it yields null, and the
+ * copy says "someone from our team" rather than a bot's display name.
+ *
+ * Device-scoped: a kiosk can only ask about its own session.
  */
 async function assistState(sessionId, device) {
   const session = await getSessionForDevice(sessionId, device);
-  if (!session.assistGrantedAt) return { open: false, expiresAt: null, helperName: null };
-  const expires = new Date(new Date(session.assistGrantedAt).getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000);
-  const open = expires.getTime() > Date.now();
-  return {
-    open,
-    expiresAt: open ? expires.toISOString() : null,
-    // Asserted by Valet, shown to the guest as a courtesy — "Marta is helping you"
-    // reads as help, where an unnamed presence reads as surveillance. Null is fine
-    // and the copy handles it; an in-person assist has no name here either.
-    helperName: open ? (session.assistAgentName || null) : null,
-  };
+
+  const method = String(session.idVerifyMethod || '');
+  const verifiedBy = (method === 'REMOTE_AGENT_OVERRIDE' || method === 'REMOTE_AGENT_NAME_OVERRIDE')
+    ? 'REMOTE'
+    : (method === 'STAFF_OVERRIDE' || method === 'STAFF_NAME_OVERRIDE')
+      ? 'IN_PERSON'
+      : null;
+
+  let open = false;
+  let expiresAt = null;
+  if (session.assistGrantedAt) {
+    const expires = new Date(new Date(session.assistGrantedAt).getTime() + ASSIST_GRANT_TTL_MIN * 60 * 1000);
+    open = expires.getTime() > Date.now();
+    expiresAt = open ? expires.toISOString() : null;
+  }
+
+  let helperName = null;
+  if ((open || verifiedBy) && session.assistUserId) {
+    const actor = await prisma.user.findUnique({
+      where: { id: session.assistUserId },
+      select: { fullName: true, isServiceAccount: true },
+    }).catch(() => null);
+    if (actor && !actor.isServiceAccount) helperName = actor.fullName || null;
+  }
+
+  return { open, expiresAt, helperName, verifiedBy };
 }
 
 async function bindVoziaConversation(sessionId, device, { conversationId } = {}) {

@@ -265,27 +265,22 @@
   .kio-main { padding: 18px 16px 24px; }
 }
 
-/* Someone is helping this guest from somewhere else, and they are told so.
-   Calm on purpose: this is not an error and not a warning. An in-person assist
-   announces itself by a person being there; remotely nothing does, so this is
-   the only signal the guest gets. It should read as reassurance — "you are not
-   alone with this" — not as an alarm about their own check-in.
-   Brand violet at a weight that passes AA on the kiosk's light ground (#8752FE
-   itself fails against white for small text, so the text uses the deep token). */
+/* The guest is told, on their own screen, that someone touched their check-in.
+   ABOVE the help overlay (zIndex 70) on the same layer as the agent toast (85):
+   the first version rendered in normal flow and sat under the opaque chat iframe
+   for its entire life. pointer-events: none — it informs, it never blocks.
+   Two tones: "helping you right now" (violet) and "your identity was confirmed
+   by X" (green, durable). Calm on purpose — reassurance, not alarm. Text colours
+   pass AA on the composited grounds (measured 9.3:1 violet, 6.8:1 green). */
 .kio-assist-notice {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 auto 14px;
-  padding: 10px 18px;
-  max-width: 720px;
-  border-radius: 999px;
-  background: rgba(135, 82, 254, .10);
-  border: 1px solid rgba(135, 82, 254, .24);
-  color: #4c1d95;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: left;
+  position: absolute; left: 0; right: 0; top: 14px;
+  margin: 0 auto; width: max-content; max-width: min(720px, calc(100% - 32px));
+  z-index: 85; pointer-events: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 18px; border-radius: 999px;
+  font-size: 15px; font-weight: 600; line-height: 1.35; text-align: left;
+  box-shadow: 0 6px 20px -8px rgba(33, 26, 56, .35);
 }
+.kio-assist-notice--now  { background: #efe9fe; border: 1px solid rgba(135, 82, 254, .28); color: #4c1d95; }
+.kio-assist-notice--done { background: #e6f5ec; border: 1px solid rgba(16, 185, 129, .30); color: #065f46; }
 .kio-assist-notice span[aria-hidden="true"] { font-size: 18px; line-height: 1; }
