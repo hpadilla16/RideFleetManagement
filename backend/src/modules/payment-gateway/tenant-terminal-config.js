@@ -391,6 +391,21 @@ export async function resolveTenantTerminalConfig(tenantId, options = {}) {
         });
         return none('NO_REGISTER_FOR_ID', { tenantId, tenantName });
       }
+      // 2026-09-04 — a pin does not outrank the counter. A register pinned by
+      // an earlier selection can go stale (the reservation's pickup location
+      // was edited, a register was re-assigned in Settings); honouring it then
+      // is charging at counter A on counter B's device, the exact move
+      // NO_REGISTER_FOR_LOCATION exists to stop. A register with no location
+      // of its own is location-agnostic and still pins fine.
+      if (wantLocationId && pinned.locationId && pinned.locationId !== wantLocationId) {
+        logger.error('[tenant-terminal-config] pinned register belongs to a DIFFERENT location — refusing', {
+          tenantId, tenantName, registerId: wantRegisterId,
+          registerLocationId: pinned.locationId, locationId: wantLocationId,
+        });
+        return none('REGISTER_LOCATION_MISMATCH', {
+          tenantId, tenantName, registerId: pinned.id, registerName: pinned.name,
+        });
+      }
       return guardComplete(pinned, 'REGISTER_PINNED');
     }
 
@@ -510,6 +525,38 @@ export async function resolveTenantTerminalConfig(tenantId, options = {}) {
 }
 
 /**
+ * The registers an AGENT may choose between at a counter (2026-09-04).
+ *
+ * This is the read the checkout wizard's terminal selector makes: which
+ * enabled registers exist, optionally narrowed to one location. It carries
+ * NAMES and MASKED TPNs only — never an auth key, never a full TPN. The
+ * `complete` flag lets the UI grey out a half-configured register instead of
+ * letting the agent pick a device that resolution will refuse anyway.
+ *
+ * `hasRegisters` distinguishes "this tenant runs registers" from the legacy
+ * single-terminal tenant, for whom the selector must not render at all.
+ */
+export async function listTerminalRegisters(tenantId, { locationId = null } = {}) {
+  if (!tenantId) return { hasRegisters: false, registers: [] };
+  const { registers } = await readTenantTerminalRow(tenantId);
+  const enabled = (registers || []).filter((r) => r.enabled);
+  const wantLocationId = String(locationId || '').trim();
+  const scoped = wantLocationId
+    ? enabled.filter((r) => !r.locationId || r.locationId === wantLocationId)
+    : enabled;
+  return {
+    hasRegisters: enabled.length > 0,
+    registers: scoped.map((r) => ({
+      id: r.id,
+      name: r.name || maskTpn(r.tpn),
+      locationId: r.locationId || null,
+      maskedTpn: maskTpn(r.tpn),
+      complete: isRegisterComplete(r),
+    })),
+  };
+}
+
+/**
  * Adapt a resolved config into the `tenantConfig` shape spin-client.getConfig()
  * reads. Per-field env fallback inside the client stays intact for the fields
  * we don't carry (clientTimeoutMs, dry-run), which is the tenant → env → nothing
@@ -581,4 +628,5 @@ export const tenantTerminalConfig = {
   isSpinDryRun,
   maskTpn,
   buildTerminalAuditMetadata,
+  listTerminalRegisters,
 };

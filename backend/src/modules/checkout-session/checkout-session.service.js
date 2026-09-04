@@ -17,6 +17,7 @@ import {
 import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
 import { isCheckoutPaymentRequired } from '../settings/checkout-payment-policy.js';
 import { CheckoutSessionError } from './checkout-session.errors.js';
+import { listTerminalRegisters } from '../payment-gateway/tenant-terminal-config.js';
 
 // Re-exported so the 13 modules that import CheckoutSessionError from here keep
 // working. The class itself moved to a leaf module so helpers this service
@@ -631,26 +632,27 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // loser never writes.
       //
       // This is a PARTIAL close of the events lost-update, and the honest
-      // count is FOURTEEN other writers of this TEXT column, all still doing
+      // count is FIFTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1247 → :1255
-      //   saveCustomerSignature :1277 → :1298  (read is OUTSIDE the
-      //                                         $transaction that starts :1283)
-      //   mintHandoffToken      :1321 → :1381
-      //   setDeclinedInsurance  :1460 → :1492
-      //   markAbandoned         :1502 → :1516
+      //   stampSideEffect       :1249 → :1257
+      //   saveCustomerSignature :1279 → :1300  (read is OUTSIDE the
+      //                                         $transaction that starts :1285)
+      //   mintHandoffToken      :1323 → :1383
+      //   setDeclinedInsurance  :1462 → :1494
+      //   markAbandoned         :1504 → :1518
+      //   selectTerminalRegister :1579 → :1632
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
-      //   spin-charge.service.js:613, :645, :926, :1083, :1274 (five)
+      //   spin-charge.service.js:663, :695, :985, :1151, :1342 (five)
       //   mobile-inspection.service.js:284
       //   vehicle-swap.service.js:130
-      //   terms-signing.service.js:275
+      //   terms-signing.service.js:331
       // Any of them can still drop an entry written between its own read and
-      // its own write. saveCustomerSignature is the sharpest of the fourteen:
+      // its own write. saveCustomerSignature is the sharpest of the fifteen:
       // its $transaction makes the two WRITES atomic but leaves the READ
       // outside it, and what it writes is customerSignedAt — an
       // ENTRY_REQUIRES field for CLOSED. See the note on stampSideEffect.
-      // (Those are ALL the appendEvent callers in the tree; :297 here is the
-      // fourteenth-plus-one and does not count — it builds a fresh row on
+      // (Those are ALL the appendEvent callers in the tree; :299 here is the
+      // fifteenth-plus-one and does not count — it builds a fresh row on
       // create, with nothing to lose. The kiosk's similarly-named
       // appendEvents(sessionId, device, rawEvents) is a different function
       // writing a different column, KioskSession.events.)
@@ -1529,6 +1531,111 @@ async function markAbandoned({ id, reason, actorUserId }) {
 // way it runs in CI at all. Not part of the service's public surface.
 export { maybeSendFinalizeEmail };
 
+/**
+ * The terminal choices at this session's counter (2026-09-04).
+ *
+ * A pickup location can run more than one Dejavoo device (LAX Counter 1 /
+ * Counter 2). This read powers the wizard's terminal selector: enabled
+ * registers at the session's pickup location — names and MASKED TPNs only,
+ * never a credential. `selectable` is true only when there is a real choice;
+ * a legacy single-terminal tenant (no registers) renders no selector at all.
+ */
+async function getTerminalOptions({ id }) {
+  if (!id) throw new CheckoutSessionError('session id required', 400);
+  const session = await prisma.checkoutSession.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      terminalRegisterId: true,
+      reservation: { select: { tenantId: true, pickupLocationId: true } },
+    },
+  });
+  if (!session) throw new CheckoutSessionError('Session not found', 404);
+  const tenantId = session.reservation?.tenantId || null;
+  const locationId = session.reservation?.pickupLocationId || null;
+  const { hasRegisters, registers } = await listTerminalRegisters(tenantId, { locationId });
+  return {
+    sessionId: session.id,
+    locationId,
+    hasRegisters,
+    options: registers,
+    selectedRegisterId: session.terminalRegisterId || null,
+    selectable: registers.length > 1,
+  };
+}
+
+/**
+ * Pin this checkout to one terminal register — or clear the pin (null).
+ *
+ * The pick is validated against the session's OWN pickup location, and the
+ * resolver re-validates at charge time (REGISTER_LOCATION_MISMATCH), so a
+ * selection that goes stale can never charge on another counter's device.
+ * Every terminal op of the session — clauses, signature, sale, card-present
+ * deposit — reads this column, which is what keeps the whole checkout on ONE
+ * device.
+ */
+async function selectTerminalRegister({ id, registerId, actorUserId }) {
+  if (!id) throw new CheckoutSessionError('session id required', 400);
+  const session = await prisma.checkoutSession.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      events: true,
+      terminalRegisterId: true,
+      reservation: { select: { tenantId: true, pickupLocationId: true } },
+    },
+  });
+  if (!session) throw new CheckoutSessionError('Session not found', 404);
+  const tenantId = session.reservation?.tenantId || null;
+  const locationId = session.reservation?.pickupLocationId || null;
+  const wanted = String(registerId || '').trim() || null;
+
+  let event;
+  if (wanted) {
+    const { registers } = await listTerminalRegisters(tenantId, { locationId });
+    const match = registers.find((r) => r.id === wanted);
+    if (!match) {
+      throw new CheckoutSessionError(
+        'That terminal is not available at this pickup location. Pick one of this counter\'s own registers.',
+        400, 'REGISTER_NOT_AT_LOCATION',
+      );
+    }
+    if (!match.complete) {
+      throw new CheckoutSessionError(
+        'That terminal register is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → Registers.',
+        409, 'INCOMPLETE_REGISTER',
+      );
+    }
+    event = {
+      kind: 'TERMINAL_REGISTER_SELECTED',
+      registerId: match.id,
+      registerName: match.name,
+      terminalTpn: match.maskedTpn,
+      actorUserId: actorUserId || null,
+      at: new Date().toISOString(),
+    };
+  } else {
+    event = {
+      kind: 'TERMINAL_REGISTER_CLEARED',
+      actorUserId: actorUserId || null,
+      at: new Date().toISOString(),
+    };
+  }
+
+  await prisma.checkoutSession.update({
+    where: { id },
+    data: {
+      terminalRegisterId: wanted,
+      // Material change — the customer display and a second agent screen both
+      // render which device is live (see the stateVersion semantics above).
+      stateVersion: { increment: 1 },
+      events: appendEvent(session.events, event),
+    },
+  });
+
+  return getTerminalOptions({ id });
+}
+
 export const checkoutSessionService = {
   createForReservation,
   getById,
@@ -1540,4 +1647,6 @@ export const checkoutSessionService = {
   exchangeHandoffToken,
   setDeclinedInsurance,
   markAbandoned,
+  getTerminalOptions,
+  selectTerminalRegister,
 };

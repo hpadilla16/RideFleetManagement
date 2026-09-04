@@ -5558,6 +5558,16 @@ model CheckoutSession {
 
   startedByUserId String?
 
+  // 2026-09-04 — which terminal REGISTER this checkout runs on, chosen by the
+  // agent when the pickup location has more than one device (LAX Counter 1 /
+  // Counter 2). Threaded into every terminal op of the session — clauses,
+  // signature, sale, card-present deposit — so the whole checkout stays on ONE
+  // device. Null = resolve by location exactly as before (sole register, or
+  // first-with-a-warning). Validated against the pickup location both at
+  // selection time and again at resolution (REGISTER_LOCATION_MISMATCH), so a
+  // stale pick can never charge on another counter's terminal.
+  terminalRegisterId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
