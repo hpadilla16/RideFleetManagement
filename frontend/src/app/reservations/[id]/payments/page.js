@@ -11,7 +11,8 @@ import {
   capabilityFlags,
   autoReconcileArmed,
   parseReference,
-  refundKind
+  refundKind,
+  refundTarget
 } from './payments-capabilities';
 
 function normalizePaymentRows(rows = []) {
@@ -22,6 +23,12 @@ function normalizePaymentRows(rows = []) {
     amount: Number(p.amount || 0),
     reference: p.reference || '',
     status: String(p.status || '').toUpperCase(),
+    // Row evidence written by the SERVER when the money moved (SPIn terminal
+    // sales carry gateway:'SPIN' + the SPIn ReferenceId in notes). The refund
+    // dialog reads these to say what a refund of THIS row will do — that is
+    // row provenance, not a client-side guess at the tenant's gateway.
+    gateway: String(p.gateway || '').toUpperCase(),
+    notes: p.notes || '',
     source: 'db'
   }));
 }
@@ -100,15 +107,23 @@ function RefundDialog({ payment, busy, onCancel, onApply }) {
   const { t } = useTranslation();
   const max = Number(payment?.amount || 0);
   const [value, setValue] = useState(max > 0 ? max.toFixed(2) : '0.00');
+  const [reason, setReason] = useState('');
   const [error, setError] = useState('');
-  const kind = refundKind(payment?.reference);
+  // Row-evidence routing (mirrors the backend's refund-rails): says whether
+  // THIS refund moves card money and where it goes, before the agent confirms.
+  const target = refundTarget(payment || {});
+  const kind = target.kind;
   const apply = () => {
     const v = Number(value || 0);
     if (!(v > 0) || v - max > 0.009) {
       setError(t('viewPayments.dialog.refundInvalid', 'Enter a valid refund amount (up to {{max}})', { max: money(max) }));
       return;
     }
-    onApply(v);
+    if (!reason.trim()) {
+      setError(t('viewPayments.dialog.refundReasonRequired', 'A reason is required to refund a payment'));
+      return;
+    }
+    onApply(v, reason.trim());
   };
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
@@ -121,12 +136,27 @@ function RefundDialog({ payment, busy, onCancel, onApply }) {
             ? t('viewPayments.dialog.refundCardBody', 'This sends a real refund to the card through the processor.')
             : t('viewPayments.dialog.refundRecordBody', 'This posts a negative bookkeeping row — no card movement.')}
         </p>
+        {/* Where the money goes: processor + the row's own last-4/reference. */}
+        <p style={{ marginTop: 0 }}>
+          {target.gateway ? <span className="proc" style={{ marginRight: 6 }}>{target.gateway}</span> : null}
+          {target.last4 ? <span className="mono">···· {target.last4}</span> : null}
+          {target.last4 && target.reference ? ' · ' : null}
+          {target.reference ? <span className="mono" title={String(payment?.reference || '')}>{target.reference}</span> : null}
+          {!target.gateway && !target.reference ? t('viewPayments.dialog.refundNoRef', 'No gateway reference on this row') : null}
+        </p>
         <label className="label">{t('viewPayments.dialog.refundAmount', 'Refund amount')}</label>
         <input type="number" min="0" step="0.01" max={max} value={value} autoFocus onChange={(e) => { setValue(e.target.value); setError(''); }} />
+        <label className="label" style={{ marginTop: 8 }}>{t('viewPayments.dialog.refundReason', 'Reason (required)')}</label>
+        <textarea
+          rows={2}
+          value={reason}
+          onChange={(e) => { setReason(e.target.value); setError(''); }}
+          placeholder={t('viewPayments.dialog.refundReasonPh', 'e.g. overcharge at counter, cancelled add-on')}
+        />
         {error ? <div className="label" style={{ color: 'var(--danger-tx)', textTransform: 'none', letterSpacing: 0, marginTop: 6 }}>{error}</div> : null}
         <div className="row">
           <button type="button" className="button-subtle" onClick={onCancel} disabled={busy}>{t('viewPayments.dialog.cancel', 'Cancel')}</button>
-          <button type="button" onClick={apply} disabled={busy}>
+          <button type="button" onClick={apply} disabled={busy || !reason.trim()}>
             {busy ? t('viewPayments.dialog.working', 'Working…') : t('viewPayments.dialog.refundSubmit', 'Refund')}
           </button>
         </div>
@@ -655,11 +685,19 @@ function Inner({ token, me, logout }) {
     }
   };
 
-  const refundPayment = async (payment, amountToRefund) => {
-    if (!(amountToRefund > 0)) return;
+  const refundPayment = async (payment, amountToRefund, reason) => {
+    if (!(amountToRefund > 0) || !String(reason || '').trim()) return;
     await runPaymentAction(`/api/reservations/${id}/payments/${payment.id}/refund`, {
-      body: { amount: amountToRefund },
-      successMessage: `Refund posted: ${money(amountToRefund)}`,
+      body: { amount: amountToRefund, reason: String(reason).trim() },
+      successMessage: (response) => {
+        const rail = String(response?.rail || '');
+        const suffix = rail === 'RECORD_ONLY'
+          ? t('viewPayments.msg.refundRecorded', ' (bookkeeping only — no card movement)')
+          : rail
+            ? t('viewPayments.msg.refundSentToCard', ' — sent to the card via {{rail}}', { rail })
+            : '';
+        return `${t('viewPayments.msg.refundPosted', 'Refund posted: {{amount}}', { amount: money(amountToRefund) })}${suffix}`;
+      },
       busyKey: `refund-${payment.id}`
     });
     setDialog(null);
@@ -1246,10 +1284,13 @@ function Inner({ token, me, logout }) {
                 {payments.length ? payments.map((p) => {
                   const isVoid = p.status === 'VOID';
                   const isNegative = Number(p.amount || 0) < 0;
-                  const canRefund = Number(p.amount || 0) > 0 && !isVoid;
+                  // AUTH_HOLD rows are authorizations, not settled money — no
+                  // refund button; the deposit band's Release tool is how
+                  // those funds go back.
+                  const canRefund = Number(p.amount || 0) > 0 && !isVoid && p.method !== 'AUTH_HOLD';
                   const canVoid = isAdmin && p.method !== 'AUTH_HOLD' && !isVoid;
                   const canSaveCard = gwAuthnet && String(p.reference || '').toUpperCase().startsWith('AUTHNET:') && !isVoid;
-                  const rKind = refundKind(p.reference);
+                  const rKind = refundKind(p);
                   const hasMenu = canRefund || canVoid || canSaveCard || !!p.reference;
                   return (
                     <tr key={p.id} className={isVoid ? 'vp-void' : undefined}>
@@ -1345,7 +1386,7 @@ function Inner({ token, me, logout }) {
           payment={dialog.payment}
           busy={actionBusy === `refund-${dialog.payment.id}`}
           onCancel={() => setDialog(null)}
-          onApply={(v) => refundPayment(dialog.payment, v)}
+          onApply={(v, reason) => refundPayment(dialog.payment, v, reason)}
         />
       ) : null}
       {dialog?.kind === 'void' ? (

@@ -2304,6 +2304,10 @@
       "refundCardBody": "This sends a real refund to the card through the processor.",
       "refundRecordBody": "This posts a negative bookkeeping row — no card movement.",
       "refundAmount": "Refund amount",
+      "refundReason": "Reason (required)",
+      "refundReasonPh": "e.g. overcharge at counter, cancelled add-on",
+      "refundReasonRequired": "A reason is required to refund a payment",
+      "refundNoRef": "No gateway reference on this row",
       "refundSubmit": "Refund",
       "refundInvalid": "Enter a valid refund amount (up to {{max}})",
       "voidTitle": "Void payment · no refund",
@@ -2335,7 +2339,10 @@
       "linkSent": "Payment link sent to {{to}}",
       "linkNotSent": "Payment link email could not be sent. Link generated{{copied}}.",
       "copiedSuffix": " and copied to clipboard",
-      "autoReconciled": "Authorize.Net payment detected and posted automatically."
+      "autoReconciled": "Authorize.Net payment detected and posted automatically.",
+      "refundPosted": "Refund posted: {{amount}}",
+      "refundSentToCard": " — sent to the card via {{rail}}",
+      "refundRecorded": " (bookkeeping only — no card movement)"
     }
   },
   "vehicleAssign": {

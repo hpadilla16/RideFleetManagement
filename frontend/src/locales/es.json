@@ -2304,6 +2304,10 @@
       "refundCardBody": "Esto envía un reembolso real a la tarjeta a través del procesador.",
       "refundRecordBody": "Esto crea una línea contable negativa — sin mover dinero.",
       "refundAmount": "Monto a reembolsar",
+      "refundReason": "Motivo (requerido)",
+      "refundReasonPh": "ej. cobro de más en el counter, add-on cancelado",
+      "refundReasonRequired": "Se requiere un motivo para reembolsar un pago",
+      "refundNoRef": "Esta línea no tiene referencia del gateway",
       "refundSubmit": "Reembolsar",
       "refundInvalid": "Ingresa un monto válido (hasta {{max}})",
       "voidTitle": "Anular pago · sin reembolso",
@@ -2335,7 +2339,10 @@
       "linkSent": "Enlace de pago enviado a {{to}}",
       "linkNotSent": "No se pudo enviar el email del enlace de pago. Enlace generado{{copied}}.",
       "copiedSuffix": " y copiado al portapapeles",
-      "autoReconciled": "Pago de Authorize.Net detectado y registrado automáticamente."
+      "autoReconciled": "Pago de Authorize.Net detectado y registrado automáticamente.",
+      "refundPosted": "Reembolso registrado: {{amount}}",
+      "refundSentToCard": " — enviado a la tarjeta vía {{rail}}",
+      "refundRecorded": " (solo contable — sin mover dinero)"
     }
   },
   "vehicleAssign": {

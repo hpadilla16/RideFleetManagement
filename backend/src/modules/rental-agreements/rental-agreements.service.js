@@ -41,6 +41,7 @@ import { spinClient } from '../payment-gateway/spin-client.js';
 import { usesSpinCnpRail, holdVoidRail } from '../payment-gateway/cnp-rail.js';
 import { resolveTenantTerminalConfig, toSpinClientConfig } from '../payment-gateway/tenant-terminal-config.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
+import { resolveRefundRail, isSameLocalDay } from './refund-rails.js';
 import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
 import logger from '../../lib/logger.js';
 import { autoCompleteShuttleRequestsOnCheckout } from '../shuttle/shuttle-requests.service.js';
@@ -5489,6 +5490,20 @@ export const rentalAgreementsService = {
     });
     if (!payment) throw new Error('Payment not found');
     if (!(Number(payment.amount || 0) > 0)) throw new Error('Only captured payments can be refunded');
+    // AUTH_HOLD is an authorization, not settled money — there is nothing to
+    // refund. Releasing the hold (the existing Release deposit tool) is the
+    // operation that gives those funds back.
+    if (String(payment.method || '').toUpperCase() === 'AUTH_HOLD') {
+      throw new Error('Auth holds cannot be refunded — release the deposit hold instead');
+    }
+    if (String(payment.status || '').toUpperCase() === 'VOID') {
+      throw new Error('This payment is already voided');
+    }
+
+    // Optional here (the View Payments route REQUIRES it; the VozIA service
+    // route carries author/ticketId instead). When present it rides the ledger
+    // note and the audit row so a dispute reads why the money went back.
+    const reason = String(payload.reason || '').trim();
 
     const refundAmount = Number(payload.amount || payment.amount || 0);
     if (!Number.isFinite(refundAmount) || refundAmount <= 0) throw new Error('Refund amount must be greater than 0');
@@ -5508,12 +5523,24 @@ export const rentalAgreementsService = {
       throw new Error('Refund amount exceeds the remaining refundable balance');
     }
 
-    const rawReference = String(payment.reference || '').trim();
-    if (rawReference.toUpperCase().startsWith('PAYARC:')) {
+    // ── Gateway rail dispatch (2026-09-04) ────────────────────────────
+    // Routed by the ROW's own evidence (reference prefix / gateway column),
+    // never by the tenant's current gateway — a legacy AUTHNET: row on a
+    // tenant that since moved to SPIn still refunds through Authorize.Net,
+    // and vice versa. Rails NEVER cross. resolveRefundRail is pure and
+    // pinned in refund-rails.test.mjs.
+    const routed = resolveRefundRail(payment);
+    const isPartial = Math.abs(refundAmount - Number(payment.amount || 0)) > 0.009;
+    // What actually happened at the gateway — recorded on the audit row and
+    // returned to the UI so staff never have to guess whether card money moved.
+    let gatewayAction = 'RECORD_ONLY';
+
+    if (routed.rail === 'PAYARC') {
       // PayArc refund dispatch — hits POST /v1/charges/:id/void
       // first, falls through to /refunds for already-settled
       // charges. See payarc-hosted-fields.refundCharge().
-      const chargeId = rawReference.slice('PAYARC:'.length).trim();
+      const chargeId = routed.key;
+      if (!chargeId) throw new Error('This PayArc payment has no charge id on file — cannot refund to the card');
       const scope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
       const cfg = await settingsService.getPaymentGatewayConfig(scope);
       if (!cfg?.payarc?.bearerToken) {
@@ -5525,8 +5552,74 @@ export const rentalAgreementsService = {
         reason: 'requested_by_customer',
         config: cfg,
       });
-    } else if (rawReference.toUpperCase().startsWith('AUTHNET:')) {
-      const transId = rawReference.slice('AUTHNET:'.length).trim();
+      gatewayAction = 'PAYARC_REFUND';
+    } else if (routed.rail === 'SPIN' || routed.rail === 'TRANSACT') {
+      if (!routed.key) {
+        throw new Error('Cannot find the gateway reference for this payment — void it and record a manual refund instead');
+      }
+      // The credential pair decides which MERCHANT the money leaves — resolve
+      // it exactly the way the original charge did (tenant registers → tenant
+      // block → audited env fallback; see tenant-terminal-config.js).
+      const resolvedTerminal = await resolveTenantTerminalConfig(agreement.tenantId, {
+        locationId: agreement.pickupLocationId || null,
+      });
+      const tenantConfig = toSpinClientConfig(resolvedTerminal);
+      // RAIL RULE: the Transact client authenticates with the PLATFORM's
+      // Transact credentials (env JWT/static token), so it may only touch
+      // transactions that ran on the legacy env terminal. A tenant-resolved
+      // SPIn terminal (tenantConfig.spinTpn present) must send the refund
+      // through SPIn with the tenant's own credentials — using the platform
+      // Transact auth against another merchant's transaction is exactly the
+      // cross-merchant call tenant-terminal-config.js exists to prevent.
+      const useSpinRail = routed.rail === 'SPIN' || !!tenantConfig.spinTpn;
+
+      if (useSpinRail) {
+        if (resolvedTerminal.source === 'NONE') {
+          throw new Error(`No SPIn terminal is configured for this tenant (${resolvedTerminal.reason}) — cannot send the refund to the card`);
+        }
+        if (isSameLocalDay(payment.paidAt, new Date())) {
+          // Batch still open → Void, which requires the ORIGINAL amount
+          // (gateway 2201 without it — proven live 2026-09-04) and can only
+          // undo the whole transaction. voidWithRetry waits out a busy
+          // terminal; refusals/declines throw immediately, never retried.
+          if (isPartial) {
+            throw new Error('Same-day card payments can only be refunded in full (terminal void). For a partial refund, retry after the batch settles tomorrow.');
+          }
+          await spinClient.voidWithRetry({
+            referenceId: routed.key,
+            amount: Number(payment.amount),
+          }, tenantConfig);
+          gatewayAction = 'SPIN_VOID';
+        } else {
+          // Settled → Return against the original ReferenceId. Partial
+          // amounts are allowed. Single attempt: spinRequest throws on any
+          // non-approval and a money call is never retried on a refusal.
+          await spinClient.refund({
+            amount: refundAmount,
+            referenceId: routed.key,
+          }, tenantConfig);
+          gatewayAction = 'SPIN_RETURN';
+        }
+      } else {
+        // Legacy env-terminal Transact row. The only Transact reversal we
+        // have is a FULL void by RRN (amount must ride empty, never '0' —
+        // see voidByRrn); there is no partial-refund endpoint in the client.
+        if (isPartial) {
+          throw new Error('Card-on-file (Transact) payments can only be refunded in full from here — the gateway void reverses the whole transaction.');
+        }
+        const voidResponse = await iposTransactClient.voidByRrn({
+          rrn: routed.key,
+          agreementNumber: agreement.agreementNumber || agreement.id,
+        }, tenantConfig);
+        const voidNorm = iposTransactClient.normalizeResponse(voidResponse);
+        if (!voidNorm.approved) {
+          throw new Error(voidNorm.errMessage || voidNorm.message || 'iPOSpays void was not approved');
+        }
+        gatewayAction = 'TRANSACT_VOID';
+      }
+    } else if (routed.rail === 'AUTHNET') {
+      const transId = routed.key;
+      if (!transId) throw new Error('This Authorize.Net payment has no transaction id on file — cannot refund to the card');
       const scope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
       const details = await authNetTransactionDetails(transId, scope);
       const tx = details?.transaction || {};
@@ -5580,10 +5673,19 @@ export const rentalAgreementsService = {
       if (!ok) {
         throw new Error(authNetMessage(authnet) || 'Authorize.Net refund failed');
       }
+      gatewayAction = transactionRequest.transactionType === 'voidTransaction'
+        ? 'AUTHNET_VOID'
+        : 'AUTHNET_REFUND';
     }
+    // routed.rail === 'RECORD' (cash/check/manual card/ATH Móvil…): no gateway
+    // call, negative bookkeeping row only — the pre-existing behavior.
 
     const refundReference = `REFUND:${paymentId}`;
     const refundPaidAt = new Date();
+    // The `Refund for payment <id>` prefix is load-bearing: the cumulative-
+    // refund guard above and the payment-delete cleanup both find refund rows
+    // by it. The reason (when given) rides after it.
+    const refundNotes = `Refund for payment ${paymentId}${reason ? ` — ${reason}` : ''}`;
     const reservationRefund = await prisma.reservationPayment.create({
       data: {
         reservationId: agreement.reservationId,
@@ -5594,7 +5696,7 @@ export const rentalAgreementsService = {
         paidAt: refundPaidAt,
         origin: payment.origin || 'OTC',
         gateway: payment.gateway || null,
-        notes: `Refund for payment ${paymentId}`
+        notes: refundNotes
       }
     });
 
@@ -5606,7 +5708,7 @@ export const rentalAgreementsService = {
         reference: refundReference,
         status: 'PAID',
         paidAt: refundPaidAt,
-        notes: `Refund for payment ${paymentId}`
+        notes: refundNotes
       }
     });
 
@@ -5621,16 +5723,28 @@ export const rentalAgreementsService = {
 
     await prisma.auditLog.create({
       data: {
+        tenantId: agreement.tenantId || null,
         reservationId: agreement.reservationId,
         actorUserId: actorUserId || null,
         action: 'UPDATE',
-        reason: `Refund posted for payment ${paymentId}: ${refundAmount.toFixed(2)}`
+        reason: `Refund posted for payment ${paymentId}: ${refundAmount.toFixed(2)}${reason ? ` — ${reason}` : ''}`,
+        // Row references only (transIds/RRNs/AuthCodes already shown in the
+        // payments table) — never credentials, tokens, or a full PAN.
+        metadata: JSON.stringify({
+          paymentId,
+          rail: gatewayAction,
+          refundAmount,
+          originalAmount: Number(payment.amount || 0),
+          originalReference: String(payment.reference || '') || null,
+          refundReference
+        })
       }
     });
 
     return {
       ok: true,
       refundedAmount: refundAmount,
+      rail: gatewayAction,
       balance: nextBalance
     };
   },

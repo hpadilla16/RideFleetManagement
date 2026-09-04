@@ -81,13 +81,56 @@ export function parseReference(reference) {
 }
 
 /**
- * What a refund of this row will actually DO, mirroring the backend's
- * reference-prefix routing (rental-agreements.service.js:5257): PAYARC:→PayArc
- * API refund, AUTHNET:→Auth.Net void/refund, anything else→negative
- * bookkeeping row. The overflow label must say which, so staff never expect a
- * card movement the backend will not make.
+ * What a refund of this row will actually DO, mirroring the backend's row
+ * routing (rental-agreements/refund-rails.js): PAYARC:→PayArc API refund,
+ * AUTHNET:→Auth.Net void/refund, IPOS_ (underscore — Transact CNP, not the
+ * IPOS: HPP prefix)→Transact void by RRN, SPIn CARD rows (gateway column, set
+ * server-side on terminal sales and card-on-file charges)→SPIn void/return,
+ * anything else→negative bookkeeping row. The overflow label must say which,
+ * so staff never expect a card movement the backend will not make.
+ *
+ * Accepts the payment row (preferred — the gateway column is row evidence
+ * written by the server, not a client-side gateway guess) or a bare reference
+ * string for back-compat.
  */
-export function refundKind(reference) {
-  const raw = String(reference || '').trim().toUpperCase();
-  return raw.startsWith('AUTHNET:') || raw.startsWith('PAYARC:') ? 'card' : 'record';
+export function refundKind(paymentOrReference) {
+  const p = typeof paymentOrReference === 'string' || paymentOrReference == null
+    ? { reference: paymentOrReference }
+    : paymentOrReference;
+  const raw = String(p.reference || '').trim().toUpperCase();
+  if (raw.startsWith('AUTHNET:') || raw.startsWith('PAYARC:')) return 'card';
+  if (/^IPOS_/.test(raw)) return 'card';
+  if (
+    String(p.gateway || '').toUpperCase() === 'SPIN'
+    && String(p.method || '').toUpperCase() === 'CARD'
+  ) return 'card';
+  return 'record';
+}
+
+/**
+ * The confirmation line the refund dialog shows — processor + the row's own
+ * reference/last-4 — so the agent confirms WHERE the money goes before it
+ * moves. Pure for the same reason as everything else in this file.
+ */
+export function refundTarget(payment = {}) {
+  const parsed = parseReference(payment.reference);
+  const gw = String(payment.gateway || '').toUpperCase();
+  const raw = String(payment.reference || '');
+  const last4 = (/\*{4}\s?(\d{4})/.exec(raw) || [])[1] || null;
+  const gateway = parsed.label
+    || (gw === 'SPIN' ? 'SPIN' : gw || null)
+    || (/^IPOS_/i.test(raw.trim()) ? 'IPOS' : null);
+  // SPIn terminal sales store the AuthCode in `reference` and the SPIn
+  // ReferenceId — the key the refund actually runs against — in the notes
+  // ("Spin Sale · <refId>"). Confirm against the key that will move money,
+  // mirroring the backend's refund-rails resolution.
+  const spinSaleRef = gw === 'SPIN'
+    ? (/Spin Sale\s*·\s*(\S+)/.exec(String(payment.notes || '')) || [])[1] || null
+    : null;
+  return {
+    kind: refundKind(payment),
+    gateway,
+    last4,
+    reference: spinSaleRef || parsed.value || raw || ''
+  };
 }
