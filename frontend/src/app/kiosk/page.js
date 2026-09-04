@@ -39,6 +39,7 @@ import {
   pairDevice,
   readDeviceToken,
   sandboxPayment,
+  createPaymentLink,
   sendEvents,
   signAgreement,
   staffAssistConfirmName,
@@ -97,6 +98,8 @@ export default function KioskPage() {
   const [vehicle, setVehicle] = useState(null);
   const [offers, setOffers] = useState(null);
   const [assistNotice, setAssistNotice] = useState(null);
+  const [payLink, setPayLink] = useState(null);
+  const [payLinkBusy, setPayLinkBusy] = useState(false);
   const [agreement, setAgreement] = useState(null);
   const [payState, setPayState] = useState('IDLE'); // IDLE | PAID | FAILED | DISABLED
   const [doneData, setDoneData] = useState(null);
@@ -199,6 +202,7 @@ export default function KioskPage() {
     setVehicle(null);
     setOffers(null);
     setAssistNotice(null);
+    setPayLink(null);
     setAgreement(null);
     setPayState('IDLE');
     setDoneData(null);
@@ -1011,6 +1015,30 @@ export default function KioskPage() {
     } finally { setBusy(false); }
   };
 
+  // B5 Phase 2 — the guest pays on their OWN phone. The kiosk asks the backend
+  // for the tenant's hosted payment page and shows it as a link and a QR; no
+  // card data ever reaches this tablet. Retrying is safe: the backend reuses the
+  // session's single payment reference rather than minting a second live link.
+  const requestPaymentLink = useCallback(async () => {
+    const sid = sessionRef.current?.id;
+    if (!sid) return;
+    const gen = genRef.current;
+    setPayLinkBusy(true); setErr('');
+    try {
+      const out = await createPaymentLink(sid);
+      if (gen !== genRef.current) return;
+      setPayLink(out || null);
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      // A blocked switch is not a guest-facing failure — it is the feature being
+      // off. The guest sees the counter fallback, not an error they cannot act on.
+      setPayLink(null);
+      setErr(e?.code === 'KIOSK_PAYMENT_BLOCKED' ? '' : (e?.message || ''));
+    } finally {
+      if (gen === genRef.current) setPayLinkBusy(false);
+    }
+  }, []);
+
   const simulatePayment = async () => {
     const gen = genRef.current;
     setBusy(true); setErr('');
@@ -1244,6 +1272,9 @@ export default function KioskPage() {
           err={err}
           agreement={agreement}
           payState={payState}
+          payLink={payLink}
+          payLinkBusy={payLinkBusy}
+          onRequestLink={requestPaymentLink}
           onSimulate={simulatePayment}
           onHelp={() => escalate('PAYMENT_TROUBLE')}
           onBack={() => { setErr(''); setScreen('OFFERS'); loadOffers(); }}
@@ -2556,7 +2587,32 @@ function OffersScreen({ t, busy, err, offers, agreement, maskedName, onChoose })
   );
 }
 
-function PaymentScreen({ t, busy, err, agreement, payState, onSimulate, onHelp, onBack }) {
+/**
+ * Renders a payment URL as a QR the guest scans with their own phone.
+ *
+ * Drawn client-side and never stored: the image exists in this tab and dies
+ * with it. `qrcode` is already a dependency (the pairing screen uses it), so
+ * this adds no new supply chain. Errors are swallowed on purpose — the link is
+ * shown as text right beside it, so a failed canvas costs the guest nothing.
+ */
+function PaymentQr({ url, label }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!url || !canvasRef.current) return undefined;
+    import('qrcode')
+      .then((mod) => {
+        if (cancelled || !canvasRef.current) return;
+        const QR = mod.default || mod;
+        QR.toCanvas(canvasRef.current, url, { width: 220, margin: 1 }, () => {});
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [url]);
+  return <canvas ref={canvasRef} width={220} height={220} aria-label={label} role="img" />;
+}
+
+function PaymentScreen({ t, busy, err, agreement, payState, payLink, payLinkBusy, onRequestLink, onSimulate, onHelp, onBack }) {
   const totals = agreement?.agreement || {};
   const deposit = Number(totals.securityDepositAmount || 0);
 
@@ -2598,12 +2654,37 @@ function PaymentScreen({ t, busy, err, agreement, payState, onSimulate, onHelp, 
           ) : null}
         </div>
         <div style={{ textAlign: 'center' }}>
-          {/* Visual placeholder — the real QR/SMS payment link ships in Fase B5. */}
-          <div className="kio-qrph"><span style={{ fontSize: 12, color: '#6f668f', fontWeight: 700 }}>{t('kiosk.payQrSoon')}</span></div>
-          <div className="kio-paystate">⏳ {t('kiosk.payWaiting')}</div>
-          <div style={{ marginTop: 14 }}>
-            <button type="button" className="kio-btn ghost sm" disabled>📱 {t('kiosk.payTextLink')}</button>
-          </div>
+          {/* B5 Phase 2 — the guest pays on their OWN phone. The tablet shows the
+              tenant's hosted payment page as a QR and a link and never sees a
+              card. Asking again is safe: the backend reuses this session's one
+              payment reference rather than putting a second live link into the
+              world, which would settle as a second real charge. */}
+          {payLink?.url ? (
+            <>
+              <div className="kio-qrph" style={{ display: 'grid', placeItems: 'center', background: '#fff' }}>
+                <PaymentQr url={payLink.url} label={t('kiosk.payQrAlt')} />
+              </div>
+              <div className="kio-paystate">📱 {t('kiosk.payScanToPay')}</div>
+              <div style={{ fontSize: 12, color: '#6f668f', marginTop: 8, maxWidth: 240 }}>
+                {t('kiosk.payScanHint')}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="kio-qrph"><span style={{ fontSize: 12, color: '#6f668f', fontWeight: 700 }}>{t('kiosk.payQrSoon')}</span></div>
+              <div className="kio-paystate">⏳ {t('kiosk.payWaiting')}</div>
+              <div style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="kio-btn sm"
+                  disabled={busy || payLinkBusy}
+                  onClick={onRequestLink}
+                >
+                  📱 {payLinkBusy ? t('kiosk.payLinkBusy') : t('kiosk.payShowQr')}
+                </button>
+              </div>
+            </>
+          )}
           <div style={{ marginTop: 22 }}>
             <div className="kio-badge-sandbox" style={{ marginBottom: 8 }}>SANDBOX</div>
             <div>
