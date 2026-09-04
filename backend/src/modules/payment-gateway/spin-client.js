@@ -515,9 +515,18 @@ export const spinClient = {
    * what we persist as RentalAgreement.depositHoldId so we can void it
    * via the nightly cleanup job when a session is abandoned.
    */
-  async preAuthDeposit({ amount, referenceId, paymentType = 'Credit', invoiceNumber, token }, tenantConfig) {
+  async preAuthDeposit({ amount, referenceId, paymentType = 'Credit', invoiceNumber, token, attempts = 3, sleep = null }, tenantConfig) {
     const isCnp = Boolean(token);
-    return spinRequest('POST', 'v2/Payment/Auth', {
+    // BUSY-RETRY (2026-09-04, proven on the first real terminal checkout at
+    // LAX): the deposit pre-auth fires SECONDS after the sale approves, which
+    // is exactly when the terminal is still closing that sale out. The live
+    // run failed twice with 1000 "Canceled/Service Busy" — at +6s and again at
+    // +18s (the device holds the session ~30-50s) — and the agent was pushed
+    // to a manual deposit for no real reason. Same waiting rule as
+    // voidWithRetry: ONLY busy failures retry, honouring the gateway's own
+    // DelayBeforeNextRequest; a decline or a 2201 is thrown immediately.
+    const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+    const send = () => spinRequest('POST', 'v2/Payment/Auth', {
       Amount: Number(amount),
       PaymentType: paymentType,
       ReferenceId: String(referenceId).slice(0, 50),
@@ -534,6 +543,21 @@ export const spinClient = {
       ...(isCnp ? { Token: String(token), CardPresent: false } : {}),
       GetExtendedData: true,
     }, tenantConfig);
+    let lastErr = null;
+    for (let i = 0; i < Math.max(1, attempts); i += 1) {
+      try {
+        return await send();
+      } catch (err) {
+        lastErr = err;
+        if (!isBusyFailure(err) || i === attempts - 1) throw err;
+        const secs = busyDelaySeconds(err);
+        logger.warn(`SPIn preauth busy, waiting ${secs}s before retry ${i + 2}/${attempts}`, {
+          referenceId, spinStatusCode: err?.spinStatusCode,
+        });
+        await wait(secs * 1000);
+      }
+    }
+    throw lastErr;
   },
 
   /**
