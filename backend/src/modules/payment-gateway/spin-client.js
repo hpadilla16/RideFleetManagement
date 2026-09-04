@@ -373,8 +373,35 @@ export const spinClient = {
    * Dejavoo dedupes by ReferenceId, so passing the original sale/auth's
    * ReferenceId triggers the void on that exact transaction.
    */
-  async void({ referenceId }, tenantConfig) {
+  /**
+   * Void a transaction.
+   *
+   * FIXED 2026-09-04, learned on a live $1 probe at LAX: sending only
+   * `ReferenceId` is refused with StatusCode 2201 —
+   *
+   *   "The Amount field is required. For PaymentType field required values
+   *    are [Credit, Debit, EBT_Food, EBT_Cash, Card, Cash, Check, Gift,
+   *    UserChoice]"
+   *
+   * — so the void NEVER worked. That matters far beyond the probe: this is
+   * the rollback spin-charge.service.js runs when a sale succeeds and the
+   * deposit pre-auth then fails. Every one of those rollbacks has been
+   * failing, leaving a renter charged for a rental whose deposit was never
+   * secured. It is the "renter charged, no deposit" row of the failure matrix,
+   * happening always rather than rarely.
+   *
+   * `amount` is therefore REQUIRED, not optional: a void without it is a call
+   * we already know the gateway refuses, and defaulting it would guess at the
+   * size of somebody's refund.
+   */
+  async void({ referenceId, amount, paymentType = 'Credit' }, tenantConfig) {
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error('SPIn void requires the original amount — the gateway rejects a void without it');
+    }
     return spinRequest('POST', 'v2/Payment/Void', {
+      Amount: n,
+      PaymentType: paymentType,
       ReferenceId: String(referenceId).slice(0, 50),
     }, tenantConfig);
   },

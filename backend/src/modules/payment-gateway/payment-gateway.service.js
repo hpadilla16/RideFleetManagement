@@ -106,9 +106,11 @@ export const paymentGatewayService = {
   /**
    * Void a transaction.
    */
-  async voidTransaction({ referenceId, tenantId, locationId = null, registerId = null }) {
+  async voidTransaction({ referenceId, amount, paymentType, tenantId, locationId = null, registerId = null }) {
     const config = await getTenantSpinConfig(tenantId, { locationId, registerId });
-    const result = await spinClient.void({ referenceId }, config);
+    // amount is required by the gateway — spinClient.void throws without it
+    // rather than sending a call we know is refused (2201, proven live).
+    const result = await spinClient.void({ referenceId, amount, paymentType }, config);
     return { ...spinClient.normalizeResponse(result), referenceId, gateway: 'SPIN' };
   },
 
