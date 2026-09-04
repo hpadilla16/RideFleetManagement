@@ -95,6 +95,19 @@ export const AUTO_RENTAL_COMMODITY_CODE = '4111';
 export const L3_ENVELOPE = {
   L3DATA: 'L3DATA',
   CART: 'CART',
+  /**
+   * The shape /v2/AutoRental/Sale documents for ITSELF.
+   *
+   * Added 2026-09-04 after that endpoint answered HTTP 500 with the ASP.NET
+   * "An error has occurred." to a body carrying `L3Data` — the same crash
+   * signature commit 02af6407 recorded for a malformed AutoRental object. The
+   * spec for this endpoint puts the CEDP summary fields at the TOP LEVEL
+   * (TaxAmount, LocalTaxFlag, LineItemCount, PurchaseIdFormatCode) and the
+   * lines under `Level3LineItems.Group[]` — `L3Data` is the Transact rail's
+   * envelope and appears nowhere in it. LocalTaxFlag is documented as a
+   * string here, where the Transact header takes a number.
+   */
+  AUTORENTAL: 'AUTORENTAL',
 };
 
 /** Why no L3 rode along. Every one of these is a normal outcome, not a bug. */
@@ -141,9 +154,12 @@ export function getTerminalL3Config(tenantConfig = {}) {
     autoRental: tenantConfig.spinL3AutoRental === true
       || truthy(process.env.SPIN_L3_AUTO_RENTAL),
     // See the header. L3DATA unless a tenant is explicitly switched to CART.
-    envelope: String(
-      tenantConfig.spinL3Envelope || process.env.SPIN_L3_ENVELOPE || L3_ENVELOPE.L3DATA,
-    ).trim().toUpperCase() === L3_ENVELOPE.CART ? L3_ENVELOPE.CART : L3_ENVELOPE.L3DATA,
+    envelope: (() => {
+      const raw = String(
+        tenantConfig.spinL3Envelope || process.env.SPIN_L3_ENVELOPE || L3_ENVELOPE.L3DATA,
+      ).trim().toUpperCase();
+      return raw === L3_ENVELOPE.CART || raw === L3_ENVELOPE.AUTORENTAL ? raw : L3_ENVELOPE.L3DATA;
+    })(),
     // Merchant attribute; no column exists for it (plan §4.1/§6.3). Blank ⇒ omitted.
     summaryCommodityCode: String(
       tenantConfig.spinL3SummaryCommodityCode
@@ -354,6 +370,21 @@ function buildLevel2Header({ total, charges, taxAmount, agreementNumber, orderDa
     };
   }
 
+  if (cfg.envelope === L3_ENVELOPE.AUTORENTAL) {
+    // TOP LEVEL, per the endpoint's own spec — not wrapped in L3Data.
+    return {
+      ok: true,
+      tax,
+      payload: {
+        TaxAmount: tax,
+        LocalTaxFlag: tax > 0 ? '1' : '0',
+        LineItemCount: 0,
+        PurchaseIdFormatCode: '3',
+        ...(cfg.summaryCommodityCode ? { SummaryCommodityCode: cfg.summaryCommodityCode } : {}),
+      },
+    };
+  }
+
   if (cfg.envelope === L3_ENVELOPE.CART) {
     return {
       ok: true,
@@ -493,6 +524,14 @@ export function buildTerminalSaleL3({
       decision.excludedDeposits = built.excludedDeposits;
       if (cfg.envelope === L3_ENVELOPE.CART) {
         payload.Cart = cartFrom(built, total);
+      } else if (cfg.envelope === L3_ENVELOPE.AUTORENTAL) {
+        // Summary fields at the top, lines under Level3LineItems.Group.
+        payload.TaxAmount = built.header.TaxAmount;
+        payload.LocalTaxFlag = built.header.TaxAmount > 0 ? '1' : '0';
+        payload.LineItemCount = built.lineItemCount;
+        payload.PurchaseIdFormatCode = '3';
+        if (cfg.summaryCommodityCode) payload.SummaryCommodityCode = cfg.summaryCommodityCode;
+        payload.Level3LineItems = { Group: built.items };
       } else {
         payload.L3Data = { Header: built.header, items: built.items };
       }
