@@ -222,8 +222,17 @@ async function run() {
   check(typeof told.body?.expiresAt === 'string', 'and an ABSOLUTE expiry, never a duration');
   check(Object.keys(told.body || {}).sort().join() === 'expiresAt,helperName,open,verifiedBy',
     'exactly the four fields — a guest-facing endpoint carries nothing else', Object.keys(told.body || {}).join());
-  const foreign = await call(`/api/kiosk/sessions/${s1.id}/assist-state`, { deviceToken: 'not-my-device-token' });
-  check(foreign.status === 401, 'another device cannot ask about this session');
+  // A VALID device that is not this session's device — the real case, not a bad
+  // token (that is the guard's 401 and proves nothing about scoping).
+  const otherToken = id('devtok2');
+  await prisma.kioskDevice.create({
+    data: {
+      id: id('dev2'), tenantId: world.tenantId, locationId: world.loc.id, name: 'E2E Kiosk 2',
+      status: 'ACTIVE', tokenHash: sha(otherToken),
+    },
+  });
+  const foreign = await call(`/api/kiosk/sessions/${stuck.id}/assist-state`, { deviceToken: otherToken });
+  check(foreign.status === 404, "another VALID device cannot ask about this session — scoped by deviceId, not just by having a token", `got ${foreign.status}`);
 
   console.log('\n8. Hard stops survive going remote');
   const noPhotos = await call(`/api/kiosk/admin/sessions/${stuck.id}/remote-assist/verify-id`, {

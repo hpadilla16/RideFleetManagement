@@ -266,24 +266,25 @@
 }
 
 /* The guest is told, on their own screen, that someone touched their check-in.
-   ABOVE the help overlay (zIndex 70) on the same layer as the agent toast (85):
-   the first version rendered in normal flow and sat under the opaque chat iframe
-   for its entire life. pointer-events: none — it informs, it never blocks.
-   Two tones: "helping you right now" (violet) and "your identity was confirmed
-   by X" (green, durable). Calm on purpose — reassurance, not alarm. Text colours
-   pass AA on the composited grounds (measured 9.3:1 violet, 6.8:1 green). */
+
+   IN FLOW, on purpose. Two absolute placements each hid something real, and
+   both were measured with puppeteer: top:14px sat on the 79px kiosk bar and
+   covered EN/ES, Help and (portrait) the chat's close ✕; top:84px cleared the
+   bar and instead covered the five-step progress row (y79–121) for the whole
+   rest of the check-in. A banner that must never obscure anything cannot be
+   absolutely positioned over a layout it does not own. .kio-root is a fixed
+   flex column; in DOM order this sits after the progress row and before the
+   screen, so it displaces content instead of covering it — and .kio-main is
+   flex:1 with overflow-y:auto, so the height is absorbed, not exploded.
+
+   Still ABOVE the chat overlay: same stacking context (.kio-root, z 50), and
+   z 84 beats the overlay's 70. The agent toast (85, ~2.5s) paints over this
+   while it lives; this is the durable one. Calm on purpose — reassurance, not
+   alarm. Text colours measured 9.3:1 violet (AAA), 6.8:1 green (AA). */
 .kio-assist-notice {
-  /* BELOW the bar, and never reaching the corners. The first placement (top:14px)
-     landed ON the 79px kiosk bar: it hid the EN/ES toggle and the Help button,
-     and in portrait it sat over the chat overlay's close ✕ (top:10, right:10,
-     ~44px). Measured with puppeteer in review at 768×1024 and 1024×768.
-     top:84 clears the bar; left/right:72 keep the pill ≥72px from either edge,
-     so the ✕ (which ends at 54px from the right) is never under it, at any
-     width. The agent toast also lives at top:84 for ~2.5s — while it does, it
-     paints over this pill and then goes; the pill is the durable one. */
-  position: absolute; left: 72px; right: 72px; top: 84px;
-  margin: 0 auto; width: max-content; max-width: min(720px, calc(100% - 144px));
-  z-index: 84; pointer-events: none;
+  position: relative; z-index: 84; flex: none;
+  margin: 8px auto 0; width: max-content; max-width: min(720px, calc(100% - 32px));
+  pointer-events: none;
   display: flex; align-items: center; gap: 10px;
   padding: 10px 18px; border-radius: 999px;
   font-size: 15px; font-weight: 600; line-height: 1.35; text-align: left;
