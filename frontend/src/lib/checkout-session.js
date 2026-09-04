@@ -45,6 +45,78 @@ export async function mintHandoffToken({ id, token }) {
   return api(`${BASE}/${id}/handoff-token`, { method: 'POST' }, token);
 }
 
+// ── Terminal contract signing (2026-09-04) ──────────────────────────────────
+// Step 2 on a Dejavoo QD2. NONE of these move money: they display a clause and
+// capture ink. The SERVER owns the PHONE/TERMINAL switch — getTerminalContract
+// answers with `mode`, and the wizard renders the existing QR flow whenever it
+// says PHONE, so a counter with no terminal can never be shown a ladder for a
+// device that is not there.
+
+export async function getTerminalContract({ id, token }) {
+  return api(`${BASE}/${id}/terminal-contract`, {}, token);
+}
+
+/**
+ * Put ONE clause on the terminal. Omitting sectionKey means "the next one that
+ * is not yet accepted", which is what makes a resume a resume — the agent
+ * screen never has to remember where it was, because the server reads it back
+ * out of the database every time.
+ */
+export async function runTerminalClause({ id, sectionKey, token }) {
+  return api(`${BASE}/${id}/terminal-contract/clause`, {
+    method: 'POST',
+    body: JSON.stringify({ sectionKey: sectionKey || null }),
+  }, token);
+}
+
+export async function captureTerminalSignature({ id, token }) {
+  return api(`${BASE}/${id}/terminal-contract/signature`, { method: 'POST' }, token);
+}
+
+/**
+ * Hand the checkout to the renter's phone, carrying over the clauses they
+ * already accepted on the terminal. Returns the TERMS_SIGNING token in the same
+ * round trip so the QR appears immediately — the fallback is ONE action, never
+ * two that can be left half-done.
+ */
+export async function fallbackTerminalContract({ id, reason, token }) {
+  return api(`${BASE}/${id}/terminal-contract/fallback`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason || null }),
+  }, token);
+}
+
+/**
+ * The five verdicts, mirrored from backend/src/modules/payment-gateway/
+ * terminal-state.js. A terminal fails eleven ways and the agent's correct
+ * action differs in each; this is what the ladder keys its buttons off, so the
+ * screen never has to parse a gateway message string.
+ */
+export const TERMINAL_VERDICTS = {
+  WAIT: 'WAIT', RETRY: 'RETRY', FALL_BACK: 'FALL_BACK', STOP: 'STOP', CONTINUE: 'CONTINUE',
+};
+
+/**
+ * Which buttons does this failure earn? Pure, so it is testable without
+ * mounting the wizard — and so the rule lives in one place rather than being
+ * re-derived inside three JSX branches.
+ *
+ * The rule: RETRY gets a resend, FALL_BACK gets the phone, WAIT gets neither
+ * (the countdown is the answer), STOP gets neither because no button helps.
+ * Nothing here can double-charge anyone — this step moves no money — but the
+ * same shape is what the sale path needs, where offering "retry" on an
+ * unresolved timeout is how a renter gets charged twice.
+ */
+export function terminalActionsFor(verdict) {
+  switch (verdict) {
+    case TERMINAL_VERDICTS.RETRY:     return { resend: true, fallback: true, wait: false };
+    case TERMINAL_VERDICTS.FALL_BACK: return { resend: false, fallback: true, wait: false };
+    case TERMINAL_VERDICTS.WAIT:      return { resend: false, fallback: false, wait: true };
+    case TERMINAL_VERDICTS.STOP:      return { resend: false, fallback: true, wait: false };
+    default:                          return { resend: true, fallback: true, wait: false };
+  }
+}
+
 export async function abandon({ id, reason, token }) {
   return api(`${BASE}/${id}/abandon`, {
     method: 'POST',

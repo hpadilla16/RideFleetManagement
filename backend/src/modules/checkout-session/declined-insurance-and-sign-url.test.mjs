@@ -461,6 +461,21 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     // field map — a crypto passthrough, not a reader or writer of the
     // declinedInsurance BOOLEAN; no gate applies.
     'src/lib/field-crypto.js',
+    // Terminal contract signing (2026-09-04). READERS, both of them. The
+    // sequencer selects `declinedInsurance` off the agreement for exactly one
+    // purpose: handing it to the pure sectionsForAgreement() so the
+    // declined-insurance acknowledgement is sequenced onto the terminal as a
+    // seventh clause when the flag is set. It never assigns the column, and it
+    // has no route that could — the four /terminal-contract endpoints accept a
+    // sectionKey and a reason, nothing else. Changing the insurance selection
+    // stays where it was: step 1, through assertInsuranceSelectionEditable().
+    //
+    // Worth recording beside this entry: the canonical declined_insurance body
+    // is 274 characters, over the terminal's 250-character UserChoice cap, so a
+    // declined-insurance check-out is REFUSED on the terminal and sent to the
+    // phone. terminal-contract.test.mjs pins that measurement.
+    'src/modules/checkout-session/terminal-contract.service.js',
+    'src/modules/checkout-session/terminal-contract.test.mjs',
   ]);
 
   const found = [];

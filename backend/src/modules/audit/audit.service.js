@@ -119,6 +119,13 @@ export const AUDIT_ACTIONS = Object.freeze({
   // boolean + tenantId ONLY — no amounts, no customer or card data.
   CHECKOUT_PAYMENT_POLICY_CHANGE: 'CHECKOUT_PAYMENT_POLICY_CHANGE',
 
+  // Which surface the renter signs the rental agreement on — their own phone or
+  // the counter's Dejavoo terminal (2026-09-04). This decides where a legal
+  // signature is captured and which device's audit trail the acceptance lands
+  // on, so "who moved contract signing onto the terminal, for which branch, and
+  // when" has to be answerable. Metadata carries the modes + location ids ONLY.
+  CHECKOUT_CONTRACT_MODE_CHANGE: 'CHECKOUT_CONTRACT_MODE_CHANGE',
+
   // ── Payment terminal / gateway configuration (2026-08-26) ──
   // Editing this row decides WHICH merchant account a tenant's card charges
   // settle into. "Who repointed the terminal, and when" has to be answerable

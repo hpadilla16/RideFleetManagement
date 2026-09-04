@@ -86,6 +86,11 @@ export const EXPORT_MODEL_CATEGORY = Object.freeze({
   agreementDriver: 'agreementDrivers',
   reservationAdditionalDriver: 'additionalDrivers',
   agreementSectionInitial: 'agreementSectionInitials',
+  // Terminal-signed contracts (2026-09-04). Empty for a renter who only ever
+  // signed on their phone; for one who signed at the counter it is the clause-
+  // by-clause record of what they were shown and which button they pressed,
+  // which is exactly the sort of thing a subject-access request is asking for.
+  agreementClauseAcceptance: 'agreementClauseAcceptances',
   rentalAgreementInspection: 'inspections',
   rentalAgreementVehicleSwap: 'vehicleSwaps',
   rentalAgreementCharge: 'agreementCharges',

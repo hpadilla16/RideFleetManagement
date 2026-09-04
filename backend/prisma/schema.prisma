@@ -2413,6 +2413,10 @@ model RentalAgreement {
   commissions      AgreementCommission[]
   addendums        RentalAgreementAddendum[]
   sectionInitials  AgreementSectionInitial[]
+  // Terminal-signed contracts only (2026-09-04). Empty for every phone-signed
+  // agreement — the renderers treat "no rows" as "this was signed on a phone"
+  // and print exactly what they printed before this feature existed.
+  clauseAcceptances AgreementClauseAcceptance[]
   checkoutSessions CheckoutSession[]
 
   @@index([status, pickupAt])
@@ -5838,6 +5842,77 @@ model AgreementSectionInitial {
   initialDataUrl String          @db.Text
   signedAt       DateTime
   customerIp     String?
+
+  @@unique([agreementId, sectionKey])
+  @@index([agreementId])
+}
+
+// Per-clause ACCEPTANCE captured on a Dejavoo QD2 (2026-09-04, US terminal
+// contract signing). One row per clause the renter answered with
+// /v2/Common/UserChoice, written THE MOMENT they answer.
+//
+// ── WHY THIS IS NOT AgreementSectionInitial ──────────────────────────────
+// The shape Hector chose is: UserChoice per clause, then ONE GetSignature for
+// the whole contract. So a clause is accepted BEFORE any ink exists. An
+// AgreementSectionInitial row cannot be written then — initialDataUrl is
+// NOT NULL, the PDF prints one block per row, and terms-signing.complete()
+// treats "a row exists for every section" as "the contract is signed". Writing
+// half-populated rows there would make a half-signed agreement look complete,
+// which is precisely the invariant this feature must not break.
+//
+// So acceptance and ink are two records. Acceptance lands per clause as it
+// happens (that is what makes the sequence resumable, and what lets the phone
+// fallback skip clauses the renter already agreed to on the terminal); the ink
+// arrives once at the end and is bound to all of them, producing the
+// AgreementSectionInitial rows the web path has always produced. A
+// terminal-signed contract therefore persists IDENTICALLY to a phone-signed
+// one — plus these rows, which the phone path simply does not write.
+//
+// ── THE PER-CLAUSE-INK SWITCH ────────────────────────────────────────────
+// `inkDataUrl` is the seam. Today it is always NULL and every
+// AgreementSectionInitial takes the single contract signature. The day Hector
+// wants six separate ink captures (13 terminal calls instead of 7), the
+// sequencer captures per clause into THIS column and the binder prefers it
+// over the contract signature — one branch in terminal-contract.service.js, no
+// migration, and nothing already persisted changes meaning. The column is
+// wired into field-crypto and the GDPR erasure/export maps NOW, so switching
+// it on is not also a privacy review.
+//
+// ── WHAT IS STORED, AND WHY EACH FIELD EARNS ITS PLACE ───────────────────
+// `choiceOption` is the EXACT string the terminal echoed back in
+// `SelectedOption` — confirmed live 2026-09-04 to be the option string we
+// sent, verbatim. It is persisted verbatim (never collapsed to a boolean on
+// the way in) because it is the legal record of what the renter literally saw
+// and pressed, including which language it was in. `accepted` is the derived
+// answer and is only ever true when `choiceOption` matched the accept option
+// we sent byte for byte — never inferred from the call merely succeeding.
+// `sectionBody` snapshots the clause text as displayed, because
+// Location.termsSectionsJson can change it afterwards and a re-print must not
+// be able to show wording nobody agreed to.
+model AgreementClauseAcceptance {
+  id           String          @id @default(cuid())
+  agreementId  String
+  agreement    RentalAgreement @relation(fields: [agreementId], references: [id])
+  sectionKey   String
+  sectionLabel String
+  // The clause text EXACTLY as it was displayed on the terminal.
+  sectionBody  String          @db.Text
+  // The verbatim SelectedOption the terminal returned.
+  choiceOption String
+  // True ONLY when choiceOption matched the accept option byte for byte.
+  accepted     Boolean
+  acceptedAt   DateTime
+  // 'TERMINAL' today. The column exists so a future surface (kiosk, tablet) is
+  // a value rather than a schema change.
+  capturedVia  String          @default("TERMINAL")
+  // Which physical device answered — MASKED TPN + register id, for the audit
+  // trail. Never the auth key.
+  terminalTpn  String?
+  registerId   String?
+  // Per-clause ink. NULL in the one-capture shape; see the switch note above.
+  inkDataUrl   String?         @db.Text
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   @@unique([agreementId, sectionKey])
   @@index([agreementId])

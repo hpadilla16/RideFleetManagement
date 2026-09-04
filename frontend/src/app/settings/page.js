@@ -202,6 +202,11 @@ function SettingsInner({ token, me, logout }) {
   // never renders the switch as "payment off" for a tenant that requires it.
   const [checkoutPaymentRequired, setCheckoutPaymentRequired] = useState(true);
   const [checkoutPaymentSaving, setCheckoutPaymentSaving] = useState(false);
+  // Checkout contract mode (2026-09-04). Seeded PHONE — today's flow for every
+  // tenant — so a failed or slow load never renders this as "the renter signs
+  // on the terminal" for a counter that has no terminal.
+  const [contractPolicy, setContractPolicy] = useState({ mode: 'PHONE', locations: {} });
+  const [contractSaving, setContractSaving] = useState(false);
   // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for mail intake.
   const [ocrCfg, setOcrCfg] = useState({ provider: 'anthropic', model: '', hasKey: false });
   const [ocrKeyInput, setOcrKeyInput] = useState('');
@@ -348,6 +353,14 @@ function SettingsInner({ token, me, logout }) {
     // direction the backend resolver uses.
     api(scopedSettingsPath('/api/settings/checkout-payment'), {}, token)
       .then((out) => setCheckoutPaymentRequired(out?.checkoutPaymentRequired !== false))
+      .catch(() => {});
+    // Same fail-safe direction: anything other than an explicit TERMINAL keeps
+    // this on PHONE, the flow that needs no device.
+    api(scopedSettingsPath('/api/settings/checkout-contract'), {}, token)
+      .then((out) => setContractPolicy({
+        mode: out?.mode === 'TERMINAL' ? 'TERMINAL' : 'PHONE',
+        locations: (out?.locations && typeof out.locations === 'object') ? out.locations : {},
+      }))
       .catch(() => {});
     // activeSettingsTenantId in deps (2026-07-26 fix): for a SUPER_ADMIN these
     // three loads are tenant-scoped via scopedSettingsPath, but the effect only
@@ -3002,6 +3015,144 @@ function SettingsInner({ token, me, logout }) {
                   están en progreso conservan el paso de pago.
                 </div>
               ) : null}
+            </div>
+
+            {/*
+              Checkout contract mode (2026-09-04). WHICH SURFACE the renter
+              signs the rental agreement on. Per tenant, with a per-location
+              override in either direction, because the rollout unit is a
+              counter and not a company: a tenant can pilot TERMINAL at one
+              branch, and pull one branch back to PHONE the moment its QD2 dies
+              without taking the whole company off the terminal.
+
+              PHONE is the default and stays available as the per-checkout
+              fallback even where TERMINAL is selected — the agent's one-switch
+              control in step 2 uses it.
+
+              Switching this does NOT migrate sessions in flight: a checkout
+              already at TC_PENDING keeps the renderer it started with, because
+              changing it mid-session would strand a renter halfway through six
+              clauses on a device nobody is watching any more.
+            */}
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Check-out Contract · Contrato del check-out</h3>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Where does the renter sign? · ¿Dónde firma el cliente?</label>
+                  <select
+                    value={contractPolicy.mode}
+                    disabled={contractSaving}
+                    onChange={async (e) => {
+                      const mode = e.target.value;
+                      const previous = contractPolicy;
+                      const next = { ...contractPolicy, mode };
+                      setContractPolicy(next);
+                      setContractSaving(true);
+                      try {
+                        const out = await api(
+                          scopedSettingsPath('/api/settings/checkout-contract'),
+                          { method: 'PUT', body: JSON.stringify(next) },
+                          token,
+                        );
+                        // Trust the server's answer, not the optimistic flip.
+                        setContractPolicy({
+                          mode: out?.mode === 'TERMINAL' ? 'TERMINAL' : 'PHONE',
+                          locations: out?.locations || {},
+                        });
+                        setMsg(mode === 'TERMINAL'
+                          ? 'Contracts will be signed on the counter terminal · Los contratos se firmarán en la terminal'
+                          : 'Contracts will be signed on the renter\'s phone · Los contratos se firmarán en el teléfono del cliente');
+                      } catch (err) {
+                        // Roll back — a switch showing a state the server
+                        // rejected is how a branch believes it is on the
+                        // terminal while every renter still gets a QR.
+                        setContractPolicy(previous);
+                        setMsg(err?.message || 'Failed to save the contract mode');
+                      } finally {
+                        setContractSaving(false);
+                      }
+                    }}
+                  >
+                    <option value="PHONE">Contract on the renter&apos;s phone (QR to /sign)</option>
+                    <option value="TERMINAL">Contract on the terminal (Dejavoo QD2)</option>
+                  </select>
+                </div>
+                <div className="surface-note">
+                  <strong>Phone</strong> (default) is today&apos;s flow for every tenant: a QR the renter
+                  scans, six acknowledgements initialled on their own device. <strong>Terminal</strong>
+                  {' '}shows each clause on the QD2 with <em>I agree / Acepto</em> and captures one
+                  signature at the end. <strong>Requires a configured terminal for that location</strong> —
+                  without one, check-out refuses rather than charging on another counter&apos;s device.
+                  Phone stays available as the per-check-out fallback either way.
+                  <br />
+                  <strong>Teléfono</strong> (por defecto) es el flujo actual. <strong>Terminal</strong>
+                  {' '}muestra cada cláusula en la QD2 y captura una firma al final. Requiere una
+                  terminal configurada para esa sede.
+                </div>
+              </div>
+
+              {Array.isArray(locations) && locations.length > 1 ? (
+                <div style={{ marginTop: 12 }}>
+                  <div className="label" style={{ marginBottom: 6 }}>
+                    Per-location override · Excepción por sede
+                  </div>
+                  <div className="stack" style={{ gap: 6 }}>
+                    {locations.map((loc) => {
+                      const value = Object.prototype.hasOwnProperty.call(contractPolicy.locations, loc.id)
+                        ? contractPolicy.locations[loc.id]
+                        : '';
+                      return (
+                        <div key={loc.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <span style={{ minWidth: 180, fontSize: 13 }}>{loc.name}</span>
+                          <select
+                            value={value}
+                            disabled={contractSaving}
+                            onChange={async (e) => {
+                              const picked = e.target.value;
+                              const previous = contractPolicy;
+                              const nextLocations = { ...contractPolicy.locations };
+                              // Empty = no entry at all, so the branch inherits
+                              // the tenant value. Storing "same as tenant" would
+                              // silently pin the branch the day the tenant flips.
+                              if (picked) nextLocations[loc.id] = picked;
+                              else delete nextLocations[loc.id];
+                              const next = { ...contractPolicy, locations: nextLocations };
+                              setContractPolicy(next);
+                              setContractSaving(true);
+                              try {
+                                const out = await api(
+                                  scopedSettingsPath('/api/settings/checkout-contract'),
+                                  { method: 'PUT', body: JSON.stringify(next) },
+                                  token,
+                                );
+                                setContractPolicy({
+                                  mode: out?.mode === 'TERMINAL' ? 'TERMINAL' : 'PHONE',
+                                  locations: out?.locations || {},
+                                });
+                              } catch (err) {
+                                setContractPolicy(previous);
+                                setMsg(err?.message || 'Failed to save the location override');
+                              } finally {
+                                setContractSaving(false);
+                              }
+                            }}
+                          >
+                            <option value="">Use tenant setting · Usar ajuste del tenant</option>
+                            <option value="PHONE">Phone · Teléfono</option>
+                            <option value="TERMINAL">Terminal</option>
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="surface-note" style={{ marginTop: 8 }}>
+                Applies to check-outs started from now on. A session already waiting for a signature
+                keeps the surface it started on. · Aplica a los check-outs que empiecen desde ahora;
+                una sesión que ya espera firma conserva la superficie en la que empezó.
+              </div>
             </div>
 
             <div className="glass card" style={{ padding: 12 }}>

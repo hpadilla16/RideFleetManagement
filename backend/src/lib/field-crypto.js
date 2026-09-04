@@ -108,6 +108,17 @@ export const FIELD_ENC_MAP = {
   agreementSectionInitial: {
     strings: ['initialDataUrl'],
   },
+  // Terminal contract signing (2026-09-04). `inkDataUrl` is NULL in the
+  // one-capture shape that ships today, and is wired here anyway because it is
+  // the column that turns per-clause ink on later: doing it now means that
+  // switch is one branch in the sequencer, rather than one branch in the
+  // sequencer PLUS a crypto and privacy review. The rest of this table (the
+  // clause text, the option string, the masked TPN) is deliberately NOT
+  // encrypted — it is the audit trail, and an audit trail nobody can read
+  // without the key is not an audit trail.
+  agreementClauseAcceptance: {
+    strings: ['inkDataUrl'],
+  },
   reservationIncident: {
     strings: ['signatureDataUrl'],
   },

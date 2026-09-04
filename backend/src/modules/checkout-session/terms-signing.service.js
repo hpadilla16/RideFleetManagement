@@ -18,6 +18,7 @@ import { sectionsForAgreement } from './terms-content.js';
 import { appendEvent } from './state-machine.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
 import { resolveCustomerFacingBrand, resolveBrandLocation } from '../../lib/tenant-brand.js';
+import { terminalAcceptedSectionKeys } from './terminal-contract.service.js';
 
 async function loadToken(token) {
   if (!token) throw new CheckoutSessionError('token required', 400);
@@ -160,6 +161,18 @@ async function loadSession(token) {
   });
   const completedKeys = new Set(initials.map((i) => i.sectionKey));
 
+  // TERMINAL FALLBACK CARRY-OVER (2026-09-04). When a checkout started on the
+  // QD2 and the terminal died partway through, the renter has already read and
+  // agreed to some of these clauses — with the option string and the timestamp
+  // on the record. Making them do it again on their phone is not a safety
+  // measure, it is a punishment for the terminal's Wi-Fi, and it is the reason
+  // agents stop trusting the fallback button.
+  //
+  // For a checkout that never touched a terminal this query returns [] and
+  // every branch below is a no-op: a phone-only agreement behaves, and renders,
+  // exactly as it did before this feature existed.
+  const terminalAccepted = new Set(await terminalAcceptedSectionKeys(ag.id));
+
   return {
     reservationNumber: row.reservation.reservationNumber,
     agreementNumber: ag.agreementNumber,
@@ -173,7 +186,12 @@ async function loadSession(token) {
     signerLocale: normalizeSignerLocale(row.reservation.customer?.locale),
     sections: sections.map((s) => ({
       key: s.key, label: s.label, body: s.body,
-      signed: completedKeys.has(s.key),
+      signed: completedKeys.has(s.key) || terminalAccepted.has(s.key),
+      // Additive and false for every phone-only signing. Lets the page say
+      // "you already agreed to this on the counter's device" instead of
+      // silently pre-ticking a legal acknowledgement, which would look like
+      // the system signed it for them.
+      acceptedOnTerminal: terminalAccepted.has(s.key) && !completedKeys.has(s.key),
     })),
     expiresAt: row.expiresAt,
   };
@@ -237,13 +255,48 @@ async function complete({ token, signatureDataUrl, signerName, customerIp }) {
     where: { agreementId: ag.id }, select: { sectionKey: true },
   });
   const haveKeys = new Set(initials.map((i) => i.sectionKey));
-  const missing = expected.map((s) => s.key).filter((k) => !haveKeys.has(k));
+
+  // Clauses accepted on the terminal before the fallback count as read and
+  // agreed — see loadSession. They have no INK yet, which is what the backfill
+  // below supplies: this signature becomes their initial, exactly the way the
+  // terminal path binds one ink capture to all six sections. The clause keeps
+  // its OWN acceptedAt, so the printed agreement still shows when each one was
+  // agreed to rather than six copies of the moment the pen came off the glass.
+  //
+  // Empty for a phone-only signing, so the guard and the writes below are
+  // byte-for-byte the pre-2026-09-04 behaviour for every existing tenant.
+  const terminalAcceptedRows = await prisma.agreementClauseAcceptance.findMany({
+    where: { agreementId: ag.id, accepted: true },
+    select: { sectionKey: true, sectionLabel: true, acceptedAt: true, inkDataUrl: true },
+  });
+  const terminalByKey = new Map(terminalAcceptedRows.map((r) => [r.sectionKey, r]));
+
+  const missing = expected.map((s) => s.key)
+    .filter((k) => !haveKeys.has(k) && !terminalByKey.has(k));
   if (missing.length) {
     throw new CheckoutSessionError(
       `Missing initials for: ${missing.join(', ')}`,
       400, 'INITIALS_INCOMPLETE',
     );
   }
+
+  const backfills = expected
+    .filter((s) => !haveKeys.has(s.key) && terminalByKey.has(s.key))
+    .map((s) => {
+      const rec = terminalByKey.get(s.key);
+      return prisma.agreementSectionInitial.create({
+        data: {
+          agreementId: ag.id,
+          sectionKey: s.key,
+          sectionLabel: s.label,
+          // Per-clause ink if it was ever captured on the device (the future
+          // switch), otherwise this signature.
+          initialDataUrl: rec.inkDataUrl || signatureDataUrl,
+          signedAt: rec.acceptedAt,
+          customerIp: customerIp || null,
+        },
+      });
+    });
 
   // Atomic finalize: write tcSignature to agreement, stamp the session,
   // mark the token consumed.
@@ -253,6 +306,9 @@ async function complete({ token, signatureDataUrl, signerName, customerIp }) {
   if (!session) throw new CheckoutSessionError('No session for reservation', 409);
 
   await prisma.$transaction([
+    // Backfill first: the agreement is never marked complete in a transaction
+    // that has not also written an initial for every expected section.
+    ...backfills,
     prisma.rentalAgreement.update({
       where: { id: ag.id },
       data: {

@@ -1174,6 +1174,19 @@ function buildSignedTermsBlock(agreement, ctx) {
   const initials = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
   const initialsByKey = new Map(initials.map((i) => [i.sectionKey, i]));
 
+  // TERMINAL-SIGNED CONTRACTS ONLY (2026-09-04). When the renter answered each
+  // clause on a Dejavoo QD2 there is a record of WHICH button they pressed and
+  // WHEN, per clause — and printing the signature without it would lose the
+  // most specific evidence the terminal path produces.
+  //
+  // EMPTY FOR EVERY PHONE-SIGNED AGREEMENT, which is the point: this map has no
+  // rows for a contract signed at /sign/:token, so `acceptanceLine` below
+  // resolves to '' and the block renders byte-for-byte what it rendered before
+  // this feature existed. A phone-signed agreement is not silently redesigned
+  // because a different tenant started using a terminal.
+  const acceptances = Array.isArray(agreement.clauseAcceptances) ? agreement.clauseAcceptances : [];
+  const acceptanceByKey = new Map(acceptances.map((a) => [a.sectionKey, a]));
+
   if (!agreement.tcSignatureDataUrl && initials.length === 0) {
     // Nothing to render — agreement was created via the legacy flow,
     // not the new checkout-wizard-v2.
@@ -1193,10 +1206,23 @@ function buildSignedTermsBlock(agreement, ctx) {
     const recordedAt = recorded?.signedAt
       ? new Date(recorded.signedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' })
       : '';
+    // The acceptance stamp: the option the renter pressed on the terminal,
+    // VERBATIM, and the moment they pressed it. Verbatim because the terminal
+    // echoes back the exact string it displayed, so this line is the record of
+    // what they literally saw and chose — including which language it was in.
+    const accepted = acceptanceByKey.get(s.key);
+    const acceptanceLine = accepted
+      ? `<div style="font-size:10.5px;color:#374151;margin:0 0 8px">
+           <span style="display:inline-block;border:0.5px solid #BFE8D9;background:#E6F7F1;color:#08674E;border-radius:4px;padding:1px 7px;font-weight:600">${esc(accepted.choiceOption)}</span>
+           <span style="color:#6B7280;margin-left:8px">${esc(new Date(accepted.acceptedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' }))}</span>
+           <span style="color:#9CA3AF;margin-left:8px">on the counter terminal${accepted.terminalTpn ? ` · TPN ${esc(accepted.terminalTpn)}` : ''}</span>
+         </div>`
+      : '';
     return `
       <div style="margin:0 0 18px;padding:14px;border:0.5px solid #E5E7EB;border-radius:8px;background:#FFF;page-break-inside:avoid">
         <div style="font-size:13px;font-weight:600;color:#111827;margin:0 0 6px">${esc(s.label)}</div>
         <div style="font-size:12px;color:#374151;line-height:1.55;margin:0 0 10px">${esc(s.body)}</div>
+        ${acceptanceLine}
         <div style="display:flex;justify-content:flex-end;align-items:center;gap:12px">
           <span style="font-size:10.5px;color:#6B7280">${esc(recordedAt)}</span>
           ${initialImg}
@@ -3430,7 +3456,13 @@ export const rentalAgreementsService = {
         // tcSignature*, declinedInsurance*, sectionInitials. The print
         // template uses these to render the signed terms acknowledgement
         // pages + declined-insurance addendum after the standard layout.
-        sectionInitials: { orderBy: { signedAt: 'asc' } }
+        sectionInitials: { orderBy: { signedAt: 'asc' } },
+        // 2026-09-04 — per-clause acceptance from a terminal-signed contract.
+        // Empty for every phone-signed agreement; buildSignedTermsBlock renders
+        // nothing extra when it is. Without this include a terminal-signed
+        // contract would quietly print without the one piece of evidence the
+        // terminal path adds — which button the renter pressed, and when.
+        clauseAcceptances: { orderBy: { acceptedAt: 'asc' } }
       }
     });
     // Blob -> Storage (Phase 1): sign Storage-path doc refs for client render.
@@ -3542,6 +3574,16 @@ export const rentalAgreementsService = {
         sectionInitials: {
           orderBy: { signedAt: 'asc' },
           select: { sectionKey: true, initialDataUrl: true, signedAt: true, customerIp: true }
+        },
+        // 2026-09-04 — the acceptance stamp printed beside each clause on a
+        // terminal-signed contract. Empty for phone-signed ones, which is why
+        // the print path is unchanged for them. Selected narrowly: the clause
+        // BODY is not read here (the section text comes from terms-content +
+        // the branch overrides, exactly as it always has) and the ink column is
+        // not read because the initials above already carry it.
+        clauseAcceptances: {
+          orderBy: { acceptedAt: 'asc' },
+          select: { sectionKey: true, choiceOption: true, accepted: true, acceptedAt: true, terminalTpn: true }
         },
         charges: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],

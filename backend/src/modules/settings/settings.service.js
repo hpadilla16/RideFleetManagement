@@ -15,6 +15,9 @@ import { invalidateTenantTerminalConfig } from '../payment-gateway/tenant-termin
 import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
+import {
+  getContractPolicy, setContractPolicy, CONTRACT_MODES,
+} from '../checkout-session/checkout-contract-mode.js';
 import { normalizeAutoConfirmScore, normalizeTollsMatchConfig } from '../tolls/tolls-match-config.js';
 import { randomUUID } from 'node:crypto';
 
@@ -1113,6 +1116,47 @@ export const settingsService = {
     }
     const value = await setCheckoutPaymentRequired(scope.tenantId, raw);
     return { checkoutPaymentRequired: value };
+  },
+
+  /**
+   * Per-tenant / per-location "where does the renter sign?" switch (2026-09-04).
+   *
+   * Storage and the fail-safe rules live in checkout-contract-mode.js — this is
+   * the API-shaped wrapper. Same FAIL-CLOSED-ON-TENANT rule as the payment
+   * policy above: without a tenantId we throw rather than touch the unscoped
+   * key, which would be a GLOBAL default capable of routing every tenant's
+   * contract onto a terminal they do not own.
+   */
+  async getCheckoutContractPolicy(scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    return getContractPolicy(scope.tenantId);
+  },
+
+  async updateCheckoutContractPolicy(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    // Strict on the WRITE path — an admin who sends a typo gets a 400 rather
+    // than silently landing on PHONE and staring at a switch that snapped back.
+    // The storage layer normalizes again anyway (defence in depth), which is
+    // what guarantees a value that somehow got past this still resolves safe.
+    const valid = new Set([CONTRACT_MODES.PHONE, CONTRACT_MODES.TERMINAL]);
+    if (payload?.mode !== undefined && !valid.has(payload.mode)) {
+      throw new Error('mode must be PHONE or TERMINAL');
+    }
+    const locations = payload?.locations;
+    if (locations !== undefined) {
+      if (!locations || typeof locations !== 'object' || Array.isArray(locations)) {
+        throw new Error('locations must be an object keyed by locationId');
+      }
+      for (const [locationId, value] of Object.entries(locations)) {
+        if (!valid.has(value)) {
+          throw new Error(`locations.${locationId} must be PHONE or TERMINAL`);
+        }
+      }
+    }
+    return setContractPolicy(scope.tenantId, {
+      mode: payload?.mode,
+      locations: locations || {},
+    });
   },
 
   async getCustomerInspectionConfig(scope = {}) {

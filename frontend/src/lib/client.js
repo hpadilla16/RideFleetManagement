@@ -103,6 +103,7 @@ async function parseApiResponse(res, path) {
     let code = null;
     let reason = null;
     let session = null;
+    let terminal = null;
     try {
       const text = await res.text();
       if (text) {
@@ -120,8 +121,15 @@ async function parseApiResponse(res, path) {
           // Both stay OFF the error object on every other response, so nothing
           // else in the app changes shape. That is a claim about the two lines
           // below the `new Error`, not about these two — see there.
+          //   terminal — { state, verdict, code, retryAfterSeconds } on a
+          //             terminal failure (2026-09-04). A terminal fails eleven
+          //             ways and the agent's correct action differs in each, so
+          //             the ladder keys its buttons off `verdict` and its
+          //             countdown off `retryAfterSeconds` — the gateway's own
+          //             number — rather than parsing the message string.
           if (j?.reason) reason = String(j.reason);
           if (j?.session) session = j.session;
+          if (j?.terminal) terminal = j.terminal;
         } catch {
           msg = `${msg}: ${text.slice(0, 300)}`;
         }
@@ -142,6 +150,9 @@ async function parseApiResponse(res, path) {
     // { reason: err.reason } : {})`). Symmetry with the wire is the point.
     if (reason) error.reason = reason;
     if (session) error.session = session;
+    // Guarded on exactly the same argument as the two above: absent, not null,
+    // on every response that is not a terminal failure.
+    if (terminal) error.terminal = terminal;
     if (typeof window !== 'undefined' && res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
       window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT, { detail: { path } }));
     }
