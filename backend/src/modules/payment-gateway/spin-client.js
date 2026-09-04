@@ -291,6 +291,39 @@ function logL3Decision(decision, context = {}) {
   });
 }
 
+/**
+ * Busy-only retry, shared by every op that can land while the terminal is
+ * still closing out the previous interaction (the ~30–50s hold proven live at
+ * LAX 2026-09-04). ONLY busy failures are retried (2008, or 1000 with a busy
+ * detail — see isBusyFailure), honouring the gateway's own
+ * DelayBeforeNextRequest. A decline or a 2201 refusal is thrown immediately:
+ * retrying a refused money call is how somebody gets charged twice, and
+ * retrying a refused prompt just hides a payload bug. Busy is safe to resend
+ * for both kinds — a busy request never reached the terminal, and Dejavoo
+ * dedupes money calls by ReferenceId besides.
+ *
+ * voidWithRetry / preAuthDeposit carry their own identical loops from the day
+ * this rule was learned; they are live-proven and deliberately left alone.
+ */
+async function retryWhileBusy(label, send, { attempts = 3, sleep = null, referenceId = '' } = {}) {
+  const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  let lastErr = null;
+  for (let i = 0; i < Math.max(1, attempts); i += 1) {
+    try {
+      return await send();
+    } catch (err) {
+      lastErr = err;
+      if (!isBusyFailure(err) || i === attempts - 1) throw err;
+      const secs = busyDelaySeconds(err);
+      logger.warn(`SPIn ${label} busy, waiting ${secs}s before retry ${i + 2}/${attempts}`, {
+        referenceId, spinStatusCode: err?.spinStatusCode,
+      });
+      await wait(secs * 1000);
+    }
+  }
+  throw lastErr;
+}
+
 export const spinClient = {
   /**
    * Process a sale (charge).
@@ -329,13 +362,19 @@ export const spinClient = {
    */
   async sale({
     amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber,
-    cart, customFields, level3 = null,
+    cart, customFields, level3 = null, attempts = 3, sleep = null,
   }, tenantConfig) {
     const { body, l3Decision } = buildSalePayload({
       amount, referenceId, paymentType, tipAmount, invoiceNumber, cart, customFields, level3,
     }, tenantConfig);
     logL3Decision(l3Decision, { referenceId: String(referenceId).slice(0, 50) });
-    return spinRequest('POST', 'v2/Payment/Sale', body, tenantConfig);
+    // BUSY-RETRY (2026-09-04, second live checkout at LAX): the checkout sale
+    // fires seconds after the contract's GetSignature releases the terminal,
+    // which is exactly the window the void and the deposit pre-auth already
+    // wait out. Same rule as theirs: busy retries, refusals throw.
+    return retryWhileBusy('sale', () => spinRequest('POST', 'v2/Payment/Sale', body, tenantConfig), {
+      attempts, sleep, referenceId: String(referenceId).slice(0, 50),
+    });
   },
 
   /**
@@ -659,20 +698,26 @@ export const spinClient = {
    *
    * Minimal payload, same 2201 discipline as disclaimer().
    */
-  async userChoice({ title, options }, tenantConfig) {
+  async userChoice({ title, options, attempts = 3, sleep = null }, tenantConfig) {
     const text = String(title ?? '').trim();
     if (!text) throw new Error('SPIn userChoice requires text');
     const choices = (Array.isArray(options) ? options : []).map((o) => String(o)).filter(Boolean);
     if (choices.length < 2) throw new Error('SPIn userChoice requires at least two options');
-    return spinRequest('POST', 'v2/Common/UserChoice', { Title: text, ChoiceOptions: choices }, tenantConfig);
+    // Busy-retry: a clause prompt sent while the terminal is still closing the
+    // previous op never reached the screen — waiting it out beats surfacing an
+    // error the agent can only answer by clicking the same button again.
+    return retryWhileBusy('userChoice', () => spinRequest('POST', 'v2/Common/UserChoice', { Title: text, ChoiceOptions: choices }, tenantConfig), { attempts, sleep });
   },
 
   /**
    * Capture an ink signature with no text — the closing signature that follows
    * the per-clause initials. Nothing beyond the common block. NO MONEY.
    */
-  async getSignature(tenantConfig) {
-    return spinRequest('POST', 'v2/Common/GetSignature', {}, tenantConfig);
+  async getSignature(tenantConfig, { attempts = 3, sleep = null } = {}) {
+    // Busy-retry, same reasoning as userChoice: the signature box follows six
+    // UserChoice prompts back-to-back, and a busy submission never showed
+    // anything to the customer.
+    return retryWhileBusy('getSignature', () => spinRequest('POST', 'v2/Common/GetSignature', {}, tenantConfig), { attempts, sleep });
   },
 
   /**

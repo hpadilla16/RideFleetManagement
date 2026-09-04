@@ -2548,7 +2548,9 @@ reservationsRouter.post('/:id/agreement/spin/charge-card-on-file', requireCapabi
   } catch (e) {
     const msg = String(e?.message || '');
     if (/not found/i.test(msg)) return res.status(404).json({ error: e.message });
-    if (/card on file|amount|declined|Spin|missing|invalid/i.test(msg)) {
+    // "not configured" / "iPOSpays" added 2026-09-04: a tenant whose CNP rail
+    // has no usable credentials was surfacing as a raw 500 at the counter.
+    if (/card on file|amount|declined|Spin|missing|invalid|not configured|iPOSpays|terminal/i.test(msg)) {
       return res.status(400).json({ error: e.message });
     }
     next(e);
@@ -2564,7 +2566,7 @@ reservationsRouter.post('/:id/agreement/spin/release-deposit', requireCapability
   } catch (e) {
     const msg = String(e?.message || '');
     if (/not found/i.test(msg)) return res.status(404).json({ error: e.message });
-    if (/deposit hold|released|declined|Spin|invalid/i.test(msg)) {
+    if (/deposit hold|released|declined|Spin|invalid|not configured|iPOSpays|terminal/i.test(msg)) {
       return res.status(400).json({ error: e.message });
     }
     next(e);
@@ -2580,7 +2582,7 @@ reservationsRouter.post('/:id/agreement/spin/reauth-deposit', requireCapability(
   } catch (e) {
     const msg = String(e?.message || '');
     if (/not found/i.test(msg)) return res.status(404).json({ error: e.message });
-    if (/card on file|amount|declined|Spin|invalid|missing/i.test(msg)) {
+    if (/card on file|amount|declined|Spin|invalid|missing|not configured|iPOSpays|terminal/i.test(msg)) {
       return res.status(400).json({ error: e.message });
     }
     next(e);
