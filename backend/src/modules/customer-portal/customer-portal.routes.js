@@ -39,6 +39,7 @@ import {
   hppNotConfiguredMessage
 } from '../payment-gateway/ipos-hpp-payment.service.js';
 import { isHppDryRun, extractHppReferenceId } from '../payment-gateway/ipos-hpp-client.js';
+import { reservationPriceConfirmedAtPickup } from '../partnerships/partner-booking.js';
 
 export const customerPortalRouter = Router();
 
@@ -363,6 +364,7 @@ async function findReservationByToken(kind, token) {
       where: { customerInfoToken: token, customerInfoTokenExpiresAt: { gt: new Date() } },
       include: {
         customer: true,
+        partner: { select: { preferredTypePricing: true } },
         pickupLocation: true,
         returnLocation: true,
         vehicle: true,
@@ -381,6 +383,7 @@ async function findReservationByToken(kind, token) {
       where: { signatureToken: token, signatureTokenExpiresAt: { gt: new Date() } },
       include: {
         customer: true,
+        partner: { select: { preferredTypePricing: true } },
         pickupLocation: true,
         returnLocation: true,
         vehicle: true,
@@ -396,6 +399,7 @@ async function findReservationByToken(kind, token) {
       where: { paymentRequestToken: token, paymentRequestTokenExpiresAt: { gt: new Date() } },
       include: {
         customer: true,
+        partner: { select: { preferredTypePricing: true } },
         pickupLocation: true,
         returnLocation: true,
         vehicle: true,
@@ -632,7 +636,7 @@ async function findReservationByAuthNetInvoiceNumber(invoiceNumber = '') {
   if (!normalized) return null;
   return prisma.reservation.findFirst({
     where: { reservationNumber: normalized },
-    include: { customer: true }
+    include: { customer: true, partner: { select: { preferredTypePricing: true } } }
   });
 }
 
@@ -942,6 +946,9 @@ async function serializeCustomerInfoReservation(reservation) {
     // Lets the portal show a dash instead of a figure for a booking the
     // customer already paid the partner for.
     isPrepaid: reservation.isPrepaid ?? null,
+    // Insurer preference bookings: amount confirmed at pickup — the portal shows a dash
+    // and no payment step (Partnerships F2, Hector decision #3).
+    priceConfirmedAtPickup: reservationPriceConfirmedAtPickup(reservation),
     pickupLocation: reservation.pickupLocation?.name || '',
     returnLocation: reservation.returnLocation?.name || '',
     vehicle: [reservation.vehicle?.year, reservation.vehicle?.make, reservation.vehicle?.model].filter(Boolean).join(' ') || '',
@@ -1106,6 +1113,7 @@ async function amountDueForReservation(reservationId, fallbackEstimated = 0) {
       where: { id: reservationId },
       include: {
         customer: { select: { dateOfBirth: true } },
+        partner: { select: { preferredTypePricing: true } },
         pickupLocation: { select: { locationConfig: true, taxRate: true } },
         pricingSnapshot: true,
         charges: { where: { selected: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
@@ -1227,6 +1235,9 @@ customerPortalRouter.get('/signature/:token', portalRead, async (req, res, next)
         // Lets the portal show a dash instead of a figure for a booking the
         // customer already paid the partner for.
         isPrepaid: reservation.isPrepaid ?? null,
+    // Insurer preference bookings: amount confirmed at pickup — the portal shows a dash
+    // and no payment step (Partnerships F2, Hector decision #3).
+    priceConfirmedAtPickup: reservationPriceConfirmedAtPickup(reservation),
         customerName: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim(),
         customerEmail: reservation.customer?.email || null,
         vehicle: reservation.vehicle ? `${reservation.vehicle.year || ''} ${reservation.vehicle.make || ''} ${reservation.vehicle.model || ''}`.trim() : null,
@@ -1848,6 +1859,9 @@ customerPortalRouter.get('/payment/:token', portalRead, async (req, res, next) =
         // Lets the portal show a dash instead of a figure for a booking the
         // customer already paid the partner for.
         isPrepaid: reservation.isPrepaid ?? null,
+    // Insurer preference bookings: amount confirmed at pickup — the portal shows a dash
+    // and no payment step (Partnerships F2, Hector decision #3).
+    priceConfirmedAtPickup: reservationPriceConfirmedAtPickup(reservation),
         customerName: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim(),
         customerEmail: reservation.customer?.email || null,
         vehicle: reservation.vehicle ? `${reservation.vehicle.year || ''} ${reservation.vehicle.make || ''} ${reservation.vehicle.model || ''}`.trim() : null,

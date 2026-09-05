@@ -272,7 +272,10 @@ export default function CustomerPayPage() {
   const balanceDue = Number(model?.portal?.payment?.balanceDue ?? model?.amountDue ?? 0);
   // A booking the customer already paid the partner for. The rental never
   // appears in the charge rows, so every figure on this screen is post-booking.
-  const rentalPrepaid = model?.reservation?.isPrepaid === true;
+  const rentalPrepaid = model?.reservation?.isPrepaid === true
+    // Partnerships F2: insurer preference bookings confirm the amount at pickup — same
+    // rule as prepaid (dash instead of a figure; only counter add-ons can be due).
+    || model?.reservation?.priceConfirmedAtPickup === true;
   const fullyPaid = balanceDue <= 0;
   const nextPortalStep = model?.portal?.nextStep;
   const agreementDoc = (model?.portal?.documents || []).find((doc) => doc.key === 'agreement' && doc.available);

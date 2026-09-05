@@ -56,7 +56,10 @@ export default function SignAgreementPage() {
   const nextPortalStep = portal?.nextStep;
   // A booking the customer already paid the partner for. The rental never
   // reaches the charge rows, so every figure on this page is post-booking.
-  const rentalPrepaid = reservation?.isPrepaid === true;
+  const rentalPrepaid = reservation?.isPrepaid === true
+    // Partnerships F2: insurer preference bookings confirm the amount at pickup — same
+    // rule as prepaid (dash instead of a figure; only counter add-ons can be due).
+    || reservation?.priceConfirmedAtPickup === true;
   const signatureReady = !!signerName.trim() && accepted;
 
   useEffect(() => {

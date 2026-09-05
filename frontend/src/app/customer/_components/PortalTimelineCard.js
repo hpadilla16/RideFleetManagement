@@ -57,7 +57,10 @@ export function PortalTimelineCard({
   // to the person reading this screen a dollar amount looks like something
   // they owe. What they can still owe is whatever was sold at the counter, and
   // that is what "Due Now" carries.
-  const rentalPrepaid = reservation?.isPrepaid === true;
+  const rentalPrepaid = reservation?.isPrepaid === true
+    // Partnerships F2: insurer preference bookings confirm the amount at pickup — same
+    // rule as prepaid (dash instead of a figure; only counter add-ons can be due).
+    || reservation?.priceConfirmedAtPickup === true;
   const paidAmount = Number(portal.payment?.paidAmount || 0);
   const balanceDue = Number(portal.payment?.balanceDue || 0);
   const dueToday = balanceDue > 0 ? balanceDue : 0;

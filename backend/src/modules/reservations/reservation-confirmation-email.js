@@ -4,6 +4,7 @@ import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.
 import { settingsService } from '../settings/settings.service.js';
 import { money } from '../../lib/money.js';
 import logger from '../../lib/logger.js';
+import { reservationPriceConfirmedAtPickup } from '../partnerships/partner-booking.js';
 
 /**
  * Shared customer-facing reservation CONFIRMATION email.
@@ -93,7 +94,8 @@ export async function sendReservationConfirmationEmail({
       pickupLocation: true,
       returnLocation: true,
       vehicle: true,
-      vehicleType: true
+      vehicleType: true,
+      partner: { select: { name: true, preferredTypePricing: true } }
     }
   });
 
@@ -133,6 +135,7 @@ export async function sendReservationConfirmationEmail({
     ?? 0
   );
 
+  const priceConfirmedAtPickup = reservationPriceConfirmedAtPickup(fullReservation);
   const replacements = {
     customerName: guestName,
     reservationNumber: String(fullReservation.reservationNumber || reservation?.reservationNumber || ''),
@@ -145,9 +148,11 @@ export async function sendReservationConfirmationEmail({
     pickupLocation: fullReservation.pickupLocation?.name || '-',
     returnLocation: fullReservation.returnLocation?.name || '-',
     vehicle: resolvedVehicleLabel,
-    dailyRate: reservation?.dailyRate != null ? `$${Number(reservation.dailyRate).toFixed(2)}` : '-',
-    estimatedTotal: `$${estimatedTotal.toFixed(2)}`,
-    dueNow: `$${dueNow.toFixed(2)}`,
+    // Insurer preference bookings (Partnerships F2): the amount is confirmed at pickup
+    // per the customer's coverage — never a figure in the email (Hector decision #3).
+    dailyRate: priceConfirmedAtPickup ? '-' : reservation?.dailyRate != null ? `$${Number(reservation.dailyRate).toFixed(2)}` : '-',
+    estimatedTotal: priceConfirmedAtPickup ? '-' : `$${estimatedTotal.toFixed(2)}`,
+    dueNow: priceConfirmedAtPickup ? '$0.00' : `$${dueNow.toFixed(2)}`,
     companyName: tenant?.name || fullReservation.pickupLocation?.name || 'Ride Fleet',
     customerInfoLink: nextActions?.customerInfo?.link || '',
     signatureLink: nextActions?.signature?.link || '',
