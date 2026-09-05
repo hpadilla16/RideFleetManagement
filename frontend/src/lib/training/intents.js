@@ -250,31 +250,31 @@ export const INTENTS = [
     key: 'kiosk-cant-scan',
     aliases: {
       en: ['kiosk cannot scan', 'kiosk scan failed', 'license wont scan kiosk', 'kiosk staff pin', 'unlock kiosk', 'kiosk manual id'],
-      es: ['kiosk no escanea', 'no escanea la licencia', 'kiosk pin', 'desbloquear kiosk', 'entrar id a mano', 'asistencia del personal kiosk'],
+      es: ['kiosk no escanea', 'licencia no escanea en el kiosk', 'kiosk pin', 'desbloquear kiosk', 'entrar id a mano', 'asistencia del personal kiosk'],
     },
     tourModuleKey: 'kiosk-cant-scan',
     route: null,
     articleSlug: null,
     summary: {
-      en: 'When the licence will not scan, the guest asks for a person and you verify the ID at the kiosk with your PIN. Your PIN opens a ten-minute window — it does not bend a rule.',
+      en: 'When the license will not scan, the guest asks for a person and you verify the ID at the kiosk with your PIN. Your PIN opens a ten-minute window — it does not bend a rule.',
       es: 'Cuando la licencia no escanea, el huésped pide a una persona y tú verificas el ID en el kiosk con tu PIN. Tu PIN abre diez minutos — no dobla ninguna regla.',
     },
-    source: { kind: 'MODULE', label: 'Ride University: The guest cannot scan their licence' },
+    source: { kind: 'MODULE', label: 'Ride University: The guest cannot scan their license' },
   },
   {
     key: 'kiosk-name-mismatch',
     aliases: {
       en: ['kiosk name mismatch', 'name does not match kiosk', 'kiosk wrong name', 'name code kiosk', 'kiosk confirm name'],
-      es: ['kiosk nombre no coincide', 'nombre no coincide', 'codigo de nombre kiosk', 'confirmar nombre kiosk', 'reservacion a nombre de otro kiosk'],
+      es: ['kiosk nombre no coincide', 'nombre no coincide en el kiosk', 'codigo de nombre kiosk', 'confirmar nombre kiosk', 'reservacion a nombre de otro kiosk'],
     },
     tourModuleKey: 'kiosk-name-mismatch',
     route: null,
     articleSlug: null,
     summary: {
-      en: 'Only the name check is red. The guest can prove the reservation is theirs with a 6-digit code to the contact on file — or you certify the licence in person.',
+      en: 'Only the name check is red. The guest can prove the reservation is theirs with a 6-digit code to the contact on file — or you certify the license in person.',
       es: 'Solo la comprobación del nombre está en rojo. El huésped puede probar que la reservación es suya con un código de 6 dígitos al contacto en archivo — o tú certificas la licencia en persona.',
     },
-    source: { kind: 'MODULE', label: 'Ride University: The name on the licence does not match' },
+    source: { kind: 'MODULE', label: 'Ride University: The name on the license does not match' },
   },
   {
     key: 'kiosk-valet-help',

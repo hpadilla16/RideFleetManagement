@@ -92,3 +92,42 @@ describe('drawn and asked steps', () => {
     expect(screen.queryByTestId('tour-check-why')).toBeNull();
   });
 });
+
+describe('a parked tour never resumes on a drawn or asked step (Innovation, 2026-09-04)', () => {
+  it('kiosk-grant-valet launched with People closed parks — and stays parked, it does not jump to the quiz', () => {
+    vi.useFakeTimers();
+    try {
+      render(<TourHost viewer={{ role: 'ADMIN' }} />);
+      start('kiosk-grant-valet');
+      // Nothing on the page carries data-tour="person-module-kiosk": parked.
+      expect(screen.getByRole('status')).toBeInTheDocument();
+      expect(screen.queryByTestId('tour-check')).toBeNull();
+      // The watcher polls every 700ms; the settle timer fires at 700ms too.
+      act(() => { vi.advanceTimersByTime(3000); });
+      expect(screen.getByRole('status'), 'still parked').toBeInTheDocument();
+      expect(screen.queryByTestId('tour-check'), 'the quiz must not be reachable without the real step').toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('…and resumes the moment the real element appears', () => {
+    vi.useFakeTimers();
+    try {
+      render(<TourHost viewer={{ role: 'ADMIN' }} />);
+      start('kiosk-grant-valet');
+      expect(screen.getByRole('status')).toBeInTheDocument();
+      const el = document.createElement('label');
+      el.setAttribute('data-tour', 'person-module-kiosk');
+      el.textContent = 'Kiosk';
+      el.getBoundingClientRect = () => ({ width: 80, height: 20, top: 100, bottom: 120, left: 40, right: 120 });
+      document.body.appendChild(el);
+      act(() => { vi.advanceTimersByTime(1500); });
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.getByRole('dialog').textContent).toContain('Tick “Kiosk”');
+      el.remove();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

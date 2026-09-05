@@ -226,7 +226,7 @@ test('kiosk: a verify that predates arming, or a grant that was never consumed, 
 test('kiosk admin: granting the kiosk module to a user proves KIOSK_ACCESS_GRANTED', () => {
   const out = findProof({
     verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt: new Date('2026-09-04T10:00:00Z'),
-    records: [{ id: 'mal1', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'tolls', from: true, to: false }, { module: 'kiosk', from: false, to: true }] }],
+    records: [{ id: 'mal1', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'tolls', from: true, to: false }, { module: 'kiosk', from: false, to: true }] }],
   });
   assert.equal(out.proved, true);
   assert.equal(out.provenBy, 'mal1');
@@ -236,14 +236,22 @@ test('kiosk admin: REVOKING kiosk, or changing some other module, does not count
   const armedAt = new Date('2026-09-04T10:00:00Z');
   assert.equal(findProof({
     verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt,
-    records: [{ id: 'x', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'kiosk', from: true, to: false }] }],
+    records: [{ id: 'x', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'kiosk', from: true, to: false }] }],
   }).proved, false, 'revoke');
   assert.equal(findProof({
     verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt,
-    records: [{ id: 'y', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'tolls', from: false, to: true }] }],
+    records: [{ id: 'y', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'tolls', from: false, to: true }] }],
   }).proved, false, 'other module');
   assert.equal(findProof({
     verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt,
-    records: [{ id: 'z', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: null }],
+    records: [{ id: 'z', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: null }],
   }).proved, false, 'malformed changed');
+});
+
+test('kiosk admin: the TENANT-wide switch in Settings is a different module — it does not prove the People one', () => {
+  const out = findProof({
+    verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt: new Date('2026-09-04T10:00:00Z'),
+    records: [{ id: 't1', scope: 'TENANT', targetUserId: null, actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'kiosk', from: false, to: true }] }],
+  });
+  assert.equal(out.proved, false);
 });

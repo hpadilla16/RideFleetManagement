@@ -1558,7 +1558,7 @@
       "kiosk-brakes": {
         "title": "«¿Sigues ahí?», «No es mi reservación» y un kiosk bloqueado",
         "summary": "Las tres formas en que el kiosk se frena solo: inactividad, una coincidencia equivocada, y quince minutos de bloqueo.",
-        "gotcha": "Un kiosk bloqueado no está roto. No lo re-parees, no lo reinicies — en quince minutos vuelve. Atiende al huésped en el counter mientras tanto.",
+        "gotcha": "Un kiosk bloqueado no está roto. Un admin lo limpia al momento emitiendo un código de pareo nuevo (Ride Fleet → Kiosks); si no hay admin a mano, atiende al huésped en el counter — en quince minutos vuelve solo. Reiniciar el iPad no cambia nada: el bloqueo vive en el servidor.",
         "steps": {
           "kiosk-fig-idle": {
             "title": "«¿Sigues ahí?» — el reinicio por privacidad",
@@ -1570,33 +1570,33 @@
           },
           "kiosk-fig-not-mine": {
             "title": "«Esta no es mi reservación»",
-            "body": "El resumen muestra conductor, fechas y clase antes de que pase nada más. Si es la equivocada, «Esta no es mi reservación» vuelve a la búsqueda sin gastar un intento. Las búsquedas por número tienen intentos limitados; agotados, el kiosk pausa las búsquedas unos minutos.",
+            "body": "El resumen muestra conductor, fechas y clase antes de que pase nada más. Si es la equivocada, «Esta no es mi reservación» vuelve a la búsqueda sin gastar un intento. Las búsquedas por número tienen intentos limitados — la pantalla de búsqueda dice cuántos quedan — y agotados, el kiosk pausa las búsquedas unos minutos.",
             "callouts": {
               "0": "«Soy yo — continuar» es el huésped confirmando la coincidencia.",
-              "1": "«Esta no es mi reservación» es gratis — no cuenta como intento fallido.",
-              "2": "Las búsquedas fallidas se cuentan y se muestran; el kiosk dice cuántas quedan."
+              "1": "«Esta no es mi reservación» es gratis — no cuenta como intento fallido."
             }
           },
           "kiosk-fig-locked": {
             "title": "Bloqueado por quince minutos",
-            "body": "Demasiados PIN incorrectos, códigos incorrectos o búsquedas fallidas, y el kiosk pausa el desbloqueo del personal y las búsquedas. Está protegiendo los datos del huésped que tiene dentro. No hay nada que arreglar: se desbloquea solo. Termina al huésped en el counter.",
+            "body": "Demasiados PIN incorrectos, códigos incorrectos o búsquedas fallidas, y el kiosk pausa el desbloqueo del personal y las búsquedas. Está protegiendo los datos del huésped que tiene dentro. Dos salidas: un admin emite un código de pareo nuevo desde Ride Fleet → Kiosks y el bloqueo se limpia al momento — o lo esperas y terminas al huésped en el counter.",
             "callouts": {
-              "0": "El contador baja en pantalla. Ninguna acción de admin lo acorta."
+              "0": "El contador baja en pantalla y llega a cero solo.",
+              "1": "La propia pantalla lo dice: un admin puede emitir un código de pareo nuevo para limpiarlo al momento."
             }
           },
           "kiosk-check-locked": {
             "title": "Chequeo rápido",
             "body": "Una pregunta antes de cerrar este módulo.",
             "check": {
-              "question": "El kiosk muestra «Este kiosk está bloqueado temporalmente» después de que un compañero tecleó mal su PIN tres veces. Hay un huésped esperando. ¿Qué haces?",
+              "question": "El kiosk muestra «Este kiosk está bloqueado temporalmente» después de que un compañero tecleó mal su PIN tres veces. Hay un huésped esperando y no hay ningún admin cerca. ¿Qué haces?",
               "options": {
                 "A": {
-                  "text": "Re-parear el kiosk con un código nuevo de 6 dígitos para resetearlo",
-                  "why": "El pareo es para un equipo nuevo. No quitaría el bloqueo y desconectaría un kiosk que funciona."
+                  "text": "Seguir probando PIN hasta que alguno funcione",
+                  "why": "El bloqueo existe por los PIN fallidos. Más intentos lo alargan y dejan al huésped parado."
                 },
                 "B": {
-                  "text": "Llevar al huésped al counter y terminar ahí; el kiosk se desbloquea solo en quince minutos",
-                  "why": "El bloqueo es protección, no una falla. El counter puede hacer todo lo que hace el kiosk."
+                  "text": "Terminar al huésped en el counter; el kiosk se desbloquea solo en quince minutos — o un admin lo limpia ahora con un código de pareo nuevo",
+                  "why": "El bloqueo es protección, no una falla. El counter hace todo lo que hace el kiosk, y Ride Fleet → Kiosks → código de pareo nuevo lo limpia al instante cuando hay un admin disponible."
                 },
                 "C": {
                   "text": "Reiniciar el iPad",
@@ -1608,7 +1608,7 @@
         }
       },
       "kiosk-done-keys": {
-        "title": "Ya firmaron: llaves, contrato y la vuelta de fotos",
+        "title": "Ya firmaron: llaves, contrato y la ronda de fotos",
         "summary": "La pantalla «¡Listo!» — dónde está la llave, qué llegó por email, y el enlace de inspección.",
         "gotcha": "La pantalla se reinicia sola tras unos segundos. Si el huésped quiere el contrato impreso, imprímelo desde la reservación — el kiosk no puede.",
         "steps": {
@@ -1781,7 +1781,8 @@
           "sign-finish": "Bloqueado mientras falten iniciales, el pago o la verificación de ID — el kiosk dice cuál.",
           "done": "La pantalla «¡Listo!» no tiene botones: llaves en el counter, contrato y recibo por email, un QR para foto-documentar el carro. Se reinicia sola.",
           "pair": "Código de seis dígitos de Ride Fleet → Kiosks → Pair. Los intentos son limitados; agotados, pide un código nuevo."
-        }
+        },
+        "legend": "Violeta = el huésped · violeta oscuro = personal · con borde = secundario · rojo = deshace algo · texto plano = un mensaje, no un botón."
       }
     },
     "waitingForScreen": "Abre {{where}} para empezar «{{name}}» — la guía sigue ahí.",
@@ -1789,7 +1790,21 @@
     "needsScreenBody": "«{{name}}» se recorre en otra pantalla — abre {{where}} y toca Empezar otra vez.",
     "openReference": "Abrir",
     "checkRight": "Correcto",
-    "checkNotQuite": "No exactamente"
+    "checkNotQuite": "No exactamente",
+    "figures": {
+      "where-guest": "En el iPad del huésped",
+      "where-staff": "Panel del personal en el iPad",
+      "chat-guest": "Hola, no puedo escanear la licencia…",
+      "chat-agent": "Ya te veo en el paso de ID. Te ayudo.",
+      "remote-cannot-skip": "Saltar la verificación de ID",
+      "remote-cannot-sign": "Firmar o pagar por el huésped",
+      "remote-cannot-car": "Abrir el carro — llaves en el counter"
+    },
+    "proof": {
+      "byWork": "Se prueba haciéndolo de verdad",
+      "readingCheck": "Lectura + chequeo",
+      "adminOnly": "Solo admin"
+    }
   },
   "copilot": {
     "launcher": "¿Cómo se hace…?",

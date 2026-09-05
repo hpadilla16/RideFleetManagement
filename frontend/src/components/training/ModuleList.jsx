@@ -211,7 +211,17 @@ export function ModuleList({ token, me }) {
                         {trainingText(t, mKey(m, 'summary'), m.summary)}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {/* How this module is passed — from the curriculum, never
+                          asserted by the row (approved mockup, 2026-09-04). */}
+                      {m.verify ? (
+                        <span className="ui-muted" data-testid="proof-pill" style={{ fontSize: 12 }}>{t('training.proof.byWork', 'Proved by doing the real thing')}</span>
+                      ) : (m.steps || []).some((s) => s.check) ? (
+                        <span className="ui-muted" data-testid="proof-pill" style={{ fontSize: 12 }}>{t('training.proof.readingCheck', 'Reading + check')}</span>
+                      ) : null}
+                      {Array.isArray(m.roles) && !m.roles.includes('AGENT') && !m.roles.includes('OPS') && (
+                        <span className="ui-muted" data-testid="proof-pill" style={{ fontSize: 12 }}>{t('training.proof.adminOnly', 'Admin only')}</span>
+                      )}
                       <span className="ui-muted" style={{ fontSize: 12 }}>{m.points} pts</span>
                       {armed && m.verify && (
                         <span className="ui-muted" style={{ fontSize: 12 }}>
@@ -252,7 +262,7 @@ export function ModuleList({ token, me }) {
                   style={{
                     alignItems: 'center', gap: 10, flexWrap: 'wrap',
                     padding: '10px 12px', borderRadius: 10,
-                    border: '1px dashed var(--border-2, #e6e0f2)',
+                    border: '1px dashed var(--border, #e6e0f2)',
                     background: 'var(--surface-2, #f7f5fd)',
                   }}
                 >

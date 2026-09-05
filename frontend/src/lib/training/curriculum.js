@@ -40,6 +40,11 @@
  *   step.check    — a question the person must answer before the module
  *                   closes. Wrong answers explain themselves and cost nothing.
  *                   It is what makes a reading module more than a Next button.
+ *   module.onboarding — false keeps the module OUT of the ONBOARDING track (it
+ *                   stays in Ride University and the copilot). The kiosk
+ *                   situations are things you look up when they happen, not a
+ *                   first-day walkthrough — with them in, an admin's onboarding
+ *                   grew from ~33 to ~58 steps (Innovation, 2026-09-04).
  *   module.needsRecord — some walkthroughs live INSIDE a record (a
  *                   reservation's own page), so their anchors cannot exist
  *                   until one is open. This names where to go find one.
@@ -631,23 +636,24 @@ export const COURSES = [
     modules: [
       {
         key: 'kiosk-cant-scan',
-        title: 'The guest cannot scan their licence',
+        title: 'The guest cannot scan their license',
         summary: 'From “I can’t — get help” to verifying the ID yourself with your PIN.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        onboarding: false,
         kind: 'OPPORTUNISTIC',
         verify: { type: VERIFY.KIOSK_ASSISTED },
         points: 15,
         showcase: null,
-        gotcha: 'Your PIN opens a ten-minute window — it does not bend a rule. Age, licence validity and the name check run exactly as they do for a scan. If the real date of birth fails, the kiosk is telling the truth: end the assistance and let the counter decide.',
+        gotcha: 'Your PIN opens a ten-minute window — it does not bend a rule. Age, license validity and the name check run exactly as they do for a scan. If the real date of birth fails, the kiosk is telling the truth: end the assistance and let the counter decide.',
         steps: [
           {
             anchor: 'kiosk-fig-scan-trouble', figure: 'scan-trouble',
             title: 'Two failed scans',
-            body: 'The guest is on “Scan your driver’s licence”, barcode side up, and the reader is not catching it. Glare, a worn card, a laminated copy — it happens. Before anyone is called, the screen already offers two ways around it.',
+            body: 'The guest is on “Scan your driver’s license”, barcode side up, and the reader is not catching it. Glare, a worn card, a laminated copy — it happens. Before anyone is called, the screen already offers two ways around it.',
             callouts: [
               '“Upload a photo of the barcode” — a still photo is often readable when the live camera is not.',
-              '“Take a photo” reads the FRONT of the licence instead, then asks the guest to confirm what it read.',
+              '“Take a photo” reads the FRONT of the license instead, then asks the guest to confirm what it read.',
             ],
           },
           {
@@ -671,8 +677,8 @@ export const COURSES = [
           },
           {
             anchor: 'kiosk-fig-staff-manual-id', figure: 'staff-manual-id',
-            title: 'Type the licence in, photograph both sides',
-            body: 'Fill in first name, last name, date of birth and expiry exactly as printed. Then “Capture” or “Upload” the FRONT and the BACK of the physical licence — both are required, and they are stored with the rental.',
+            title: 'Type the license in, photograph both sides',
+            body: 'Fill in first name, last name, date of birth and expiry exactly as printed. Then “Capture” or “Upload” the FRONT and the BACK of the physical license — both are required, and they are stored with the rental.',
             callouts: [
               'The photos are the evidence that a person saw the card. Without both, “Verify and continue” stays off.',
             ],
@@ -680,7 +686,7 @@ export const COURSES = [
           {
             anchor: 'kiosk-fig-staff-verify', figure: 'staff-verify',
             title: 'Verify and continue — the rules still run',
-            body: 'The same three checks as a scan: the name matches the reservation, the age requirement, and a licence valid through the return date. A typo can be corrected and verified again. A real failure cannot be talked past.',
+            body: 'The same three checks as a scan: the name matches the reservation, the age requirement, and a license valid through the return date. A typo can be corrected and verified again. A real failure cannot be talked past.',
             callouts: [
               'A red mark here is the kiosk doing its job — check the fields for a typo first.',
               '“Verify and continue” runs the checks again with what you typed.',
@@ -700,9 +706,9 @@ export const COURSES = [
             title: 'Quick check',
             body: 'One question before this module closes.',
             check: {
-              question: 'You typed the licence in and the kiosk says the guest does not meet the minimum age. What do you do?',
+              question: 'You typed the license in and the kiosk says the guest does not meet the minimum age. What do you do?',
               options: [
-                { key: 'A', text: 'Re-enter a “corrected” date of birth so it passes', why: 'That is falsifying a rental record under your own PIN. The date of birth on the licence is the date of birth.' },
+                { key: 'A', text: 'Re-enter a “corrected” date of birth so it passes', why: 'That is falsifying a rental record under your own PIN. The date of birth on the license is the date of birth.' },
                 { key: 'B', text: 'Check for a typo; if the date is real, end the assistance and let the counter decide', correct: true, why: 'Nothing skips the rules — not your PIN, not a remote agent. A real failure is the kiosk doing its job.' },
                 { key: 'C', text: 'Ask Valet to approve it remotely', why: 'Remote agents run the very same checks. There is no override for age or validity anywhere in the system.' },
               ],
@@ -713,19 +719,20 @@ export const COURSES = [
 
       {
         key: 'kiosk-name-mismatch',
-        title: 'The name on the licence does not match',
-        summary: 'The guest’s own way out (a 6-digit code) and yours (certifying the licence).',
+        title: 'The name on the license does not match',
+        summary: 'The guest’s own way out (a 6-digit code) and yours (certifying the license).',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        onboarding: false,
         kind: 'OPPORTUNISTIC',
         verify: { type: VERIFY.KIOSK_ASSISTED },
         points: 10,
         showcase: null,
-        gotcha: 'When you confirm the name you are certifying, under your own account, that you looked at the physical licence and it belongs to this person. When the guest can prove it themselves with the code, let them — it leaves the cleaner trail.',
+        gotcha: 'When you confirm the name you are certifying, under your own account, that you looked at the physical license and it belongs to this person. When the guest can prove it themselves with the code, let them — it leaves the cleaner trail.',
         steps: [
           {
             anchor: 'kiosk-fig-name-mismatch', figure: 'name-mismatch',
-            title: 'The licence read fine — the name did not match',
+            title: 'The license read fine — the name did not match',
             body: 'Age and validity pass; only the name check is red. Common causes: a maiden name, a second surname, a booking made by a spouse. The kiosk does not fail the guest here — it offers two ways to prove the reservation is theirs.',
             callouts: [
               'Two green, one red: this is a NAME problem, not an ID problem.',
@@ -736,7 +743,7 @@ export const COURSES = [
           {
             anchor: 'kiosk-fig-name-code', figure: 'name-code',
             title: 'The guest proves it with a code',
-            body: 'A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the licence name and the check-in continues. It expires in ten minutes.',
+            body: 'A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the license name and the check-in continues. It expires in ten minutes.',
             callouts: [
               '“Confirm code” — three wrong codes pause codes on this kiosk for a few minutes.',
               '“Resend” has a cooldown so the inbox is not flooded.',
@@ -745,9 +752,9 @@ export const COURSES = [
           {
             anchor: 'kiosk-fig-staff-name-confirm', figure: 'staff-name-confirm',
             title: 'Or you confirm it, in person',
-            body: 'Unlock with your PIN as usual. Instead of the full form the kiosk shows both names side by side. “I verified this licence belongs to the guest” records that YOU looked at the card and vouched — the rental carries your name on that decision.',
+            body: 'Unlock with your PIN as usual. Instead of the full form the kiosk shows both names side by side. “I verified this license belongs to the guest” records that YOU looked at the card and vouched — the rental carries your name on that decision.',
             callouts: [
-              'Licence name versus reservation name, exactly as each system has them.',
+              'License name versus reservation name, exactly as each system has them.',
               'This button is a certification, not a shortcut. If you did not see the card, do not press it.',
             ],
           },
@@ -756,9 +763,9 @@ export const COURSES = [
             title: 'Quick check',
             body: 'One question before this module closes.',
             check: {
-              question: 'The guest says the reservation was made by her husband, who is not here. The licence is hers. What is the right path?',
+              question: 'The guest says the reservation was made by her husband, who is not here. The license is hers. What is the right path?',
               options: [
-                { key: 'A', text: 'Press “I verified this licence belongs to the guest” — it is her licence', why: 'Her licence is real, but the reservation is not in her name. Certifying the name does not put a driver on someone else’s booking.' },
+                { key: 'A', text: 'Press “I verified this license belongs to the guest” — it is her license', why: 'Her license is real, but the reservation is not in her name. Certifying the name does not put a driver on someone else’s booking.' },
                 { key: 'B', text: 'Have the guest use “Send my code” — the code goes to the contact on the reservation', correct: true, why: 'If the husband shares the code, the booking updates to her name with his consent on record. If he cannot, the counter decides the rental.' },
                 { key: 'C', text: 'Tell her to start over and search by her own name', why: 'There is no reservation under her name to find. Starting over only erases what she entered.' },
               ],
@@ -773,6 +780,7 @@ export const COURSES = [
         summary: 'What the guest sees, what a remote agent can and cannot do, and why the keys are yours to hand over.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        onboarding: false,
         kind: 'ON_DEMAND',
         verify: null,
         points: 10,
@@ -782,7 +790,7 @@ export const COURSES = [
           {
             anchor: 'kiosk-fig-help-chat', figure: 'help-chat',
             title: '🎧 Help opens a chat with a Valet agent',
-            body: 'The guest can tap Help on any screen. A Valet agent sees which step they are on and what has been verified — never the licence photos, never card details. The chat sits over the check-in without ending it.',
+            body: 'The guest can tap Help on any screen. A Valet agent sees which step they are on and what has been verified — never the license photos, never card details. The chat sits over the check-in without ending it.',
             callouts: [
               'Help is always in the corner. It never ends the session.',
               'Closing the chat asks “Close the help chat?” — the check-in stays where it was.',
@@ -801,7 +809,7 @@ export const COURSES = [
           {
             anchor: 'kiosk-fig-remote-limits', figure: 'remote-limits',
             title: 'What a remote agent can — and cannot — do',
-            body: 'Can: unlock the session, enter the licence by hand from the photos already on file, confirm the name. Cannot: skip verification, sign, pay — and cannot open the car. The remote unlock goes to a lockbox that does not exist yet, so the agent tells the guest to collect the keys at the front desk.',
+            body: 'Can: unlock the session, enter the license by hand from the photos already on file, confirm the name. Cannot: skip verification, sign, pay — and cannot open the car. The remote unlock goes to a lockbox that does not exist yet, so the agent tells the guest to collect the keys at the front desk.',
             callouts: [
               'Everything here runs the same rules as the kiosk itself.',
               'Signature and payment are the guest’s alone, at the kiosk.',
@@ -830,6 +838,7 @@ export const COURSES = [
         summary: 'Coming soon at your location: the link and QR, and what to do when the screen does not advance.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        onboarding: false,
         kind: 'ON_DEMAND',
         verify: null,
         points: 5,
@@ -877,11 +886,12 @@ export const COURSES = [
         summary: 'The three ways the kiosk stops itself: inactivity, a wrong match, and fifteen minutes of lockout.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        onboarding: false,
         kind: 'ON_DEMAND',
         verify: null,
         points: 5,
         showcase: null,
-        gotcha: 'A locked kiosk is not broken. Do not re-pair it, do not restart it — fifteen minutes and it is back. Take the guest to the counter meanwhile.',
+        gotcha: 'A locked kiosk is not broken. An admin clears it on the spot by issuing a new pairing code (Ride Fleet → Kiosks); with no admin at hand, finish the guest at the counter — in fifteen minutes it is back by itself. Restarting the iPad changes nothing: the lock lives on the server.',
         steps: [
           {
             anchor: 'kiosk-fig-idle', figure: 'idle',
@@ -895,19 +905,19 @@ export const COURSES = [
           {
             anchor: 'kiosk-fig-not-mine', figure: 'not-mine',
             title: '“This isn’t my reservation”',
-            body: 'The summary shows driver, dates and class before anything else happens. If it is the wrong one, “This isn’t my reservation” goes back to the search without spending an attempt. Lookups by number have a limited number of tries; once spent, the kiosk pauses searches for a few minutes.',
+            body: 'The summary shows driver, dates and class before anything else happens. If it is the wrong one, “This isn’t my reservation” goes back to the search without spending an attempt. Lookups by number have a limited number of tries — the search screen says how many are left — and once spent, the kiosk pauses searches for a few minutes.',
             callouts: [
               '“That’s me — continue” is the guest confirming the match.',
               '“This isn’t my reservation” is free — it does not count as a failed attempt.',
-              'Failed lookups are counted and shown; the kiosk says how many are left.',
             ],
           },
           {
             anchor: 'kiosk-fig-locked', figure: 'locked',
             title: 'Locked for fifteen minutes',
-            body: 'Too many wrong PINs, wrong codes or failed lookups, and the kiosk pauses staff unlock and searches. It is protecting the guest data on it. There is nothing to fix: it unlocks itself. Finish the guest at the counter.',
+            body: 'Too many wrong PINs, wrong codes or failed lookups, and the kiosk pauses staff unlock and searches. It is protecting the guest data on it. Two ways out: an admin issues a new pairing code from Ride Fleet → Kiosks and the lock clears immediately — or you wait it out and finish the guest at the counter.',
             callouts: [
-              'The timer counts down on screen. No admin action shortens it.',
+              'The timer counts down on screen and reaches zero on its own.',
+              'The screen itself says it: an admin can issue a new pairing code to clear it right away.',
             ],
           },
           {
@@ -915,11 +925,11 @@ export const COURSES = [
             title: 'Quick check',
             body: 'One question before this module closes.',
             check: {
-              question: 'The kiosk shows “This kiosk is temporarily locked” after a colleague mistyped their PIN three times. A guest is waiting. What do you do?',
+              question: 'The kiosk shows “This kiosk is temporarily locked” after a colleague mistyped their PIN three times. A guest is waiting and no admin is around. What do you do?',
               options: [
-                { key: 'A', text: 'Re-pair the kiosk with a new 6-digit code to reset it', why: 'Pairing is for a new device. It would not clear the lockout and it would disconnect a working kiosk.' },
-                { key: 'B', text: 'Take the guest to the counter and finish there; the kiosk unlocks itself in fifteen minutes', correct: true, why: 'The lockout is protection, not a fault. The counter can do everything the kiosk does.' },
-                { key: 'C', text: 'Restart the iPad', why: 'The lockout lives on the server, not the tablet. A restart changes nothing and loses the guest’s session.' },
+                { key: 'A', text: 'Keep trying PINs until one works', why: 'The lock is there because of failed PINs. More attempts extend it and leave the guest standing.' },
+                { key: 'B', text: 'Finish the guest at the counter; the kiosk unlocks itself in fifteen minutes — or an admin clears it now with a new pairing code', correct: true, why: 'The lockout is protection, not a fault. The counter does everything the kiosk does, and Ride Fleet → Kiosks → new pairing code clears it instantly when an admin is available.' },
+                { key: 'C', text: 'Restart the iPad', why: 'The lock lives on the server, not the tablet. A restart changes nothing and loses the guest’s session.' },
               ],
             },
           },
@@ -932,6 +942,7 @@ export const COURSES = [
         summary: 'The “All set!” screen — where the key is, what arrived by email, and the inspection link.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        onboarding: false,
         kind: 'ON_DEMAND',
         verify: null,
         points: 5,
@@ -970,6 +981,7 @@ export const COURSES = [
         summary: 'People → the Valet service account → the Kiosk module. Without it, Valet cannot see kiosk sessions.',
         roles: ['ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        onboarding: false,
         kind: 'OPPORTUNISTIC',
         needsRecord: '/people',
         needsRecordLabel: 'the Valet service account in People',
@@ -1052,6 +1064,7 @@ export function stepsForTrack(track, viewer = {}) {
       .flatMap((m) => (m.steps || []).map((s) => ({ ...s, moduleKey: m.key, moduleTitle: m.title })));
   }
   return modulesFor(viewer)
+    .filter((m) => m.onboarding !== false)
     .flatMap((m) => (m.steps || []).map((s) => ({ ...s, moduleKey: m.key, moduleTitle: m.title })));
 }
 

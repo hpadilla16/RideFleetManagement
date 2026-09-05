@@ -31,6 +31,7 @@ import {
   moduleForStep, moduleRunEnd, recordScopedRunEnd, isVirtualStep,
 } from '../../lib/training/curriculum.js';
 import { figureFor } from './figures/index.js';
+import { FIGURE_TEXT, figureTextKey } from '../../lib/training/figure-text.js';
 import { stepKey, moduleKey as mKeyOf, trainingText } from '../../lib/training/i18n-keys.js';
 import {
   TOUR_STORAGE_KEY, TOUR_END,
@@ -143,6 +144,14 @@ export function TourHost({ viewer }) {
     virtualAnchors.current = new Set((list || []).filter(isVirtualStep).map((s) => s.anchor));
   };
   const isPresent = useCallback((name) => virtualAnchors.current.has(name) || !!anchorEl(name), []);
+  /**
+   * The PARKED watcher must not see virtual steps as present (Innovation,
+   * 2026-09-04). It scans forward for "whatever is on screen" — and a drawn or
+   * asked step is on every screen, so with isPresent it would resume a parked
+   * module on its own quiz, skipping the one real step the person was sent to
+   * open. Resuming means an ELEMENT appeared; only the DOM can say so.
+   */
+  const isPresentInDom = useCallback((name) => !virtualAnchors.current.has(name) && !!anchorEl(name), []);
   // The answer picked on a check step. Reset whenever the step changes. The
   // ref mirrors "Next is locked" for the keyboard handler, which is bound once.
   const [pick, setPick] = useState(null);
@@ -269,7 +278,7 @@ export function TourHost({ viewer }) {
   useEffect(() => {
     if (!state?.waiting || !steps.length) return undefined;
     const look = () => {
-      const resumed = resumeAt(state, steps, isPresent);
+      const resumed = resumeAt(state, steps, isPresentInDom);
       if (resumed) persist(resumed);
     };
     const timer = setInterval(look, WAIT_POLL_MS);
@@ -638,16 +647,27 @@ export function TourHost({ viewer }) {
         <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700 }}>{title}</h3>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--text-2, #4a4258)' }}>{body}</p>
 
+        {/* Drawn step. The SVG keeps its aspect ratio inside its own height
+            clamp (xMidYMid meet), so a short window letterboxes the drawing
+            instead of cropping its bottom row off; the card itself scrolls.
+            The eyebrow says WHERE this screen lives — it is not RFM. */}
         {Figure && (
-          <div data-testid="tour-figure" style={{ margin: '10px 0 0', border: '1px solid var(--border-2, #e6e0f2)', borderRadius: 10, overflow: 'hidden', maxHeight: '38vh' }}>
-            <Figure />
+          <div data-testid="tour-figure" style={{ margin: '10px 0 0' }}>
+            <div className="eyebrow" style={{ marginBottom: 4 }}>
+              {String(step.figure).startsWith('staff-')
+                ? t(figureTextKey('where-staff'), FIGURE_TEXT['where-staff'])
+                : t(figureTextKey('where-guest'), FIGURE_TEXT['where-guest'])}
+            </div>
+            <div style={{ border: '1px solid var(--border, #e6e0f2)', borderRadius: 10, overflow: 'hidden', display: 'flex', justifyContent: 'center', background: '#fbfaff' }}>
+              <Figure />
+            </div>
           </div>
         )}
         {callouts.length > 0 && (
           <ol data-testid="tour-callouts" style={{ margin: '10px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
             {callouts.map((text, i) => (
               <li key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', fontSize: 12.5, lineHeight: 1.45, color: 'var(--text-2, #4a4258)' }}>
-                <span aria-hidden="true" style={{ flex: '0 0 20px', height: 20, borderRadius: '50%', background: '#8752FE', color: '#fff', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                <span aria-hidden="true" style={{ flex: '0 0 20px', height: 20, borderRadius: '50%', background: 'var(--p-600, #6a35e0)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
                 <span>{text}</span>
               </li>
             ))}
@@ -673,8 +693,8 @@ export function TourHost({ viewer }) {
                     style={{
                       display: 'flex', gap: 10, alignItems: 'flex-start', textAlign: 'left', cursor: 'pointer',
                       padding: '8px 11px', borderRadius: 9, fontSize: 13, lineHeight: 1.4,
-                      border: `1px solid ${tone === 'ok' ? '#1f8a5f' : tone === 'bad' ? '#b3261e' : 'var(--border-2, #d9d2ea)'}`,
-                      background: tone === 'ok' ? 'rgba(31,138,95,0.08)' : tone === 'bad' ? 'rgba(179,38,30,0.06)' : 'var(--surface-1, #fff)',
+                      border: `1px solid ${tone === 'ok' ? 'var(--ok-tx, #08674e)' : tone === 'bad' ? 'var(--danger-tx, #b3261e)' : 'var(--border, #d9d2ea)'}`,
+                      background: tone === 'ok' ? 'var(--ok-bg, rgba(31,138,95,0.08))' : tone === 'bad' ? 'var(--danger-bg, rgba(179,38,30,0.06))' : 'var(--surface-1, #fff)',
                       color: 'var(--text-1, #1e1a2b)',
                     }}
                   >
@@ -689,9 +709,9 @@ export function TourHost({ viewer }) {
                 role="status"
                 data-testid="tour-check-why"
                 style={{ margin: '10px 0 0', borderRadius: 8, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.5,
-                  background: picked.correct ? 'rgba(31,138,95,0.08)' : '#f8efe0', color: 'var(--text-2, #4a4258)' }}
+                  background: picked.correct ? 'var(--ok-bg, rgba(31,138,95,0.08))' : 'var(--warn-bg, #fdf3e2)', color: 'var(--text-2, #4a4258)' }}
               >
-                <span style={{ display: 'block', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 2, color: picked.correct ? '#1f8a5f' : '#9a5b12' }}>
+                <span style={{ display: 'block', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 2, color: picked.correct ? 'var(--ok-tx, #08674e)' : 'var(--warn-tx, #8a5606)' }}>
                   {picked.correct ? t('training.checkRight', 'Right') : t('training.checkNotQuite', 'Not quite')}
                 </span>
                 {trainingText(t, stepKey(step.moduleKey, step, `check.options.${picked.key}.why`), picked.why)}

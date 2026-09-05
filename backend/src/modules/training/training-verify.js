@@ -61,6 +61,11 @@ export const PROOF_SHAPE = Object.freeze({
   },
   KIOSK_ACCESS_GRANTED: {
     model: 'moduleAccessAuditLog', actorField: 'actorUserId', atField: 'changedAt',
+    // Per-PERSON grants only. The tenant-wide switch in Settings writes the
+    // same {module, to} shape with scope 'TENANT', and that is a different
+    // module (kiosk-grant-valet teaches People, not Settings). Repeated here,
+    // not only in the DB query, so the decision stays testable without one.
+    where: { field: 'scope', in: ['USER'] },
     match: (row) => Array.isArray(row?.changed)
       && row.changed.some((c) => c && c.module === 'kiosk' && c.to === true),
   },

@@ -27,6 +27,21 @@ export const K = Object.freeze({
 export const W = 640;
 export const H = 320;
 
+/**
+ * The invented people and figures in the drawings, in ONE place so the prose
+ * in curriculum.js and the drawings cannot drift apart. Not real customers or
+ * employees — generic Puerto Rican names, round amounts.
+ */
+export const SAMPLE = Object.freeze({
+  staff: 'Ana Rivera',
+  guestFirst: 'Roberto',
+  guestFull: 'Roberto Díaz',
+  guestLicenceName: 'ROBERTO DIAZ MORALES',
+  guestReservationName: 'ROBERTO DIAZ',
+  timeLeft: '9:58',
+  maskedEmail: 'r•••@gmail.com',
+});
+
 /** Clip a string so it never overruns the frame; SVG text does not wrap. */
 export function clip(s, max) {
   const str = String(s || '');
@@ -48,7 +63,7 @@ export function KioskFrame({ step = 1, help = true, children, label }) {
     t('kiosk.stepSign', 'Sign & keys'),
   ];
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label || ''} data-testid="kiosk-figure" style={{ display: 'block', width: '100%', height: 'auto' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label || ''} data-testid="kiosk-figure" style={{ display: 'block', width: '100%', height: 'auto', maxHeight: '38vh' }}>
       <rect width={W} height={H} rx="14" fill={K.ground} />
       <rect x="0" y="0" width={W} height="42" fill={K.surface} />
       {steps.map((name, i) => {
@@ -57,7 +72,7 @@ export function KioskFrame({ step = 1, help = true, children, label }) {
         return (
           <g key={name}>
             <rect x={x} y="15" width="100" height="10" rx="5" fill={on ? K.purple : K.borderStrong} />
-            <text x={x} y="36" fontFamily="system-ui, sans-serif" fontSize="9" fill={on ? K.deep : K.muted}>{clip(name, 22)}</text>
+            <text x={x} y="36" fontFamily="system-ui, sans-serif" fontSize="10" fill={on ? K.deep : K.muted}>{clip(name, 20)}</text>
           </g>
         );
       })}
@@ -90,7 +105,10 @@ export function Btn({ x, y, w = 160, label, tone = 'primary', callout }) {
     <g>
       <rect x={x} y={y} width={w} height="34" rx="9" fill={fill} stroke={tone === 'secondary' ? K.border : 'none'} />
       <text x={x + w / 2} y={y + 22} textAnchor="middle" fontFamily="system-ui, sans-serif" fontSize="12" fontWeight="600" fill={ink}>{clip(label, Math.floor(w / 6.4))}</text>
-      {callout && <Callout n={callout} x={x + w + 4} y={y + 17} />}
+      {/* The marker straddles the top-right corner (as in the approved
+          mockup) instead of sitting beside the button, where it bit into the
+          next button's edge whenever two buttons sat 14px apart. */}
+      {callout && <Callout n={callout} x={x + w - 2} y={y - 2} />}
     </g>
   );
 }
@@ -108,11 +126,37 @@ export function Callout({ n, x, y }) {
 /** The guest-facing assist notice pill, violet (now) or green (done). */
 export function NoticePill({ y = 58, text, tone = 'now', callout }) {
   const now = tone === 'now';
+  // Wide enough for the longest Spanish notice (77 chars at 11.5px ≈ 490px).
   return (
     <g>
-      <rect x="120" y={y} width="400" height="34" rx="17" fill={now ? K.soft : K.mint} stroke={now ? K.softLine : 'rgba(16,185,129,.3)'} />
-      <text x="320" y={y + 22} textAnchor="middle" fontFamily="system-ui, sans-serif" fontSize="12" fontWeight="600" fill={now ? K.deep : K.mintInk}>{clip(text, 64)}</text>
-      {callout && <Callout n={callout} x={104} y={y + 17} />}
+      <rect x="40" y={y} width="560" height="34" rx="17" fill={now ? K.soft : K.mint} stroke={now ? K.softLine : 'rgba(16,185,129,.3)'} />
+      <text x="320" y={y + 22} textAnchor="middle" fontFamily="system-ui, sans-serif" fontSize="11.5" fontWeight="600" fill={now ? K.deep : K.mintInk}>{clip(text, 84)}</text>
+      {callout && <Callout n={callout} x={26} y={y + 17} />}
+    </g>
+  );
+}
+
+/** Wrap a long string into up to `rows` lines of ~`max` chars, on word boundaries. */
+export function wrap(text, max, rows = 2) {
+  const words = String(text || '').split(/\s+/);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    if ((cur + ' ' + w).trim().length > max && cur) { lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim();
+    if (lines.length === rows) break;
+  }
+  if (lines.length < rows && cur) lines.push(cur);
+  if (lines.length === rows && words.join(' ').length > lines.join(' ').length) lines[rows - 1] = clip(lines[rows - 1] + '…', max);
+  return lines;
+}
+
+/** Several lines of plain text, wrapped. */
+export function Lines({ x, y, text, max = 80, rows = 2, size = 11, color = K.muted, weight = 400, gap = 14, anchor = 'start' }) {
+  return (
+    <g>
+      {wrap(text, max, rows).map((l, i) => (
+        <text key={i} x={x} y={y + i * gap} textAnchor={anchor} fontFamily="system-ui, sans-serif" fontSize={size} fontWeight={weight} fill={color}>{l}</text>
+      ))}
     </g>
   );
 }

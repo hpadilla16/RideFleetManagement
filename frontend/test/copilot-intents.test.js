@@ -91,6 +91,21 @@ describe('intent map integrity', () => {
 });
 
 describe('matching — EN and ES phrasings', () => {
+  it('every alias of every intent resolves to ITS OWN intent — no alias is shadowed by another', () => {
+    // Innovation, 2026-09-04: the kiosk course added 60+ aliases and nothing
+    // asserted they do not collide with what was there. This does, for all.
+    const wrong = [];
+    for (const intent of INTENTS) {
+      for (const lang of ['en', 'es']) {
+        for (const alias of intent.aliases?.[lang] || []) {
+          const got = matchIntent(alias)?.intent?.key;
+          if (got !== intent.key) wrong.push(`${lang} "${alias}" → ${got || 'MISS'} (wanted ${intent.key})`);
+        }
+      }
+    }
+    expect(wrong, wrong.join('\n')).toEqual([]);
+  });
+
   it("the owner's example, verbatim, in both languages", () => {
     expect(matchIntent('¿Cómo añado un conductor adicional?')?.intent.key).toBe('additional-drivers');
     expect(matchIntent('How do I add an additional driver?')?.intent.key).toBe('additional-drivers');

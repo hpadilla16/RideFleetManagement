@@ -9,13 +9,16 @@
  * training.glossary.kiosk, keyed by entry id).
  *
  * tone — how the chip is drawn: guest (violet), staff (deep violet),
- *        secondary (outlined), danger (undoes something).
+ *        secondary (outlined), danger (undoes something), note (NOT a button:
+ *        a message or rule quoted from the kiosk, drawn as plain text — the
+ *        legend's premise is chip = real button, so nothing else gets one).
  */
 
 export const KIOSK_GLOSSARY = Object.freeze({
   key: 'kiosk-buttons',
   title: 'What does every button do?',
   summary: 'Every button on the kiosk and on the staff panel, by screen.',
+  legend: 'Violet = the guest · dark violet = staff · outlined = secondary · red = undoes something · plain text = a message, not a button.',
   groups: [
     {
       key: 'bar',
@@ -42,11 +45,11 @@ export const KIOSK_GLOSSARY = Object.freeze({
     },
     {
       key: 'id',
-      title: 'Driver’s licence',
+      title: 'Driver’s license',
       entries: [
-        { id: 'scan', labels: ['kiosk.scanLicenseBtn', 'kiosk.scanStopBtn'], tone: 'guest', what: 'Reads the PDF417 barcode on the BACK and fills in name, licence number, date of birth and expiry. “Stop scanning” turns the camera off.' },
+        { id: 'scan', labels: ['kiosk.scanLicenseBtn', 'kiosk.scanStopBtn'], tone: 'guest', what: 'Reads the PDF417 barcode on the BACK and fills in name, license number, date of birth and expiry. “Stop scanning” turns the camera off.' },
         { id: 'upload-barcode', labels: ['kiosk.scanUploadBtn'], tone: 'secondary', what: 'A still photo of the barcode — often readable when the live camera is not.' },
-        { id: 'photo', labels: ['kiosk.idPhotoBackToPhoto', 'kiosk.idPhotoReady', 'kiosk.idPhotoRetake'], tone: 'guest', what: 'Reads the FRONT of the licence from a photo, then shows “Is this correct?” with what it read. “Retake” starts over.' },
+        { id: 'photo', labels: ['kiosk.idPhotoBackToPhoto', 'kiosk.idPhotoReady', 'kiosk.idPhotoRetake'], tone: 'guest', what: 'Reads the FRONT of the license from a photo, then shows “Is this correct?” with what it read. “Retake” starts over.' },
         { id: 'confirm-read', labels: ['kiosk.idPhotoConfirmYes'], tone: 'guest', what: 'The guest confirms the fields read from the photo are theirs.' },
         { id: 'upload-id', labels: ['kiosk.idPhotoUpload'], tone: 'secondary', what: 'When there is no camera.' },
         { id: 'cant-scan', labels: ['kiosk.idCantScan'], tone: 'secondary', what: 'Escalates: “A team member is on the way”. After several failed reads the kiosk does this on its own.' },
@@ -60,9 +63,9 @@ export const KIOSK_GLOSSARY = Object.freeze({
         { id: 'entry', labels: ['kiosk.assistEntry'], tone: 'secondary', what: 'Your door into the panel, from the escalation screen. Employees with a PIN only.' },
         { id: 'unlock', labels: ['kiosk.assistUnlockBtn'], tone: 'staff', what: 'Name + PIN opens a TEN-MINUTE grant in your name (“Ana — 9:58 left”). Three failures lock the kiosk for fifteen minutes.' },
         { id: 'cancel', labels: ['kiosk.assistCancel'], tone: 'secondary', what: 'Closes the panel without a grant; the guest is exactly where they were.' },
-        { id: 'capture', labels: ['kiosk.assistCaptureBtn', 'kiosk.assistUpload'], tone: 'secondary', what: 'Photos of the FRONT and BACK of the physical licence. Both are required.' },
+        { id: 'capture', labels: ['kiosk.assistCaptureBtn', 'kiosk.assistUpload'], tone: 'secondary', what: 'Photos of the FRONT and BACK of the physical license. Both are required.' },
         { id: 'verify', labels: ['kiosk.assistVerifyBtn'], tone: 'staff', what: 'Runs the real rules — name, age, validity. YOUR PIN DOES NOT SKIP THEM.' },
-        { id: 'name-confirm', labels: ['kiosk.assistNameConfirmBtn'], tone: 'staff', what: 'You certify the name matches after checking the physical licence. Recorded under your name.' },
+        { id: 'name-confirm', labels: ['kiosk.assistNameConfirmBtn'], tone: 'staff', what: 'You certify the name matches after checking the physical license. Recorded under your name.' },
         { id: 'continue-guest', labels: ['kiosk.assistContinueGuest', 'kiosk.assistEndBtn'], tone: 'guest', what: 'Hands control back to the guest — or closes without verifying, and the counter decides the rental.' },
       ],
     },
@@ -71,8 +74,8 @@ export const KIOSK_GLOSSARY = Object.freeze({
       title: 'Name does not match (guest’s own way out)',
       entries: [
         { id: 'send-code', labels: ['kiosk.nameUpdateSend'], tone: 'guest', what: 'Sends a 6-digit code to the email or phone ON THE RESERVATION. Expires in 10 minutes.' },
-        { id: 'confirm-code', labels: ['kiosk.nameUpdateConfirmBtn', 'kiosk.nameUpdateResend'], tone: 'guest', what: 'Validates the code and updates the reservation to the licence name. Resend has a cooldown; attempts are limited.' },
-        { id: 'not-eligible', labels: ['kiosk.nameUpdateNotEligible'], tone: 'secondary', what: 'No button here: the correction is done by staff with “I verified this licence belongs to the guest”.' },
+        { id: 'confirm-code', labels: ['kiosk.nameUpdateConfirmBtn', 'kiosk.nameUpdateResend'], tone: 'guest', what: 'Validates the code and updates the reservation to the license name. Resend has a cooldown; attempts are limited.' },
+        { id: 'not-eligible', labels: ['kiosk.nameUpdateNotEligible'], tone: 'note', what: 'No button here: the correction is done by staff with “I verified this license belongs to the guest”.' },
       ],
     },
     {
@@ -80,8 +83,8 @@ export const KIOSK_GLOSSARY = Object.freeze({
       title: 'Help chat (Valet, remote)',
       entries: [
         { id: 'close-chat', labels: ['kiosk.voziaClose', 'kiosk.voziaEndConfirm', 'kiosk.voziaEndCancel'], tone: 'secondary', what: 'Ends the conversation, with a confirmation. The check-in is not lost.' },
-        { id: 'agent-can', labels: ['kiosk.voziaAppliedToast'], tone: 'guest', what: 'The agent can UNLOCK, ENTER THE ID BY HAND (from the photos already on file) and CONFIRM THE NAME. The guest sees this toast and the violet/green notice.' },
-        { id: 'agent-cannot', labels: ['kiosk.voziaSkipRefused'], tone: 'danger', what: 'The agent cannot skip verification, sign or pay — and cannot open the car. Keys are handed at the front desk.' },
+        { id: 'agent-can', labels: ['kiosk.voziaAppliedToast'], tone: 'note', what: 'The agent can UNLOCK, ENTER THE ID BY HAND (from the photos already on file) and CONFIRM THE NAME. The guest sees this toast and the violet/green notice.' },
+        { id: 'agent-cannot', labels: ['kiosk.voziaSkipRefused'], tone: 'note', what: 'The agent cannot skip verification, sign or pay — and cannot open the car. Keys are handed at the front desk.' },
       ],
     },
     {
@@ -100,7 +103,7 @@ export const KIOSK_GLOSSARY = Object.freeze({
         { id: 'retry', labels: ['kiosk.payRetry'], tone: 'guest', what: 'After “The payment didn’t go through” (no charge was made): reuses the same link if the amount is unchanged.' },
         { id: 'change-extras', labels: ['kiosk.payChangeExtras'], tone: 'secondary', what: 'Back to extras; if the total changes, the previous link is invalidated and a new one is created.' },
         { id: 'simulate', labels: ['kiosk.paySimulate'], tone: 'secondary', what: 'Test environments only. It does not appear in production.' },
-        { id: 'pay-rule', labels: ['kiosk.payWaiting'], tone: 'danger', what: 'NEVER charge by hand what the kiosk is charging. If it does not advance, wait 10–15 seconds and check Reservations → Payments.' },
+        { id: 'pay-rule', labels: ['kiosk.payWaiting'], tone: 'note', what: 'NEVER charge by hand what the kiosk is charging. If it does not advance, wait 10–15 seconds and check Reservations → Payments.' },
       ],
     },
     {
@@ -110,7 +113,7 @@ export const KIOSK_GLOSSARY = Object.freeze({
         { id: 'initial-all', labels: ['kiosk.signInitialAll'], tone: 'secondary', what: 'Applies the initials drawn once to every section; sections can also be tapped one by one.' },
         { id: 'read-agreement', labels: ['kiosk.signReadAgreement', 'kiosk.signHideAgreement'], tone: 'secondary', what: 'Expands the full agreement text.' },
         { id: 'sign-finish', labels: ['kiosk.signFinish'], tone: 'guest', what: 'Blocked while initials, payment or ID verification are missing — the kiosk says which.' },
-        { id: 'done', labels: ['kiosk.doneKeysStaff'], tone: 'secondary', what: 'The “All set!” screen has no buttons: keys at the counter, contract and receipt by email, a QR to photo-document the car. It resets on its own.' },
+        { id: 'done', labels: ['kiosk.doneKeysStaff'], tone: 'note', what: 'The “All set!” screen has no buttons: keys at the counter, contract and receipt by email, a QR to photo-document the car. It resets on its own.' },
       ],
     },
     {
@@ -130,7 +133,7 @@ export const glossaryEntryKey = (entry) => `${NS}.entries.${entry.id}`;
 
 /** Every translatable string the glossary will ask for. */
 export function glossaryKeys() {
-  const keys = [glossaryKey('title'), glossaryKey('summary')];
+  const keys = [glossaryKey('title'), glossaryKey('summary'), glossaryKey('legend')];
   for (const g of KIOSK_GLOSSARY.groups) {
     keys.push(glossaryGroupKey(g));
     for (const e of g.entries) keys.push(glossaryEntryKey(e));

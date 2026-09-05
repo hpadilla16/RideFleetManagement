@@ -84,7 +84,7 @@ async function candidatesFor(verifyType, { tenantId, userId, armedAt }) {
       // findProof; 25 most recent per-user saves since arming is plenty.
       return prisma.moduleAccessAuditLog.findMany({
         where: { tenantId, scope: 'USER', actorUserId: userId, changedAt: { gte: armedAt } },
-        select: { id: true, actorUserId: true, changedAt: true, changed: true },
+        select: { id: true, actorUserId: true, changedAt: true, changed: true, scope: true },
         take: 25, orderBy: { changedAt: 'desc' },
       });
     default:

@@ -1328,16 +1328,16 @@
         }
       },
       "kiosk-cant-scan": {
-        "title": "The guest cannot scan their licence",
+        "title": "The guest cannot scan their license",
         "summary": "From “I can’t — get help” to verifying the ID yourself with your PIN.",
-        "gotcha": "Your PIN opens a ten-minute window — it does not bend a rule. Age, licence validity and the name check run exactly as they do for a scan. If the real date of birth fails, the kiosk is telling the truth: end the assistance and let the counter decide.",
+        "gotcha": "Your PIN opens a ten-minute window — it does not bend a rule. Age, license validity and the name check run exactly as they do for a scan. If the real date of birth fails, the kiosk is telling the truth: end the assistance and let the counter decide.",
         "steps": {
           "kiosk-fig-scan-trouble": {
             "title": "Two failed scans",
-            "body": "The guest is on “Scan your driver’s licence”, barcode side up, and the reader is not catching it. Glare, a worn card, a laminated copy — it happens. Before anyone is called, the screen already offers two ways around it.",
+            "body": "The guest is on “Scan your driver’s license”, barcode side up, and the reader is not catching it. Glare, a worn card, a laminated copy — it happens. Before anyone is called, the screen already offers two ways around it.",
             "callouts": {
               "0": "“Upload a photo of the barcode” — a still photo is often readable when the live camera is not.",
-              "1": "“Take a photo” reads the FRONT of the licence instead, then asks the guest to confirm what it read."
+              "1": "“Take a photo” reads the FRONT of the license instead, then asks the guest to confirm what it read."
             }
           },
           "kiosk-fig-escalated": {
@@ -1358,15 +1358,15 @@
             }
           },
           "kiosk-fig-staff-manual-id": {
-            "title": "Type the licence in, photograph both sides",
-            "body": "Fill in first name, last name, date of birth and expiry exactly as printed. Then “Capture” or “Upload” the FRONT and the BACK of the physical licence — both are required, and they are stored with the rental.",
+            "title": "Type the license in, photograph both sides",
+            "body": "Fill in first name, last name, date of birth and expiry exactly as printed. Then “Capture” or “Upload” the FRONT and the BACK of the physical license — both are required, and they are stored with the rental.",
             "callouts": {
               "0": "The photos are the evidence that a person saw the card. Without both, “Verify and continue” stays off."
             }
           },
           "kiosk-fig-staff-verify": {
             "title": "Verify and continue — the rules still run",
-            "body": "The same three checks as a scan: the name matches the reservation, the age requirement, and a licence valid through the return date. A typo can be corrected and verified again. A real failure cannot be talked past.",
+            "body": "The same three checks as a scan: the name matches the reservation, the age requirement, and a license valid through the return date. A typo can be corrected and verified again. A real failure cannot be talked past.",
             "callouts": {
               "0": "A red mark here is the kiosk doing its job — check the fields for a typo first.",
               "1": "“Verify and continue” runs the checks again with what you typed.",
@@ -1384,11 +1384,11 @@
             "title": "Quick check",
             "body": "One question before this module closes.",
             "check": {
-              "question": "You typed the licence in and the kiosk says the guest does not meet the minimum age. What do you do?",
+              "question": "You typed the license in and the kiosk says the guest does not meet the minimum age. What do you do?",
               "options": {
                 "A": {
                   "text": "Re-enter a “corrected” date of birth so it passes",
-                  "why": "That is falsifying a rental record under your own PIN. The date of birth on the licence is the date of birth."
+                  "why": "That is falsifying a rental record under your own PIN. The date of birth on the license is the date of birth."
                 },
                 "B": {
                   "text": "Check for a typo; if the date is real, end the assistance and let the counter decide",
@@ -1404,12 +1404,12 @@
         }
       },
       "kiosk-name-mismatch": {
-        "title": "The name on the licence does not match",
-        "summary": "The guest’s own way out (a 6-digit code) and yours (certifying the licence).",
-        "gotcha": "When you confirm the name you are certifying, under your own account, that you looked at the physical licence and it belongs to this person. When the guest can prove it themselves with the code, let them — it leaves the cleaner trail.",
+        "title": "The name on the license does not match",
+        "summary": "The guest’s own way out (a 6-digit code) and yours (certifying the license).",
+        "gotcha": "When you confirm the name you are certifying, under your own account, that you looked at the physical license and it belongs to this person. When the guest can prove it themselves with the code, let them — it leaves the cleaner trail.",
         "steps": {
           "kiosk-fig-name-mismatch": {
-            "title": "The licence read fine — the name did not match",
+            "title": "The license read fine — the name did not match",
             "body": "Age and validity pass; only the name check is red. Common causes: a maiden name, a second surname, a booking made by a spouse. The kiosk does not fail the guest here — it offers two ways to prove the reservation is theirs.",
             "callouts": {
               "0": "Two green, one red: this is a NAME problem, not an ID problem.",
@@ -1419,7 +1419,7 @@
           },
           "kiosk-fig-name-code": {
             "title": "The guest proves it with a code",
-            "body": "A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the licence name and the check-in continues. It expires in ten minutes.",
+            "body": "A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the license name and the check-in continues. It expires in ten minutes.",
             "callouts": {
               "0": "“Confirm code” — three wrong codes pause codes on this kiosk for a few minutes.",
               "1": "“Resend” has a cooldown so the inbox is not flooded."
@@ -1427,9 +1427,9 @@
           },
           "kiosk-fig-staff-name-confirm": {
             "title": "Or you confirm it, in person",
-            "body": "Unlock with your PIN as usual. Instead of the full form the kiosk shows both names side by side. “I verified this licence belongs to the guest” records that YOU looked at the card and vouched — the rental carries your name on that decision.",
+            "body": "Unlock with your PIN as usual. Instead of the full form the kiosk shows both names side by side. “I verified this license belongs to the guest” records that YOU looked at the card and vouched — the rental carries your name on that decision.",
             "callouts": {
-              "0": "Licence name versus reservation name, exactly as each system has them.",
+              "0": "License name versus reservation name, exactly as each system has them.",
               "1": "This button is a certification, not a shortcut. If you did not see the card, do not press it."
             }
           },
@@ -1437,11 +1437,11 @@
             "title": "Quick check",
             "body": "One question before this module closes.",
             "check": {
-              "question": "The guest says the reservation was made by her husband, who is not here. The licence is hers. What is the right path?",
+              "question": "The guest says the reservation was made by her husband, who is not here. The license is hers. What is the right path?",
               "options": {
                 "A": {
-                  "text": "Press “I verified this licence belongs to the guest” — it is her licence",
-                  "why": "Her licence is real, but the reservation is not in her name. Certifying the name does not put a driver on someone else’s booking."
+                  "text": "Press “I verified this license belongs to the guest” — it is her license",
+                  "why": "Her license is real, but the reservation is not in her name. Certifying the name does not put a driver on someone else’s booking."
                 },
                 "B": {
                   "text": "Have the guest use “Send my code” — the code goes to the contact on the reservation",
@@ -1463,7 +1463,7 @@
         "steps": {
           "kiosk-fig-help-chat": {
             "title": "🎧 Help opens a chat with a Valet agent",
-            "body": "The guest can tap Help on any screen. A Valet agent sees which step they are on and what has been verified — never the licence photos, never card details. The chat sits over the check-in without ending it.",
+            "body": "The guest can tap Help on any screen. A Valet agent sees which step they are on and what has been verified — never the license photos, never card details. The chat sits over the check-in without ending it.",
             "callouts": {
               "0": "Help is always in the corner. It never ends the session.",
               "1": "Closing the chat asks “Close the help chat?” — the check-in stays where it was."
@@ -1480,7 +1480,7 @@
           },
           "kiosk-fig-remote-limits": {
             "title": "What a remote agent can — and cannot — do",
-            "body": "Can: unlock the session, enter the licence by hand from the photos already on file, confirm the name. Cannot: skip verification, sign, pay — and cannot open the car. The remote unlock goes to a lockbox that does not exist yet, so the agent tells the guest to collect the keys at the front desk.",
+            "body": "Can: unlock the session, enter the license by hand from the photos already on file, confirm the name. Cannot: skip verification, sign, pay — and cannot open the car. The remote unlock goes to a lockbox that does not exist yet, so the agent tells the guest to collect the keys at the front desk.",
             "callouts": {
               "0": "Everything here runs the same rules as the kiosk itself.",
               "1": "Signature and payment are the guest’s alone, at the kiosk.",
@@ -1558,7 +1558,7 @@
       "kiosk-brakes": {
         "title": "“Still there?”, “Not my reservation”, and a locked kiosk",
         "summary": "The three ways the kiosk stops itself: inactivity, a wrong match, and fifteen minutes of lockout.",
-        "gotcha": "A locked kiosk is not broken. Do not re-pair it, do not restart it — fifteen minutes and it is back. Take the guest to the counter meanwhile.",
+        "gotcha": "A locked kiosk is not broken. An admin clears it on the spot by issuing a new pairing code (Ride Fleet → Kiosks); with no admin at hand, finish the guest at the counter — in fifteen minutes it is back by itself. Restarting the iPad changes nothing: the lock lives on the server.",
         "steps": {
           "kiosk-fig-idle": {
             "title": "“Still there?” — the privacy reset",
@@ -1570,37 +1570,37 @@
           },
           "kiosk-fig-not-mine": {
             "title": "“This isn’t my reservation”",
-            "body": "The summary shows driver, dates and class before anything else happens. If it is the wrong one, “This isn’t my reservation” goes back to the search without spending an attempt. Lookups by number have a limited number of tries; once spent, the kiosk pauses searches for a few minutes.",
+            "body": "The summary shows driver, dates and class before anything else happens. If it is the wrong one, “This isn’t my reservation” goes back to the search without spending an attempt. Lookups by number have a limited number of tries — the search screen says how many are left — and once spent, the kiosk pauses searches for a few minutes.",
             "callouts": {
               "0": "“That’s me — continue” is the guest confirming the match.",
-              "1": "“This isn’t my reservation” is free — it does not count as a failed attempt.",
-              "2": "Failed lookups are counted and shown; the kiosk says how many are left."
+              "1": "“This isn’t my reservation” is free — it does not count as a failed attempt."
             }
           },
           "kiosk-fig-locked": {
             "title": "Locked for fifteen minutes",
-            "body": "Too many wrong PINs, wrong codes or failed lookups, and the kiosk pauses staff unlock and searches. It is protecting the guest data on it. There is nothing to fix: it unlocks itself. Finish the guest at the counter.",
+            "body": "Too many wrong PINs, wrong codes or failed lookups, and the kiosk pauses staff unlock and searches. It is protecting the guest data on it. Two ways out: an admin issues a new pairing code from Ride Fleet → Kiosks and the lock clears immediately — or you wait it out and finish the guest at the counter.",
             "callouts": {
-              "0": "The timer counts down on screen. No admin action shortens it."
+              "0": "The timer counts down on screen and reaches zero on its own.",
+              "1": "The screen itself says it: an admin can issue a new pairing code to clear it right away."
             }
           },
           "kiosk-check-locked": {
             "title": "Quick check",
             "body": "One question before this module closes.",
             "check": {
-              "question": "The kiosk shows “This kiosk is temporarily locked” after a colleague mistyped their PIN three times. A guest is waiting. What do you do?",
+              "question": "The kiosk shows “This kiosk is temporarily locked” after a colleague mistyped their PIN three times. A guest is waiting and no admin is around. What do you do?",
               "options": {
                 "A": {
-                  "text": "Re-pair the kiosk with a new 6-digit code to reset it",
-                  "why": "Pairing is for a new device. It would not clear the lockout and it would disconnect a working kiosk."
+                  "text": "Keep trying PINs until one works",
+                  "why": "The lock is there because of failed PINs. More attempts extend it and leave the guest standing."
                 },
                 "B": {
-                  "text": "Take the guest to the counter and finish there; the kiosk unlocks itself in fifteen minutes",
-                  "why": "The lockout is protection, not a fault. The counter can do everything the kiosk does."
+                  "text": "Finish the guest at the counter; the kiosk unlocks itself in fifteen minutes — or an admin clears it now with a new pairing code",
+                  "why": "The lockout is protection, not a fault. The counter does everything the kiosk does, and Ride Fleet → Kiosks → new pairing code clears it instantly when an admin is available."
                 },
                 "C": {
                   "text": "Restart the iPad",
-                  "why": "The lockout lives on the server, not the tablet. A restart changes nothing and loses the guest’s session."
+                  "why": "The lock lives on the server, not the tablet. A restart changes nothing and loses the guest’s session."
                 }
               }
             }
@@ -1719,7 +1719,7 @@
             "title": "Welcome and finding the reservation"
           },
           "id": {
-            "title": "Driver’s licence"
+            "title": "Driver’s license"
           },
           "staff": {
             "title": "Staff panel (PIN)"
@@ -1755,9 +1755,9 @@
           "find": "Looks up by confirmation number. Attempts are limited; once spent, the kiosk pauses lookups for a few minutes.",
           "by-name": "Last name plus the pickup day, or the phone number on file. If several match, the kiosk asks for one more detail.",
           "thats-me": "Confirms the reservation found — or goes back to search without spending an attempt.",
-          "scan": "Reads the PDF417 barcode on the BACK and fills in name, licence number, date of birth and expiry. “Stop scanning” turns the camera off.",
+          "scan": "Reads the PDF417 barcode on the BACK and fills in name, license number, date of birth and expiry. “Stop scanning” turns the camera off.",
           "upload-barcode": "A still photo of the barcode — often readable when the live camera is not.",
-          "photo": "Reads the FRONT of the licence from a photo, then shows “Is this correct?” with what it read. “Retake” starts over.",
+          "photo": "Reads the FRONT of the license from a photo, then shows “Is this correct?” with what it read. “Retake” starts over.",
           "confirm-read": "The guest confirms the fields read from the photo are theirs.",
           "upload-id": "When there is no camera.",
           "cant-scan": "Escalates: “A team member is on the way”. After several failed reads the kiosk does this on its own.",
@@ -1765,13 +1765,13 @@
           "entry": "Your door into the panel, from the escalation screen. Employees with a PIN only.",
           "unlock": "Name + PIN opens a TEN-MINUTE grant in your name (“Ana — 9:58 left”). Three failures lock the kiosk for fifteen minutes.",
           "cancel": "Closes the panel without a grant; the guest is exactly where they were.",
-          "capture": "Photos of the FRONT and BACK of the physical licence. Both are required.",
+          "capture": "Photos of the FRONT and BACK of the physical license. Both are required.",
           "verify": "Runs the real rules — name, age, validity. YOUR PIN DOES NOT SKIP THEM.",
-          "name-confirm": "You certify the name matches after checking the physical licence. Recorded under your name.",
+          "name-confirm": "You certify the name matches after checking the physical license. Recorded under your name.",
           "continue-guest": "Hands control back to the guest — or closes without verifying, and the counter decides the rental.",
           "send-code": "Sends a 6-digit code to the email or phone ON THE RESERVATION. Expires in 10 minutes.",
-          "confirm-code": "Validates the code and updates the reservation to the licence name. Resend has a cooldown; attempts are limited.",
-          "not-eligible": "No button here: the correction is done by staff with “I verified this licence belongs to the guest”.",
+          "confirm-code": "Validates the code and updates the reservation to the license name. Resend has a cooldown; attempts are limited.",
+          "not-eligible": "No button here: the correction is done by staff with “I verified this license belongs to the guest”.",
           "close-chat": "Ends the conversation, with a confirmation. The check-in is not lost.",
           "agent-can": "The agent can UNLOCK, ENTER THE ID BY HAND (from the photos already on file) and CONFIRM THE NAME. The guest sees this toast and the violet/green notice.",
           "agent-cannot": "The agent cannot skip verification, sign or pay — and cannot open the car. Keys are handed at the front desk.",
@@ -1787,8 +1787,23 @@
           "sign-finish": "Blocked while initials, payment or ID verification are missing — the kiosk says which.",
           "done": "The “All set!” screen has no buttons: keys at the counter, contract and receipt by email, a QR to photo-document the car. It resets on its own.",
           "pair": "Six-digit code from Ride Fleet → Kiosks → Pair. Attempts are limited; once spent, ask for a new code."
-        }
+        },
+        "legend": "Violet = the guest · dark violet = staff · outlined = secondary · red = undoes something · plain text = a message, not a button."
       }
+    },
+    "proof": {
+      "byWork": "Proved by doing the real thing",
+      "readingCheck": "Reading + check",
+      "adminOnly": "Admin only"
+    },
+    "figures": {
+      "where-guest": "On the guest’s iPad",
+      "where-staff": "Staff panel on the iPad",
+      "chat-guest": "Hi, I can’t scan my license…",
+      "chat-agent": "I see you at the ID step. Let me help.",
+      "remote-cannot-skip": "Skip the ID check",
+      "remote-cannot-sign": "Sign or pay for the guest",
+      "remote-cannot-car": "Open the car — keys at the counter"
     }
   },
   "copilot": {
