@@ -22,6 +22,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 const REDACT_KEYS = new Set([
   'firstname', 'lastname', 'phone', 'email', 'dob', 'dateofbirth',
   'licensenumber', 'license', 'cardonfiletoken', 'ssn', 'password',
+  // Partnerships (2026-09-05): Reservation.partnerPolicyNumber (insurer claim / policy id).
+  'partnerpolicynumber', 'policynumber',
   // Wave 3 defense-in-depth (2026-08-23): mask any field literally NAMED a
   // credential, everywhere the redactor runs (logs, audit metadata, Sentry).
   // EXACT-key matches only — 'tokenVersion'/'apiKeyId' etc. do NOT match, so no

@@ -44,7 +44,9 @@ function Editor({ token, me, logout }) {
   const id = String(params?.id || '');
   const tenantCtx = useTenantContext(me, token);
   const qs = tenantQuerySuffix(tenantCtx.activeTenantId, tenantCtx.isSuperAdmin);
-  const url = (path, extra = '') => `/api/partnerships/${id}${path}${qs}${extra ? (qs ? '&' : '?') + extra : ''}`;
+  // Memoized: PricingTab/HostedTab effects depend on it — a fresh function per render
+  // would refire /pricing-grid, /hosted and /reservations on every setBusy/setMsg.
+  const url = useCallback((path, extra = '') => `/api/partnerships/${id}${path}${qs}${extra ? (qs ? '&' : '?') + extra : ''}`, [id, qs]);
 
   const [partner, setPartner] = useState(null);
   const [tab, setTab] = useState('profile');
@@ -60,7 +62,7 @@ function Editor({ token, me, logout }) {
       const row = await api(url(''), { bypassCache: true }, token);
       setPartner(row);
     } catch (e) { setMsg(String(e?.message || e)); }
-  }, [id, qs, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [url, token]);
 
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => {

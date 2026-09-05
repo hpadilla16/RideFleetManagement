@@ -107,9 +107,8 @@ export const partnerPublicService = {
         logoUrl: logoPublicUrl(partner.logoRef),
         validFrom: partner.validFrom,
         validTo: partner.validTo,
-        contact: partner.contactName || partner.contactEmail || partner.contactPhone
-          ? { name: partner.contactName, email: partner.contactEmail, phone: partner.contactPhone }
-          : null,
+        // Partner contact (name/email/phone) is the account-manager record for
+        // RFM staff — deliberately NOT public. The landing shows the TENANT's contact.
         landing: partner.landingJson || { es: {}, en: {} },
         terms: partner.termsJson || { es: '', en: '' },
         termsVersion: partner.termsVersion,

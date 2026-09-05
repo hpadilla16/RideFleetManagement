@@ -1679,6 +1679,7 @@ model Reservation {
   @@index([pickupLocationId, pickupAt])
   @@index([tenantId, createdAt])
   @@index([tenantId, status, pickupAt])
+  @@index([partnerId]) // Partnerships (2026-09-05): matches migration 20260914; keeps `db push` from dropping it
   @@index([repairOrderNumber])
   @@index([customerId])
   @@index([returnAt])

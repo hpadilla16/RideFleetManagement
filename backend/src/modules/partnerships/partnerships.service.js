@@ -495,17 +495,28 @@ export const partnershipsService = {
       }));
     }
 
-    const rate = existing
+    let rate;
+    if (existing) {
       // Re-linking a detached book: detachRate deactivated it, and the resolver
       // requires isActive && active — reactivate or every class quotes null.
-      ? await prisma.rate.update({ where: { id: existing.id }, data: { active: true, isActive: true, displayOnline: false } })
-      : await prisma.rate.create({
+      rate = await prisma.rate.update({ where: { id: existing.id }, data: { active: true, isActive: true, displayOnline: false } });
+    } else {
+      try {
+        rate = await prisma.rate.create({
           data: {
             tenantId, rateCode, name: `Partner · ${partner.name}`, purpose: 'PARTNER',
             locationId: null, displayOnline: false, active: true, isActive: true,
             ...(seed.length ? { rateItems: { create: seed } } : {})
           }
         });
+      } catch (err) {
+        // Two concurrent "create price book" clicks: the unique (tenantId, rateCode)
+        // rejects the second — re-read instead of surfacing a 500.
+        if (err?.code !== 'P2002') throw err;
+        rate = await prisma.rate.findFirst({ where: { tenantId, rateCode, purpose: 'PARTNER' } });
+        if (!rate) throw err;
+      }
+    }
 
     await prisma.partner.update({ where: { id: partner.id }, data: { rateId: rate.id, discountPct: null } });
     await audit({ tenantId, partnerId: partner.id, actor: ctx.actor, action: 'PRICING', changed: { rateId: rate.id, seededFrom: copyFromLocationId || null, seededClasses: seed.length } });
@@ -692,11 +703,14 @@ export const partnershipsService = {
     const partner = await loadPartner(id, tenantId);
     const tenant = await tenantHostedBase(tenantId);
     const url = hostedUrl({ hostedBaseUrl: tenant.partnerHostedBaseUrl, appBaseUrl: appBaseUrl(), tenantSlug: tenant.slug, slug: partner.slug });
+    const effective = effectiveStatus(partner);
     return {
       url,
       qrUrl: qrUrl(url),
-      published: partner.status === 'ACTIVE',
-      effectiveStatus: effectiveStatus(partner),
+      // "Published" means the page answers RIGHT NOW (status + validity window), so
+      // the QR is only offered for a program the public route would serve.
+      published: effective === 'ACTIVE',
+      effectiveStatus: effective,
       hostedIsTenantDomain: !!tenant.partnerHostedBaseUrl,
       visitCount: partner.visitCount,
       lastVisitAt: partner.lastVisitAt
