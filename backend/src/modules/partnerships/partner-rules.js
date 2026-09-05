@@ -13,6 +13,13 @@ export const PARTNER_KINDS = Object.freeze(['INSURANCE', 'CORPORATE', 'COOPERATI
 export const VEHICLE_MODES = Object.freeze(['SHOW_INVENTORY', 'PREFERRED_TYPE', 'ASSIGN_AT_PICKUP']);
 export const PREFERRED_TYPE_PRICING = Object.freeze(['CONFIRM_AT_PICKUP', 'TYPE_PRICE']);
 
+/** Strip trailing slashes without a backtracking regex (CodeQL js/polynomial-redos on user input). */
+export function stripTrailingSlashes(value) {
+  let s = String(value || '').trim();
+  while (s.endsWith('/')) s = s.slice(0, -1);
+  return s;
+}
+
 /** "Seguros Isla" → "seguros-isla". ASCII-folds accents, max 48 chars. */
 export function normalizeSlug(value) {
   return String(value || '')
@@ -119,9 +126,9 @@ export function applyDiscount(baseDaily, discountPct) {
  */
 export function hostedUrl({ hostedBaseUrl, appBaseUrl, tenantSlug, slug }) {
   const clean = normalizeSlug(slug);
-  const base = String(hostedBaseUrl || '').trim().replace(/\/+$/, '');
+  const base = stripTrailingSlashes(hostedBaseUrl);
   if (base) return `${base}/${clean}`;
-  const app = String(appBaseUrl || '').trim().replace(/\/+$/, '');
+  const app = stripTrailingSlashes(appBaseUrl);
   return `${app}/p/${encodeURIComponent(String(tenantSlug || ''))}/${clean}`;
 }
 

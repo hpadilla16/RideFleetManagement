@@ -36,7 +36,8 @@ import {
   publishReadiness,
   hostedUrl,
   qrUrl,
-  defaultCoverageDisclosure
+  defaultCoverageDisclosure,
+  stripTrailingSlashes
 } from './partner-rules.js';
 
 // Public bucket: a partner logo is marketing, not PII, and the landing payload is
@@ -193,7 +194,7 @@ export const partnershipsService = {
     return {
       partnershipsEnabled: !!tenant.partnershipsEnabled,
       partnerHostedBaseUrl: tenant.partnerHostedBaseUrl || null,
-      fallbackBaseUrl: `${appBaseUrl().replace(/\/+$/, '')}/p/${encodeURIComponent(tenant.slug || '')}`
+      fallbackBaseUrl: `${stripTrailingSlashes(appBaseUrl())}/p/${encodeURIComponent(tenant.slug || '')}`
     };
   },
 
@@ -201,13 +202,13 @@ export const partnershipsService = {
     const tenantId = requireTenant(ctx);
     let base = patch?.partnerHostedBaseUrl === null || patch?.partnerHostedBaseUrl === undefined
       ? null
-      : String(patch.partnerHostedBaseUrl).trim().replace(/\/+$/, '');
+      : stripTrailingSlashes(patch.partnerHostedBaseUrl);
     if (base) {
       let parsed;
       try { parsed = new URL(base); } catch { parsed = null; }
       if (!parsed || parsed.protocol !== 'https:') throw new ValidationError('partnerHostedBaseUrl must be an https:// URL');
       if (parsed.search || parsed.hash) throw new ValidationError('partnerHostedBaseUrl must not carry a query string or fragment');
-      base = parsed.toString().replace(/\/+$/, '');
+      base = stripTrailingSlashes(parsed.toString());
     } else {
       base = null;
     }
