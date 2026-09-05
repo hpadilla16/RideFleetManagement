@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ModuleList } from '../../components/training/ModuleList';
 import Link from 'next/link';
 import { AuthGate } from '../../components/AuthGate';
@@ -510,6 +511,7 @@ function DynamicArticles({ token }) {
 }
 
 export default function KnowledgeBasePage() {
+  const { t } = useTranslation();
   return (
     <AuthGate>
       {({ me, logout, token }) => (
@@ -517,9 +519,9 @@ export default function KnowledgeBasePage() {
           <div className="stack" style={{ gap: 18 }}>
             <section className="glass card-lg knowledge-hero">
               <div className="eyebrow">Ride University</div>
-              <h1 className="page-title" style={{ margin: 0 }}>Learn the software, one task at a time.</h1>
+              <h1 className="page-title" style={{ margin: 0 }}>{t('training.heroTitle', 'Learn the software, one task at a time.')}</h1>
               <p className="ui-muted" style={{ maxWidth: 860 }}>
-                Training modules you complete by doing the real work, plus the playbooks your team already relies on.
+                {t('training.heroBody', 'Training modules you complete by doing the real work, plus the playbooks your team already relies on.')}
               </p>
               {/* The tour's home when it is not running. This is the page
                   people already open when they are stuck, so it is where
@@ -528,13 +530,13 @@ export default function KnowledgeBasePage() {
                 <button
                   type="button"
                   onClick={() => window.dispatchEvent(new CustomEvent('ride-university:start', { detail: { track: 'ONBOARDING' } }))}
-                >Take the tour</button>
+                >{t('training.takeTheTour', 'Take the tour')}</button>
                 <button
                   type="button"
                   className="button-subtle"
-                  title="Presenter mode for demos — shows the whole product, advance with the arrow keys"
+                  title={t('training.showcaseHint', 'Presenter mode for demos — shows the whole product, advance with the arrow keys')}
                   onClick={() => window.dispatchEvent(new CustomEvent('ride-university:start', { detail: { track: 'SHOWCASE' } }))}
-                >Showcase mode</button>
+                >{t('training.showcaseMode', 'Showcase mode')}</button>
               </div>
               <div className="knowledge-anchor-grid">
                 {anchors.map((anchor) => (
