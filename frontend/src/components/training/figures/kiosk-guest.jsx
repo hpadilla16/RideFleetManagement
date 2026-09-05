@@ -216,7 +216,9 @@ export function Idle() {
       <rect x="0" y="42" width={W} height={H - 42} fill="rgba(33,26,56,.35)" />
       <rect x="110" y="84" width="420" height="176" rx="14" fill={K.surface} />
       <Line x={W / 2} y={120} anchor="middle" text={t('kiosk.idleTitle', 'Still there?')} size={18} weight={700} color={K.title} />
-      <Lines x={W / 2} y={144} anchor="middle" text={t('kiosk.idleBody', 'For your privacy, this session will restart and clear everything you entered.')} size={11} color={K.muted} max={62} rows={2} />
+      {/* The real string ends in a preposition on purpose: kiosk/layout.js
+          appends the live countdown in amber right after it. Mirror that. */}
+      <Lines x={W / 2} y={144} anchor="middle" text={`${t('kiosk.idleBody', 'For your privacy, this session will reset and clear everything you entered in')} 30s`} size={11} color={K.muted} max={62} rows={2} />
       <Btn x={130} y={200} w={200} label={t('kiosk.idleStillHere', 'I’m still here — continue')} callout={1} />
       <Btn x={360} y={200} w={150} label={t('kiosk.idleStartOver', 'Start over')} tone="danger" callout={2} />
     </KioskFrame>
