@@ -634,7 +634,7 @@ export const ratesService = {
     const rates = await prisma.rate.findMany({
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
-        purpose: { not: 'LOANER' }, // rental lookup never returns loaner price book
+        purpose: { notIn: ['LOANER', 'PARTNER'] }, // rental lookup never returns loaner/partner price books
         // Match by primary locationId OR by the multi-location string field
         // (locationIds is a comma-separated string of location IDs). This mirrors
         // how resolveForRental looks up rates that span locations.
@@ -656,7 +656,7 @@ export const ratesService = {
     return prisma.rate.findMany({
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
-        purpose: { not: 'LOANER' }, // rental rates admin never lists loaner price book
+        purpose: { notIn: ['LOANER', 'PARTNER'] }, // rental rates admin never lists loaner/partner price books (partner rates are edited from /partnerships)
         ...(query
           ? {
               OR: [
@@ -746,7 +746,7 @@ export const ratesService = {
     const plans = await prisma.rate.findMany({
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
-        purpose: { not: 'LOANER' },
+        purpose: { notIn: ['LOANER', 'PARTNER'] },
         isActive: true,
         active: true,
         AND: [
@@ -788,11 +788,25 @@ export const ratesService = {
       gracePeriodMin = Number(cfg?.gracePeriodMin || 0);
     }
 
+    // Partnerships (2026-09-05): a partner's price book (purpose PARTNER) is
+    // NEVER a candidate on the ordinary path — not for staff, not online. It is
+    // selected only when the caller passes the partner's own rateId, and then
+    // it is the ONLY candidate (the displayOnline gate does not apply: partner
+    // rates are deliberately offline). Fail-closed below is unchanged: no
+    // RateItem for the class in that rate → null → the class is not offered.
+    const partnerRateId = options?.rateId ? String(options.rateId) : null;
+    // The money seam: a partner quote without a tenant in scope would match the
+    // book by id alone. Refuse rather than trust every future caller.
+    if (partnerRateId && !scope?.tenantId) return null;
     const candidates = await prisma.rate.findMany({
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
-        ...(options?.displayOnline ? { displayOnline: true } : {}),
-        purpose: { not: 'LOANER' }, // isolation: loaner price book never quotes a rental
+        ...(partnerRateId
+          ? { id: partnerRateId, purpose: 'PARTNER' }
+          : {
+              ...(options?.displayOnline ? { displayOnline: true } : {}),
+              purpose: { notIn: ['LOANER', 'PARTNER'] } // isolation: loaner/partner price books never quote a rental
+            }),
         isActive: true,
         active: true,
         [dayFlag]: true,
@@ -859,7 +873,7 @@ export const ratesService = {
     // `scoped[0]` fallback is preserved: staff may legitimately quote off a
     // default rate and a human can catch a wrong number. (VozIA audit item c.)
     const chosen = scoped.find((r) => (r.rateItems || []).length > 0)
-      || (options?.displayOnline ? null : scoped[0])
+      || (options?.displayOnline || partnerRateId ? null : scoped[0])
       || null;
     if (!chosen) return null;
 

@@ -8,7 +8,7 @@ import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
 import { EnrollLinkBanner, enrollLinkMessage } from './EnrollLinkBanner';
 import { TENANT_STATUS_OPTIONS, statusOptionsFor, statusChipTone, isKnownStatus } from '../../lib/tenant-status';
 
-const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false, citationsEnabled: false, marketIntelligenceEnabled: false };
+const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false, citationsEnabled: false, marketIntelligenceEnabled: false, partnershipsEnabled: false };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
 const EMPTY_PLAN = {
   code: '',
@@ -198,7 +198,8 @@ function Inner({ token, me, logout }) {
           dealershipLoanerEnabled: !!row.dealershipLoanerEnabled,
           tollsEnabled: !!row.tollsEnabled,
           citationsEnabled: !!row.citationsEnabled,
-          marketIntelligenceEnabled: !!row.marketIntelligenceEnabled
+          marketIntelligenceEnabled: !!row.marketIntelligenceEnabled,
+          partnershipsEnabled: !!row.partnershipsEnabled
         })
       }, token);
       setMsg('Tenant updated');
@@ -491,6 +492,7 @@ function Inner({ token, me, logout }) {
             <label className="label"><input type="checkbox" checked={tenantForm.tollsEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, tollsEnabled: e.target.checked }))} /> Tolls Enabled</label>
             <label className="label"><input type="checkbox" checked={tenantForm.citationsEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, citationsEnabled: e.target.checked }))} /> Citations Enabled</label>
             <label className="label"><input type="checkbox" checked={tenantForm.marketIntelligenceEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, marketIntelligenceEnabled: e.target.checked }))} /> Market Intelligence Enabled</label>
+            <label className="label"><input type="checkbox" checked={!!tenantForm.partnershipsEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, partnershipsEnabled: e.target.checked }))} /> Partnerships Enabled</label>
           </div>
           <button style={{ marginTop: 8 }} onClick={createTenant}>Create Tenant</button>
         </div>
@@ -510,7 +512,7 @@ function Inner({ token, me, logout }) {
           />
           <div className="table-scroll">
           <table className="tenants-table">
-            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Billing</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Citations</th><th>Market Int.</th><th>Counts</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Billing</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Citations</th><th>Market Int.</th><th>Partnerships</th><th>Counts</th><th>Actions</th></tr></thead>
             <tbody>
               {(rows || []).map((r) => (
                 <tr key={r.id}>
@@ -670,6 +672,11 @@ function Inner({ token, me, logout }) {
                   <td>
                     <label className="label">
                       <input type="checkbox" checked={!!r.marketIntelligenceEnabled} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, marketIntelligenceEnabled: e.target.checked } : x))} /> Enabled
+                    </label>
+                  </td>
+                  <td>
+                    <label className="label">
+                      <input type="checkbox" checked={!!r.partnershipsEnabled} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, partnershipsEnabled: e.target.checked } : x))} /> Enabled
                     </label>
                   </td>
                   <td className="label">

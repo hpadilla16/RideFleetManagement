@@ -659,6 +659,7 @@ async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeI
       tenantId,
       isActive: true,
       displayOnline: true,
+      partnerId: null, // partner-only services never reach the public site (partnerships.test.mjs guard)
       OR: [
         { locationId: null },
         ...(locationId ? [{ locationId }] : [])
@@ -710,6 +711,7 @@ async function listStaffAdditionalServices({ tenantId, locationId, vehicleTypeId
     where: {
       tenantId,
       isActive: true,
+      partnerId: null, // partner-only services never reach the staff catalog (partnerships.test.mjs guard)
       OR: [
         { locationId: null },
         ...(locationId ? [{ locationId }] : [])

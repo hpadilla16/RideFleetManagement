@@ -34,9 +34,11 @@ function round2(n) { return Number(Number(n || 0).toFixed(2)); }
 function addDays(d, n) { return new Date(new Date(d).getTime() + n * 24 * 3600e3); }
 
 async function resolveMonthlyRate({ tenantId, rateId, vehicleTypeId }) {
+  // Partnerships (2026-09-05): the class-wide fallback must not pick a partner's
+  // (or the loaner) book just because it has a Monthly column filled in.
   const where = rateId
     ? { id: String(rateId) }
-    : { ...(tenantId ? { tenantId } : {}), isActive: true, active: true };
+    : { ...(tenantId ? { tenantId } : {}), isActive: true, active: true, purpose: { notIn: ['LOANER', 'PARTNER'] } };
   const rates = await prisma.rate.findMany({
     where,
     select: {
