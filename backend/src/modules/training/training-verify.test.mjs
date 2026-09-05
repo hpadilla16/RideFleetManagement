@@ -180,22 +180,23 @@ test('standing with nothing available does not divide by zero', () => {
 
 /* ───── Ride University · kiosk course (2026-09-04) ───── */
 
-test('kiosk: an IN-PERSON staff verify after arming proves KIOSK_ASSISTED', () => {
+test('kiosk: an IN-PERSON staff verify after arming proves KIOSK_ASSISTED_ID', () => {
   const armedAt = new Date('2026-09-04T10:00:00Z');
   const out = findProof({
-    verifyType: 'KIOSK_ASSISTED', userId: 'u1', armedAt,
+    verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt,
     records: [{ id: 'ks1', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: 'STAFF_OVERRIDE' }],
   });
   assert.equal(out.proved, true);
   assert.equal(out.provenBy, 'ks1');
 });
 
-test('kiosk: vouching for the NAME in person counts too — it is the other in-person method', () => {
-  const out = findProof({
-    verifyType: 'KIOSK_ASSISTED', userId: 'u1', armedAt: new Date('2026-09-04T10:00:00Z'),
-    records: [{ id: 'ks2', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: 'STAFF_NAME_OVERRIDE' }],
-  });
-  assert.equal(out.proved, true);
+test('kiosk: vouching for the NAME proves the name module — and NOT the manual-ID one (one act, one module)', () => {
+  const rec = [{ id: 'ks2', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: 'STAFF_NAME_OVERRIDE' }];
+  const armedAt = new Date('2026-09-04T10:00:00Z');
+  assert.equal(findProof({ verifyType: 'KIOSK_ASSISTED_NAME', userId: 'u1', armedAt, records: rec }).proved, true);
+  assert.equal(findProof({ verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt, records: rec }).proved, false, 'a name vouch is not a manual ID entry');
+  const typed = [{ id: 'ks9', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: 'STAFF_OVERRIDE' }];
+  assert.equal(findProof({ verifyType: 'KIOSK_ASSISTED_NAME', userId: 'u1', armedAt, records: typed }).proved, false, 'and a manual ID entry is not a name vouch');
 });
 
 test('kiosk: a REMOTE override never proves the in-person module, even with the same actor', () => {
@@ -203,7 +204,7 @@ test('kiosk: a REMOTE override never proves the in-person module, even with the 
   // pins that the METHOD is what decides, not the actor column alone.
   for (const method of ['REMOTE_AGENT_OVERRIDE', 'REMOTE_AGENT_NAME_OVERRIDE', 'SCAN', 'SCAN_NAME_UPDATED', null]) {
     const out = findProof({
-      verifyType: 'KIOSK_ASSISTED', userId: 'u1', armedAt: new Date('2026-09-04T10:00:00Z'),
+      verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt: new Date('2026-09-04T10:00:00Z'),
       records: [{ id: 'ks3', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: method }],
     });
     assert.equal(out.proved, false, `method ${method} must not prove it`);
@@ -213,11 +214,11 @@ test('kiosk: a REMOTE override never proves the in-person module, even with the 
 test('kiosk: a verify that predates arming, or a grant that was never consumed, proves nothing', () => {
   const armedAt = new Date('2026-09-04T10:00:00Z');
   assert.equal(findProof({
-    verifyType: 'KIOSK_ASSISTED', userId: 'u1', armedAt,
+    verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt,
     records: [{ id: 'old', assistUserId: 'u1', idVerifiedAt: '2026-09-04T09:00:00Z', idVerifyMethod: 'STAFF_OVERRIDE' }],
   }).proved, false, 'before arming');
   assert.equal(findProof({
-    verifyType: 'KIOSK_ASSISTED', userId: 'u1', armedAt,
+    verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt,
     // unlocked, never verified: no idVerifiedAt
     records: [{ id: 'open', assistUserId: 'u1', idVerifiedAt: null, idVerifyMethod: null, assistGrantedAt: '2026-09-04T10:30:00Z' }],
   }).proved, false, 'a grant is not a verify');

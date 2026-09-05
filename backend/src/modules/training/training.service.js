@@ -65,7 +65,8 @@ async function candidatesFor(verifyType, { tenantId, userId, armedAt }) {
         select: { id: true, recordedByUserId: true, paidAt: true },
         ...common,
       });
-    case 'KIOSK_ASSISTED':
+    case 'KIOSK_ASSISTED_ID':
+    case 'KIOSK_ASSISTED_NAME':
       // idVerifiedAt, not assistGrantedAt: the grant is cleared when the verify
       // consumes it (see training-verify.js). The method filter is repeated in
       // findProof so the decision is testable without a database.
@@ -74,7 +75,7 @@ async function candidatesFor(verifyType, { tenantId, userId, armedAt }) {
           tenantId,
           assistUserId: userId,
           idVerifiedAt: { gte: armedAt },
-          idVerifyMethod: { in: ['STAFF_OVERRIDE', 'STAFF_NAME_OVERRIDE'] },
+          idVerifyMethod: verifyType === 'KIOSK_ASSISTED_ID' ? 'STAFF_OVERRIDE' : 'STAFF_NAME_OVERRIDE',
         },
         select: { id: true, assistUserId: true, idVerifiedAt: true, idVerifyMethod: true },
         take: 25, orderBy: { idVerifiedAt: 'desc' },

@@ -1330,52 +1330,52 @@
       "kiosk-cant-scan": {
         "title": "The guest cannot scan their license",
         "summary": "From “I can’t — get help” to verifying the ID yourself with your PIN.",
-        "gotcha": "Your PIN opens a ten-minute window — it does not bend a rule. Age, license validity and the name check run exactly as they do for a scan. If the real date of birth fails, the kiosk is telling the truth: end the assistance and let the counter decide.",
+        "gotcha": "Your PIN opens a ten-minute window — it does not bend a rule. Age and license validity run exactly as they do for a scan; the name check is the one thing it skips, because you are holding the physical license in front of the guest and that is what your PIN certifies. If the real date of birth fails, the kiosk is telling the truth: “End assist” and let the counter decide.",
         "steps": {
           "kiosk-fig-scan-trouble": {
             "title": "Two failed scans",
             "body": "The guest is on “Scan your driver’s license”, barcode side up, and the reader is not catching it. Glare, a worn card, a laminated copy — it happens. Before anyone is called, the screen already offers two ways around it.",
             "callouts": {
-              "0": "“Upload a photo of the barcode” — a still photo is often readable when the live camera is not.",
-              "1": "“Take a photo” reads the FRONT of the license instead, then asks the guest to confirm what it read."
+              "0": "“Upload barcode photo” — a still photo is often readable when the live camera is not.",
+              "1": "“Take a photo instead” reads the FRONT of the license instead, then asks the guest to confirm what it read."
             }
           },
           "kiosk-fig-escalated": {
             "title": "They ask for a person",
-            "body": "The guest taps “I can’t — get help”. The kiosk switches to “A team member is on the way” and notifies the counter. Nothing is lost: the reservation, the step, everything they entered stays in the session.",
+            "body": "The guest taps “I can't do this — get help”. The kiosk switches to “A team member is on the way” and notifies the counter. Nothing is lost: the reservation, the step, everything they entered stays in the session.",
             "callouts": {
               "0": "If they tap 🎧 Help instead, the help chat opens and a Valet agent takes over remotely — that is its own module.",
-              "1": "The small “Staff assistance” button at the bottom is your door in."
+              "1": "The small “Staff assist” button at the bottom is your door in."
             }
           },
           "kiosk-fig-staff-pin": {
             "title": "Unlock with your PIN",
-            "body": "Tap “Staff assistance”, pick your name and enter your PIN on the keypad. “Unlock” opens a ten-minute grant in your name — the chip shows who and how long, and it closes on its own.",
+            "body": "Tap “Staff assist”, pick your name and enter your PIN on the keypad. “Unlock” opens a ten-minute grant in your name — the chip shows who and how long, and it closes on its own.",
             "callouts": {
               "0": "Your name greyed out means you have no PIN yet — set one in your profile first.",
               "1": "Wrong PINs, wrong codes and failed lookups all feed one counter for this kiosk — the screen says how many attempts are left. At zero it locks for fifteen minutes.",
-              "2": "“Cancel — back to the guest” closes the panel without a grant."
+              "2": "“Cancel — back to guest” closes the panel without a grant."
             }
           },
           "kiosk-fig-staff-manual-id": {
             "title": "Type the license in, photograph both sides",
             "body": "Fill in first name, last name, date of birth and expiry exactly as printed. Then “Capture” or “Upload” the FRONT and the BACK of the physical license — both are required, and they are stored with the rental.",
             "callouts": {
-              "0": "The photos are the evidence that a person saw the card. Without both, “Verify and continue” stays off."
+              "0": "The photos are the evidence that a person saw the card. Without both, “Verify & continue” stays off."
             }
           },
           "kiosk-fig-staff-verify": {
-            "title": "Verify and continue — the rules still run",
-            "body": "The same three checks as a scan: the name matches the reservation, the age requirement, and a license valid through the return date. A typo can be corrected and verified again. A real failure cannot be talked past.",
+            "title": "Verify and continue — two rules still run",
+            "body": "Two checks, not three: the age requirement and a license valid through the return date. The name check is deliberately NOT run here — you are holding the physical license in front of the guest, and that is exactly what your PIN certifies. A typo can be corrected and verified again. A real failure cannot be talked past.",
             "callouts": {
               "0": "A red mark here is the kiosk doing its job — check the fields for a typo first.",
-              "1": "“Verify and continue” runs the checks again with what you typed.",
-              "2": "“End assistance” closes without verifying; the rental is then the counter’s call."
+              "1": "“Verify & continue” runs the two checks again with what you typed.",
+              "2": "“End assist” closes without verifying; the rental is then the counter’s call."
             }
           },
           "kiosk-fig-guest-notice-done": {
             "title": "What the guest sees now",
-            "body": "“ID verified by staff” hands control back with “Continue as guest”. From then on a green notice reads “Your ID was confirmed by Ana Rivera from our team” — the name is your real user account, and it stays on screen for the rest of the check-in.",
+            "body": "“ID verified by staff” hands control back with “Continue as guest”. From then on a green notice reads “Your ID was confirmed by Ana Rivera from our team.” — the name is your real user account, and it stays on screen for the rest of the check-in.",
             "callouts": {
               "0": "The record keeps who, when, and that it was in person — distinct from a remote override."
             }
@@ -1414,7 +1414,7 @@
             "callouts": {
               "0": "Two green, one red: this is a NAME problem, not an ID problem.",
               "1": "“Send my code” — the guest proves it themselves (next step).",
-              "2": "“Connect me with the team” — a person confirms it, in person or from Valet."
+              "2": "“Connect me to a team member” — a person confirms it, in person or from Valet."
             }
           },
           "kiosk-fig-name-code": {
@@ -1422,12 +1422,12 @@
             "body": "A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the license name and the check-in continues. It expires in ten minutes.",
             "callouts": {
               "0": "“Confirm code” — wrong codes count against the kiosk’s shared attempt counter; the screen says how many are left before it locks.",
-              "1": "“Resend” has a cooldown so the inbox is not flooded."
+              "1": "“Resend code” has a cooldown so the inbox is not flooded."
             }
           },
           "kiosk-fig-staff-name-confirm": {
             "title": "Or you confirm it, in person",
-            "body": "Unlock with your PIN as usual. Instead of the full form the kiosk shows both names side by side. “I verified this license belongs to the guest” records that YOU looked at the card and vouched — the rental carries your name on that decision.",
+            "body": "Unlock with your PIN as usual. Instead of the full form the kiosk shows both names side by side. “I verified this license matches the guest” records that YOU looked at the card and vouched — the rental carries your name on that decision.",
             "callouts": {
               "0": "License name versus reservation name, exactly as each system has them.",
               "1": "This button is a certification, not a shortcut. If you did not see the card, do not press it."
@@ -1440,7 +1440,7 @@
               "question": "The guest says the reservation was made by her husband, who is not here. The license is hers. What is the right path?",
               "options": {
                 "A": {
-                  "text": "Press “I verified this license belongs to the guest” — it is her license",
+                  "text": "Press “I verified this license matches the guest” — it is her license",
                   "why": "Her license is real, but the reservation is not in her name. Certifying the name does not put a driver on someone else’s booking."
                 },
                 "B": {
@@ -1466,12 +1466,12 @@
             "body": "The guest can tap Help on any screen. A Valet agent sees which step they are on and what has been verified — never the license photos, never card details. The chat sits over the check-in without ending it.",
             "callouts": {
               "0": "Help is always in the corner. It never ends the session.",
-              "1": "Closing the chat asks “Close the help chat?” — the check-in stays where it was."
+              "1": "Closing the chat asks “End help chat?” — the check-in stays where it was."
             }
           },
           "kiosk-fig-guest-notice-now": {
             "title": "While the agent works, the guest is told",
-            "body": "A violet notice reads “Ana Rivera from our team is helping you with this check-in right now” for as long as the agent holds a grant (ten minutes, then it closes by itself). The name is the REAL user account behind the action — never a name the console typed. A service account shows “someone from our team”.",
+            "body": "A violet notice reads “Ana Rivera from our team is helping you with this check-in right now.” for as long as the agent holds a grant (ten minutes, then it closes by itself). The name is the REAL user account behind the action — never a name the console typed. A service account shows “Someone from our team is helping you with this check-in right now.”.",
             "callouts": {
               "0": "Violet = happening now. It turns green (“your ID was confirmed… remotely”) once the override is applied.",
               "1": "“✓ Your agent updated your check-in” confirms an action landed.",
@@ -1484,7 +1484,7 @@
             "callouts": {
               "0": "Everything here runs the same rules as the kiosk itself.",
               "1": "Signature and payment are the guest’s alone, at the kiosk.",
-              "2": "Keys: “Stop by the counter” — that is you."
+              "2": "Keys: “Please see a team member at the counter to pick up your keys.” — that is you."
             }
           },
           "kiosk-check-valet-keys": {
@@ -1503,7 +1503,7 @@
                 },
                 "C": {
                   "text": "The kiosk prints a pickup code",
-                  "why": "The kiosk prints nothing. The “All set” screen says “Stop by the counter”."
+                  "why": "The kiosk prints nothing. The “All set” screen says “Please see a team member at the counter to pick up your keys.”."
                 }
               }
             }
@@ -1513,23 +1513,23 @@
       "kiosk-payment": {
         "title": "The payment fails or the kiosk does not move on",
         "summary": "Coming soon at your location: the link and QR, and what to do when the screen does not advance.",
-        "gotcha": "Never charge by hand what the kiosk is charging. A “stuck” screen is usually a payment that landed a few seconds ago — look in Reservations → Payments before touching the terminal.",
+        "gotcha": "Never charge by hand what the kiosk is charging. A “stuck” screen is usually a payment that landed a few seconds ago — look in Reservations → Payments before touching the terminal. And if two payments ever land (an old QR left open on the phone), refund the extra one; never re-charge.",
         "steps": {
           "kiosk-fig-pay-qr": {
             "title": "One link, one QR, and the kiosk waits",
-            "body": "“Show payment code” creates ONE payment link to the tenant’s hosted payment page and shows it as a QR. The guest scans it and pays on their phone. The kiosk shows “Waiting for payment…” and moves to the signature by itself the moment the server confirms.",
+            "body": "“Show payment code” creates ONE payment link to the tenant’s hosted payment page and shows it as a QR. The guest scans it and pays on their phone. The kiosk shows “Waiting for payment…” and moves to the signature by itself the moment the server confirms. Pressing “Show payment code” again with the same total shows the SAME link.",
             "callouts": {
               "0": "The QR is a link to the payment page — the kiosk never sees the card.",
-              "1": "“Waiting for payment…” polls every few seconds. Give it ten to fifteen.",
+              "1": "“Waiting for payment…” polls every few seconds. Give it ten to fifteen. A declined card is retried by the guest on their phone, from this same QR.",
               "2": "What is charged today versus the refundable hold on the card."
             }
           },
           "kiosk-fig-pay-failed": {
-            "title": "If it did not go through",
-            "body": "“The payment didn’t go through — no charge was made.” “Try again” reuses the same link when the amount is unchanged. “Change protection & extras” goes back; if the total changes, the old link is invalidated and a new one is created. Nothing here charges twice.",
+            "title": "If the total changes",
+            "body": "“Change protection & extras” goes back to extras. A new total mints a NEW link and QR; the old one leaves the kiosk screen but is STILL payable if the guest left it open on their phone — there is no way to cancel it at the gateway. Have the guest close the old payment page before scanning the new code. If two payments land, both show under Reservations → Payments: refund the extra one, never re-charge.",
             "callouts": {
-              "0": "“Try again” — same amount, same link.",
-              "1": "“Change protection & extras” — a new total means a new link; the old one dies."
+              "0": "“Try again” belongs to the sandbox/failed screen — it is not a link action. Same-total reuse comes from pressing “Show payment code” again.",
+              "1": "“Change protection & extras” — a new total means a new link; the old one is off the screen, not dead."
             }
           },
           "kiosk-check-payment": {
@@ -1544,7 +1544,7 @@
                 },
                 "B": {
                   "text": "Wait ten to fifteen seconds, then check Reservations → Payments",
-                  "why": "If the payment is there, the kiosk will catch up. If it is not, “Try again” reuses the same link — still no second charge."
+                  "why": "If the payment is there, the kiosk will catch up. If it is not, the guest retries on their phone from the same QR — or you press “Show payment code” again, which shows the same link for the same total."
                 },
                 "C": {
                   "text": "Tap “Start over” and begin the check-in again",
@@ -1561,26 +1561,26 @@
         "gotcha": "A locked kiosk is not broken. An admin clears it on the spot by issuing a new pairing code (Ride Fleet → Kiosks); with no admin at hand, finish the guest at the counter — in fifteen minutes it is back by itself. Restarting the iPad changes nothing: the lock lives on the server.",
         "steps": {
           "kiosk-fig-idle": {
-            "title": "“Still there?” — the privacy reset",
-            "body": "After a pause with no touch, the kiosk asks. “I’m still here — continue” keeps everything. If nobody answers, the session resets and clears what was entered — a stranger walking up must never see the last guest’s reservation.",
+            "title": "“Are you still there?” — the privacy reset",
+            "body": "After a pause with no touch, the kiosk asks. “I'm still here — continue” keeps everything. If nobody answers, the countdown reaches zero and the session resets, clearing what was entered — a stranger walking up must never see the last guest’s reservation.",
             "callouts": {
-              "0": "Continue keeps every field filled so far.",
+              "0": "“I'm still here — continue” keeps every field filled so far.",
               "1": "“Start over” clears it all on purpose — there is no undo."
             }
           },
           "kiosk-fig-not-mine": {
-            "title": "“This isn’t my reservation”",
-            "body": "The summary shows driver, dates and class before anything else happens. If it is the wrong one, “This isn’t my reservation” goes back to the search without spending an attempt. Lookups by number have a limited number of tries — the search screen says how many are left — and once spent, the kiosk pauses searches for a few minutes.",
+            "title": "“This isn't my reservation”",
+            "body": "The summary shows driver, dates and class before anything else happens. If it is the wrong one, “This isn't my reservation” goes back to the search without spending an attempt. Lookups by number have a limited number of tries — the search screen says how many are left — and once spent, the kiosk pauses searches for a few minutes.",
             "callouts": {
-              "0": "“That’s me — continue” is the guest confirming the match.",
-              "1": "“This isn’t my reservation” is free — it does not count as a failed attempt."
+              "0": "“That's me — continue” is the guest confirming the match.",
+              "1": "“This isn't my reservation” is free — it does not count as a failed attempt."
             }
           },
           "kiosk-fig-locked": {
             "title": "Locked for fifteen minutes",
             "body": "Too many wrong PINs, wrong codes or failed lookups, and the kiosk pauses staff unlock and searches. It is protecting the guest data on it. Two ways out: an admin issues a new pairing code from Ride Fleet → Kiosks and the lock clears immediately — or you wait it out and finish the guest at the counter.",
             "callouts": {
-              "0": "The timer counts down on screen and reaches zero on its own.",
+              "0": "There is no timer on screen — the lock simply lifts by itself after fifteen minutes.",
               "1": "The screen itself says it: an admin can issue a new pairing code to clear it right away."
             }
           },
@@ -1610,13 +1610,13 @@
       "kiosk-done-keys": {
         "title": "They signed: keys, contract and the photo walk-around",
         "summary": "The “All set!” screen — where the key is, what arrived by email, and the inspection link.",
-        "gotcha": "The screen resets itself after a few seconds. If the guest wants a printed contract, print it from the reservation — the kiosk cannot.",
+        "gotcha": "The screen resets itself after a 30-second countdown. If the guest wants a printed contract, print it from the reservation — the kiosk cannot.",
         "steps": {
           "kiosk-fig-done": {
             "title": "“All set!” — three things to point at",
-            "body": "Keys: “Stop by the counter — a team member hands you the keys.” Contract and receipt: already in their email. Before leaving: a QR (or emailed link) to photo-document the car’s condition — the same inspection the counter would do, done by the guest on their phone.",
+            "body": "Keys: “Please see a team member at the counter to pick up your keys.” Contract and receipt: already in their email. Before leaving: a QR (or emailed link) to photo-document the car’s condition — the same inspection the counter would do, done by the guest on their phone.",
             "callouts": {
-              "0": "Keys are handed by you, at the counter. Always.",
+              "0": "Keys are handed by you, at the counter — unless your location is set to Lockbox in Ride Fleet → Kiosks, in which case the screen sends the guest to the lockbox instead.",
               "1": "Contract and receipt went to the email on the reservation.",
               "2": "The inspection link is how damage disputes are settled later — encourage it."
             }
@@ -1760,13 +1760,13 @@
           "photo": "Reads the FRONT of the license from a photo, then shows “Is this correct?” with what it read. “Retake” starts over.",
           "confirm-read": "The guest confirms the fields read from the photo are theirs.",
           "upload-id": "When there is no camera.",
-          "cant-scan": "Escalates: “A team member is on the way”. After several failed reads the kiosk does this on its own.",
+          "cant-scan": "Escalates: “A team member is on the way” — the counter is notified. Nothing escalates by itself; the guest (or you) presses it.",
           "connect": "Shown when verification fails: open the chat with Valet, or scan again.",
           "entry": "Your door into the panel, from the escalation screen. Employees with a PIN only.",
           "unlock": "Name + PIN opens a TEN-MINUTE grant in your name (“Ana — 9:58 left”). Wrong PINs share one attempt counter with lookups and codes; at zero the kiosk locks for fifteen minutes.",
           "cancel": "Closes the panel without a grant; the guest is exactly where they were.",
           "capture": "Photos of the FRONT and BACK of the physical license. Both are required.",
-          "verify": "Runs the real rules — name, age, validity. YOUR PIN DOES NOT SKIP THEM.",
+          "verify": "Runs two real rules — age and license validity. The name check is deliberately skipped here (you are holding the license). YOUR PIN DOES NOT SKIP THE OTHER TWO.",
           "name-confirm": "You certify the name matches after checking the physical license. Recorded under your name.",
           "continue-guest": "Hands control back to the guest — or closes without verifying, and the counter decides the rental.",
           "send-code": "Sends a 6-digit code to the email or phone ON THE RESERVATION. Expires in 10 minutes.",
@@ -1778,14 +1778,14 @@
           "add-extras": "Adds what is ticked to the total (prices are for the rental’s days), or continues without extras. Every option includes the deposit.",
           "selfie": "Identity selfie. “Upload a photo” when there is no camera.",
           "show-qr": "Creates ONE payment link to the tenant’s hosted payment page and shows its QR. The guest pays on their phone; the kiosk shows “Waiting for payment…” and advances by itself.",
-          "retry": "After “The payment didn’t go through” (no charge was made): reuses the same link if the amount is unchanged.",
-          "change-extras": "Back to extras; if the total changes, the previous link is invalidated and a new one is created.",
-          "simulate": "Test environments only. It does not appear in production.",
+          "retry": "Only on the sandbox/failed screen; it is not a link action. A real declined card is retried by the guest on their phone from the same QR. Pressing “Show payment code” again shows the same link for the same total.",
+          "change-extras": "Back to extras. A new total mints a NEW link; the previous one leaves the screen but stays payable if the guest left it open on their phone — have them close it. Two payments landing = refund the extra, never re-charge.",
+          "simulate": "Sandbox stamp for test environments. It is still on screen in production but refuses (“Sandbox payment isn’t enabled…”) — never press it in front of a guest.",
           "pay-rule": "NEVER charge by hand what the kiosk is charging. If it does not advance, wait 10–15 seconds and check Reservations → Payments.",
           "initial-all": "Applies the initials drawn once to every section; sections can also be tapped one by one.",
           "read-agreement": "Expands the full agreement text.",
           "sign-finish": "Blocked while initials, payment or ID verification are missing — the kiosk says which.",
-          "done": "The “All set!” screen has no buttons: keys at the counter, contract and receipt by email, a QR to photo-document the car. It resets on its own.",
+          "done": "The “All set!” screen has no buttons: keys at the counter (or the lockbox, if your location is set to it), contract and receipt by email, a QR to photo-document the car. It resets after a 30-second countdown.",
           "pair": "Six-digit code from Ride Fleet → Kiosks → Pair. Attempts are limited; once spent, ask for a new code."
         },
         "legend": "Violet = the guest · dark violet = staff · outlined = secondary · red = undoes something · plain text = a message, not a button."

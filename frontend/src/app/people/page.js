@@ -776,7 +776,7 @@ function Inner({ token, me, logout }) {
                         // module (kiosk-grant-valet) on this one checkbox. A wrapper
                         // with a literal attribute, so the anchor scanner counts
                         // exactly one placement and no stray literal.
-                        <span data-tour="person-module-kiosk" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <span data-tour="person-module-kiosk" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                           <input
                             type="checkbox"
                             checked={isModuleChecked(userModuleAccess, item.key)}

@@ -90,11 +90,12 @@ export function StaffVerify() {
     <KioskFrame step={2} help={false} label={t('kiosk.assistVerifyBtn', 'Verify and continue')}>
       <GrantChip y={62} />
       <Heading y={96} title={t('kiosk.assistFormTitle', 'Enter the guest’s ID by hand')} />
-      <Card y={116} h={104}>
+      {/* TWO rules, not three: the staff panel deliberately skips the name check
+          (kiosk-staff-assist.service.js) — the person is holding the license. */}
+      <Card y={116} h={80}>
         {[
-          [t('kiosk.checkName', 'Name matches the reservation'), true],
           [t('kiosk.checkAge', 'Age requirement ({{age}}+)', { age: 21 }), false],
-          [t('kiosk.checkExpiry', 'Licence valid during your rental'), true],
+          [t('kiosk.checkExpiry', 'License valid during your rental'), true],
         ].map(([label, ok], i) => (
           <g key={label}>
             <circle cx="56" cy={142 + i * 28} r="8" fill={ok ? K.mint : K.bad} />
@@ -102,7 +103,7 @@ export function StaffVerify() {
             <Line x={76} y={146 + i * 28} text={label} size={12} color={K.ink} max={70} />
           </g>
         ))}
-        <Callout n={1} x={W - 60} y={170} />
+        <Callout n={1} x={W - 60} y={156} />
       </Card>
       <Lines x={32} y={238} text={t('kiosk.assistCorrectHint', 'Fix a typo in the fields and verify again, or end the assistance.')} size={11} color={K.muted} max={90} rows={2} gap={13} />
       <Btn x={32} y={270} w={220} label={t('kiosk.assistVerifyBtn', 'Verify and continue')} tone="staff" callout={2} />

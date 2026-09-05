@@ -21,8 +21,11 @@
  *   RESERVATION_CHECKED_OUT  CheckoutSession.startedByUserId + finishedAt
  *   RESERVATION_CHECKED_IN   RentalAgreement.closedByUserId
  *   PAYMENT_RECORDED         ReservationPayment.recordedByUserId
- *   KIOSK_ASSISTED           KioskSession.assistUserId + idVerifiedAt, where the
- *                            method is one of the IN-PERSON pair. assistGrantedAt
+ *   KIOSK_ASSISTED_ID        KioskSession.assistUserId + idVerifiedAt, method
+ *                            STAFF_OVERRIDE (typed the license in, in person)
+ *   KIOSK_ASSISTED_NAME      same row, method STAFF_NAME_OVERRIDE (vouched for
+ *                            the name only). Two types, not one: they are two
+ *                            modules, and one act must not award both. assistGrantedAt
  *                            is the wrong timestamp: it is CLEARED the moment the
  *                            verify consumes the grant, so a proof read from it
  *                            would vanish at exactly the moment it became true.
@@ -43,7 +46,8 @@ export const VERIFY_TYPES = Object.freeze([
   'RESERVATION_CHECKED_OUT',
   'RESERVATION_CHECKED_IN',
   'PAYMENT_RECORDED',
-  'KIOSK_ASSISTED',
+  'KIOSK_ASSISTED_ID',
+  'KIOSK_ASSISTED_NAME',
   'KIOSK_ACCESS_GRANTED',
 ]);
 
@@ -55,9 +59,13 @@ export const PROOF_SHAPE = Object.freeze({
   PAYMENT_RECORDED: { model: 'reservationPayment', actorField: 'recordedByUserId', atField: 'paidAt' },
   // `where` narrows by a column value; `match` is a pure predicate over the row
   // for what a column filter cannot say (a JSON containment). Both optional.
-  KIOSK_ASSISTED: {
+  KIOSK_ASSISTED_ID: {
     model: 'kioskSession', actorField: 'assistUserId', atField: 'idVerifiedAt',
-    where: { field: 'idVerifyMethod', in: ['STAFF_OVERRIDE', 'STAFF_NAME_OVERRIDE'] },
+    where: { field: 'idVerifyMethod', in: ['STAFF_OVERRIDE'] },
+  },
+  KIOSK_ASSISTED_NAME: {
+    model: 'kioskSession', actorField: 'assistUserId', atField: 'idVerifiedAt',
+    where: { field: 'idVerifyMethod', in: ['STAFF_NAME_OVERRIDE'] },
   },
   KIOSK_ACCESS_GRANTED: {
     model: 'moduleAccessAuditLog', actorField: 'actorUserId', atField: 'changedAt',

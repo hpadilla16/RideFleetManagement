@@ -1330,7 +1330,7 @@
       "kiosk-cant-scan": {
         "title": "El huésped no puede escanear su licencia",
         "summary": "Del «No puedo — pedir ayuda» a verificar el ID tú mismo con tu PIN.",
-        "gotcha": "Tu PIN abre una ventana de diez minutos — no dobla ninguna regla. Edad, validez de la licencia y coincidencia del nombre corren exactamente igual que con un escaneo. Si la fecha de nacimiento real no pasa, el kiosk está diciendo la verdad: termina la asistencia y que el counter decida.",
+        "gotcha": "Tu PIN abre una ventana de diez minutos — no dobla ninguna regla. Edad y validez de la licencia corren exactamente igual que con un escaneo; la comprobación del nombre es lo único que se salta, porque tú tienes la licencia física frente al huésped y eso es justo lo que tu PIN certifica. Si la fecha de nacimiento real no pasa, el kiosk está diciendo la verdad: «Terminar asistencia» y que el counter decida.",
         "steps": {
           "kiosk-fig-scan-trouble": {
             "title": "Dos escaneos fallidos",
@@ -1365,11 +1365,11 @@
             }
           },
           "kiosk-fig-staff-verify": {
-            "title": "Verificar y continuar — las reglas siguen corriendo",
-            "body": "Las mismas tres comprobaciones que un escaneo: el nombre coincide con la reservación, el requisito de edad y una licencia válida hasta la fecha de devolución. Un error de tecleo se corrige y se verifica otra vez. Un fallo real no se negocia.",
+            "title": "Verificar y continuar — dos reglas siguen corriendo",
+            "body": "Dos comprobaciones, no tres: el requisito de edad y una licencia válida hasta la fecha de devolución. La comprobación del nombre NO se corre aquí a propósito — tú tienes la licencia física frente al huésped, y eso es exactamente lo que tu PIN certifica. Un error de tecleo se corrige y se verifica otra vez. Un fallo real no se negocia.",
             "callouts": {
               "0": "Una marca roja aquí es el kiosk haciendo su trabajo — revisa primero si tecleaste mal.",
-              "1": "«Verificar y continuar» corre las comprobaciones otra vez con lo que escribiste.",
+              "1": "«Verificar y continuar» corre las dos comprobaciones otra vez con lo que escribiste.",
               "2": "«Terminar asistencia» cierra sin verificar; la renta pasa a ser decisión del counter."
             }
           },
@@ -1513,23 +1513,23 @@
       "kiosk-payment": {
         "title": "El pago falla o el kiosk no avanza",
         "summary": "Próximamente en tu sede: el link y el QR, y qué hacer cuando la pantalla no avanza.",
-        "gotcha": "Nunca cobres a mano lo que el kiosk está cobrando. Una pantalla «trancada» casi siempre es un pago que aterrizó hace unos segundos — mira en Reservations → Payments antes de tocar el terminal.",
+        "gotcha": "Nunca cobres a mano lo que el kiosk está cobrando. Una pantalla «trancada» casi siempre es un pago que aterrizó hace unos segundos — mira en Reservations → Payments antes de tocar el terminal. Y si alguna vez aterrizan dos pagos (un QR viejo que quedó abierto en el teléfono), reembolsa el extra; nunca vuelvas a cobrar.",
         "steps": {
           "kiosk-fig-pay-qr": {
             "title": "Un link, un QR, y el kiosk espera",
-            "body": "«Mostrar código de pago» crea UN link a la página de pago del tenant y lo muestra como QR. El huésped lo escanea y paga en su teléfono. El kiosk muestra «Esperando el pago…» y pasa solo a la firma en el momento en que el servidor confirma.",
+            "body": "«Mostrar código de pago» crea UN link a la página de pago del tenant y lo muestra como QR. El huésped lo escanea y paga en su teléfono. El kiosk muestra «Esperando el pago…» y pasa solo a la firma en el momento en que el servidor confirma. Tocar «Mostrar código de pago» otra vez con el mismo total muestra el MISMO link.",
             "callouts": {
               "0": "El QR es un link a la página de pago — el kiosk nunca ve la tarjeta.",
-              "1": "«Esperando el pago…» consulta cada pocos segundos. Dale de diez a quince.",
+              "1": "«Esperando el pago…» consulta cada pocos segundos. Dale de diez a quince. Una tarjeta declinada la reintenta el huésped en su teléfono, desde este mismo QR.",
               "2": "Lo que se cobra hoy versus la retención reembolsable en la tarjeta."
             }
           },
           "kiosk-fig-pay-failed": {
-            "title": "Si no pasó",
-            "body": "«El pago no pasó — no se hizo ningún cobro.» «Intentar de nuevo» reusa el mismo link cuando el monto no cambió. «Cambiar protección y extras» vuelve atrás; si el total cambia, el link viejo se invalida y se crea uno nuevo. Nada aquí cobra dos veces.",
+            "title": "Si el total cambia",
+            "body": "«Cambiar protección y extras» vuelve a los extras. Un total nuevo genera un link y un QR NUEVOS; el viejo sale de la pantalla del kiosk pero SIGUE siendo pagable si el huésped lo dejó abierto en su teléfono — no hay forma de cancelarlo en el gateway. Pídele al huésped que cierre la página de pago vieja antes de escanear el código nuevo. Si aterrizan dos pagos, los dos salen en Reservations → Payments: reembolsa el extra, nunca vuelvas a cobrar.",
             "callouts": {
-              "0": "«Intentar de nuevo» — mismo monto, mismo link.",
-              "1": "«Cambiar protección y extras» — un total nuevo significa un link nuevo; el viejo muere."
+              "0": "«Intentar de nuevo» pertenece a la pantalla de sandbox/fallo — no es una acción sobre el link. La reutilización con el mismo total viene de tocar «Mostrar código de pago» otra vez.",
+              "1": "«Cambiar protección y extras» — un total nuevo significa un link nuevo; el viejo sale de la pantalla, pero no muere."
             }
           },
           "kiosk-check-payment": {
@@ -1544,7 +1544,7 @@
                 },
                 "B": {
                   "text": "Espero de diez a quince segundos y reviso Reservations → Payments",
-                  "why": "Si el pago está ahí, el kiosk se pone al día. Si no está, «Intentar de nuevo» reusa el mismo link — sigue sin haber un segundo cobro."
+                  "why": "Si el pago está ahí, el kiosk se pone al día. Si no está, el huésped reintenta en su teléfono desde el mismo QR — o tú tocas «Mostrar código de pago» otra vez, que muestra el mismo link para el mismo total."
                 },
                 "C": {
                   "text": "Toco «Empezar de nuevo» y arranco el check-in otra vez",
@@ -1562,9 +1562,9 @@
         "steps": {
           "kiosk-fig-idle": {
             "title": "«¿Sigues ahí?» — el reinicio por privacidad",
-            "body": "Tras una pausa sin tocar la pantalla, el kiosk pregunta. «Sigo aquí — continuar» conserva todo. Si nadie contesta, la sesión se reinicia y borra lo entrado — un extraño que se acerque jamás debe ver la reservación del huésped anterior.",
+            "body": "Tras una pausa sin tocar la pantalla, el kiosk pregunta. «Sigo aquí — continuar» conserva todo. Si nadie contesta, la cuenta regresiva llega a cero y la sesión se reinicia, borrando lo entrado — un extraño que se acerque jamás debe ver la reservación del huésped anterior.",
             "callouts": {
-              "0": "Continuar conserva cada campo llenado hasta ahí.",
+              "0": "«Sigo aquí — continuar» conserva cada campo llenado hasta ahí.",
               "1": "«Empezar de nuevo» lo borra todo a propósito — no hay deshacer."
             }
           },
@@ -1580,7 +1580,7 @@
             "title": "Bloqueado por quince minutos",
             "body": "Demasiados PIN incorrectos, códigos incorrectos o búsquedas fallidas, y el kiosk pausa el desbloqueo del personal y las búsquedas. Está protegiendo los datos del huésped que tiene dentro. Dos salidas: un admin emite un código de pareo nuevo desde Ride Fleet → Kiosks y el bloqueo se limpia al momento — o lo esperas y terminas al huésped en el counter.",
             "callouts": {
-              "0": "El contador baja en pantalla y llega a cero solo.",
+              "0": "No hay reloj en pantalla — el bloqueo simplemente se levanta solo a los quince minutos.",
               "1": "La propia pantalla lo dice: un admin puede emitir un código de pareo nuevo para limpiarlo al momento."
             }
           },
@@ -1610,13 +1610,13 @@
       "kiosk-done-keys": {
         "title": "Ya firmaron: llaves, contrato y la ronda de fotos",
         "summary": "La pantalla «¡Listo!» — dónde está la llave, qué llegó por email, y el enlace de inspección.",
-        "gotcha": "La pantalla se reinicia sola tras unos segundos. Si el huésped quiere el contrato impreso, imprímelo desde la reservación — el kiosk no puede.",
+        "gotcha": "La pantalla se reinicia sola tras una cuenta regresiva de 30 segundos. Si el huésped quiere el contrato impreso, imprímelo desde la reservación — el kiosk no puede.",
         "steps": {
           "kiosk-fig-done": {
             "title": "«¡Listo!» — tres cosas que señalar",
             "body": "Llaves: «Pasa por el counter — un miembro del equipo te entrega las llaves.» Contrato y recibo: ya están en su email. Antes de salir: un QR (o enlace por email) para foto-documentar la condición del carro — la misma inspección que haría el counter, hecha por el huésped en su teléfono.",
             "callouts": {
-              "0": "Las llaves las entregas tú, en el counter. Siempre.",
+              "0": "Las llaves las entregas tú, en el counter — salvo que tu sede esté configurada en Lockbox en Ride Fleet → Kiosks, y entonces la pantalla manda al huésped al lockbox.",
               "1": "Contrato y recibo fueron al email de la reservación.",
               "2": "El enlace de inspección es cómo se resuelven después las disputas de daños — anímalo."
             }
@@ -1754,13 +1754,13 @@
           "photo": "Lee el FRENTE de la licencia desde una foto y luego muestra «¿Está correcto?» con lo leído. «Repetir» empieza de nuevo.",
           "confirm-read": "El huésped confirma que los campos leídos de la foto son suyos.",
           "upload-id": "Cuando no hay cámara.",
-          "cant-scan": "Escala: «Un miembro del equipo va en camino». Tras varias lecturas fallidas el kiosk lo hace solo.",
+          "cant-scan": "Escala: «Un miembro del equipo va en camino» — se avisa al counter. Nada escala solo; lo toca el huésped (o tú).",
           "connect": "Aparecen cuando la verificación falla: abrir el chat con Valet, o escanear otra vez.",
           "entry": "Tu puerta de entrada al panel, desde la pantalla de escalado. Solo empleados con PIN.",
           "unlock": "Nombre + PIN abre un permiso de DIEZ MINUTOS a tu nombre («Ana — quedan 9:58»). Los PIN incorrectos comparten un contador de intentos con las búsquedas y los códigos; en cero, el kiosk se bloquea quince minutos.",
           "cancel": "Cierra el panel sin permiso; el huésped queda exactamente donde estaba.",
           "capture": "Fotos del FRENTE y ATRÁS de la licencia física. Las dos son obligatorias.",
-          "verify": "Corre las reglas reales — nombre, edad, validez. TU PIN NO LAS SALTA.",
+          "verify": "Corre dos reglas reales — edad y validez de la licencia. La comprobación del nombre se salta aquí a propósito (tú tienes la licencia en la mano). TU PIN NO SALTA LAS OTRAS DOS.",
           "name-confirm": "Certificas que el nombre coincide tras revisar la licencia física. Queda registrado a tu nombre.",
           "continue-guest": "Devuelve el control al huésped — o cierra sin verificar, y el counter decide la renta.",
           "send-code": "Envía un código de 6 dígitos al email o teléfono DE LA RESERVACIÓN. Expira en 10 minutos.",
@@ -1772,14 +1772,14 @@
           "add-extras": "Suma lo marcado al total (los precios son para los días de la renta), o continúa sin extras. Todas las opciones incluyen el depósito.",
           "selfie": "Selfie de identidad. «Subir una foto» cuando no hay cámara.",
           "show-qr": "Crea UN link de pago a la página de pago del tenant y muestra su QR. El huésped paga en su teléfono; el kiosk muestra «Esperando el pago…» y avanza solo.",
-          "retry": "Tras «El pago no pasó» (no se hizo ningún cobro): reusa el mismo link si el monto no cambió.",
-          "change-extras": "Vuelve a extras; si el total cambia, el link anterior se invalida y se crea uno nuevo.",
-          "simulate": "Solo en ambientes de prueba. En producción no aparece.",
+          "retry": "Solo en la pantalla de sandbox/fallo; no es una acción sobre el link. Una tarjeta declinada real la reintenta el huésped en su teléfono desde el mismo QR. Tocar «Mostrar código de pago» otra vez muestra el mismo link para el mismo total.",
+          "change-extras": "Vuelve a extras. Un total nuevo genera un link NUEVO; el anterior sale de la pantalla pero sigue pagable si el huésped lo dejó abierto en su teléfono — pídele que lo cierre. Si aterrizan dos pagos = reembolsa el extra, nunca vuelvas a cobrar.",
+          "simulate": "Sello de sandbox para ambientes de prueba. En producción sigue en pantalla pero se niega («El pago sandbox no está habilitado…») — nunca lo toques frente a un huésped.",
           "pay-rule": "NUNCA cobres a mano lo que el kiosk está cobrando. Si no avanza, espera de 10 a 15 segundos y revisa Reservations → Payments.",
           "initial-all": "Aplica las iniciales dibujadas una vez a cada sección; también se puede tocar sección por sección.",
           "read-agreement": "Despliega el texto completo del contrato.",
           "sign-finish": "Bloqueado mientras falten iniciales, el pago o la verificación de ID — el kiosk dice cuál.",
-          "done": "La pantalla «¡Listo!» no tiene botones: llaves en el counter, contrato y recibo por email, un QR para foto-documentar el carro. Se reinicia sola.",
+          "done": "La pantalla «¡Listo!» no tiene botones: llaves en el counter (o en el lockbox, si tu sede lo tiene configurado), contrato y recibo por email, un QR para foto-documentar el carro. Se reinicia tras una cuenta regresiva de 30 segundos.",
           "pair": "Código de seis dígitos de Ride Fleet → Kiosks → Pair. Los intentos son limitados; agotados, pide un código nuevo."
         },
         "legend": "Violeta = el huésped · violeta oscuro = personal · con borde = secundario · rojo = deshace algo · texto plano = un mensaje, no un botón."
