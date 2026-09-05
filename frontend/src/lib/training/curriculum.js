@@ -671,7 +671,7 @@ export const COURSES = [
             body: 'Tap “Staff assistance”, pick your name and enter your PIN on the keypad. “Unlock” opens a ten-minute grant in your name — the chip shows who and how long, and it closes on its own.',
             callouts: [
               'Your name greyed out means you have no PIN yet — set one in your profile first.',
-              'Three wrong PINs lock this kiosk for fifteen minutes.',
+              'Wrong PINs, wrong codes and failed lookups all feed one counter for this kiosk — the screen says how many attempts are left. At zero it locks for fifteen minutes.',
               '“Cancel — back to the guest” closes the panel without a grant.',
             ],
           },
@@ -745,7 +745,7 @@ export const COURSES = [
             title: 'The guest proves it with a code',
             body: 'A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the license name and the check-in continues. It expires in ten minutes.',
             callouts: [
-              '“Confirm code” — three wrong codes pause codes on this kiosk for a few minutes.',
+              '“Confirm code” — wrong codes count against the kiosk’s shared attempt counter; the screen says how many are left before it locks.',
               '“Resend” has a cooldown so the inbox is not flooded.',
             ],
           },
@@ -925,9 +925,9 @@ export const COURSES = [
             title: 'Quick check',
             body: 'One question before this module closes.',
             check: {
-              question: 'The kiosk shows “This kiosk is temporarily locked” after a colleague mistyped their PIN three times. A guest is waiting and no admin is around. What do you do?',
+              question: 'The kiosk shows “This kiosk is temporarily locked” after a colleague ran its attempt counter down with wrong PINs. A guest is waiting and no admin is around. What do you do?',
               options: [
-                { key: 'A', text: 'Keep trying PINs until one works', why: 'The lock is there because of failed PINs. More attempts extend it and leave the guest standing.' },
+                { key: 'A', text: 'Keep trying PINs until one works', why: 'While locked, every attempt is refused before it is even counted — it does nothing except keep the guest standing there.' },
                 { key: 'B', text: 'Finish the guest at the counter; the kiosk unlocks itself in fifteen minutes — or an admin clears it now with a new pairing code', correct: true, why: 'The lockout is protection, not a fault. The counter does everything the kiosk does, and Ride Fleet → Kiosks → new pairing code clears it instantly when an admin is available.' },
                 { key: 'C', text: 'Restart the iPad', why: 'The lock lives on the server, not the tablet. A restart changes nothing and loses the guest’s session.' },
               ],

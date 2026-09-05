@@ -1353,7 +1353,7 @@
             "body": "Toca «Asistencia del personal», escoge tu nombre y entra tu PIN en el teclado. «Desbloquear» abre un permiso de diez minutos a tu nombre — el chip dice quién y cuánto queda, y se cierra solo.",
             "callouts": {
               "0": "Tu nombre en gris significa que todavía no tienes PIN — configúralo primero en tu perfil.",
-              "1": "Tres PIN incorrectos bloquean este kiosk por quince minutos.",
+              "1": "PIN incorrectos, códigos incorrectos y búsquedas fallidas alimentan un solo contador de este kiosk — la pantalla dice cuántos intentos quedan. En cero, se bloquea quince minutos.",
               "2": "«Cancelar — volver al cliente» cierra el panel sin permiso."
             }
           },
@@ -1421,7 +1421,7 @@
             "title": "El huésped lo prueba con un código",
             "body": "Un código de 6 dígitos va al email o teléfono DE LA RESERVACIÓN — nunca a un número que el huésped escriba ahora. Al entrarlo, la reservación se actualiza al nombre de la licencia y el check-in continúa. Expira en diez minutos.",
             "callouts": {
-              "0": "«Confirmar código» — tres códigos incorrectos pausan los códigos en este kiosk por unos minutos.",
+              "0": "«Confirmar código» — los códigos incorrectos cuentan contra el contador compartido de intentos del kiosk; la pantalla dice cuántos quedan antes de bloquearse.",
               "1": "«Reenviar» tiene espera para no inundar la bandeja."
             }
           },
@@ -1588,11 +1588,11 @@
             "title": "Chequeo rápido",
             "body": "Una pregunta antes de cerrar este módulo.",
             "check": {
-              "question": "El kiosk muestra «Este kiosk está bloqueado temporalmente» después de que un compañero tecleó mal su PIN tres veces. Hay un huésped esperando y no hay ningún admin cerca. ¿Qué haces?",
+              "question": "El kiosk muestra «Este kiosk está bloqueado temporalmente» después de que un compañero agotó el contador de intentos con PIN incorrectos. Hay un huésped esperando y no hay ningún admin cerca. ¿Qué haces?",
               "options": {
                 "A": {
                   "text": "Seguir probando PIN hasta que alguno funcione",
-                  "why": "El bloqueo existe por los PIN fallidos. Más intentos lo alargan y dejan al huésped parado."
+                  "why": "Mientras está bloqueado, cada intento se rechaza antes siquiera de contarse — no hace nada, salvo dejar al huésped parado."
                 },
                 "B": {
                   "text": "Terminar al huésped en el counter; el kiosk se desbloquea solo en quince minutos — o un admin lo limpia ahora con un código de pareo nuevo",
@@ -1757,7 +1757,7 @@
           "cant-scan": "Escala: «Un miembro del equipo va en camino». Tras varias lecturas fallidas el kiosk lo hace solo.",
           "connect": "Aparecen cuando la verificación falla: abrir el chat con Valet, o escanear otra vez.",
           "entry": "Tu puerta de entrada al panel, desde la pantalla de escalado. Solo empleados con PIN.",
-          "unlock": "Nombre + PIN abre un permiso de DIEZ MINUTOS a tu nombre («Ana — quedan 9:58»). Tres fallos bloquean el kiosk por quince minutos.",
+          "unlock": "Nombre + PIN abre un permiso de DIEZ MINUTOS a tu nombre («Ana — quedan 9:58»). Los PIN incorrectos comparten un contador de intentos con las búsquedas y los códigos; en cero, el kiosk se bloquea quince minutos.",
           "cancel": "Cierra el panel sin permiso; el huésped queda exactamente donde estaba.",
           "capture": "Fotos del FRENTE y ATRÁS de la licencia física. Las dos son obligatorias.",
           "verify": "Corre las reglas reales — nombre, edad, validez. TU PIN NO LAS SALTA.",

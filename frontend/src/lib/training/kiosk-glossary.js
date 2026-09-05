@@ -61,7 +61,7 @@ export const KIOSK_GLOSSARY = Object.freeze({
       title: 'Staff panel (PIN)',
       entries: [
         { id: 'entry', labels: ['kiosk.assistEntry'], tone: 'secondary', what: 'Your door into the panel, from the escalation screen. Employees with a PIN only.' },
-        { id: 'unlock', labels: ['kiosk.assistUnlockBtn'], tone: 'staff', what: 'Name + PIN opens a TEN-MINUTE grant in your name (“Ana — 9:58 left”). Three failures lock the kiosk for fifteen minutes.' },
+        { id: 'unlock', labels: ['kiosk.assistUnlockBtn'], tone: 'staff', what: 'Name + PIN opens a TEN-MINUTE grant in your name (“Ana — 9:58 left”). Wrong PINs share one attempt counter with lookups and codes; at zero the kiosk locks for fifteen minutes.' },
         { id: 'cancel', labels: ['kiosk.assistCancel'], tone: 'secondary', what: 'Closes the panel without a grant; the guest is exactly where they were.' },
         { id: 'capture', labels: ['kiosk.assistCaptureBtn', 'kiosk.assistUpload'], tone: 'secondary', what: 'Photos of the FRONT and BACK of the physical license. Both are required.' },
         { id: 'verify', labels: ['kiosk.assistVerifyBtn'], tone: 'staff', what: 'Runs the real rules — name, age, validity. YOUR PIN DOES NOT SKIP THEM.' },

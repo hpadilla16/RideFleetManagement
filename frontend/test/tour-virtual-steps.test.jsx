@@ -94,6 +94,8 @@ describe('drawn and asked steps', () => {
 });
 
 describe('a parked tour never resumes on a drawn or asked step (Innovation, 2026-09-04)', () => {
+  beforeEach(() => { window.localStorage.clear(); });
+
   it('kiosk-grant-valet launched with People closed parks — and stays parked, it does not jump to the quiz', () => {
     vi.useFakeTimers();
     try {

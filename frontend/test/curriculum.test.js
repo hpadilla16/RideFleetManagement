@@ -1,14 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  COURSES,
-  TOUR_TRACKS,
-  allModules,
-  findModule,
-  modulesFor,
-  pointsAvailable,
-  stepsForTrack,
-  stepsForModule,
-} from '../src/lib/training/curriculum.js';
+import { COURSES, TOUR_TRACKS, allModules, findModule, modulesFor, pointsAvailable, stepsForTrack, stepsForModule } from '../src/lib/training/curriculum.js';
 
 const AGENT = { role: 'AGENT' };
 const ADMIN = { role: 'ADMIN' };
@@ -47,6 +38,14 @@ describe('curriculum integrity', () => {
         expect(m.kind, `${m.key} would have trainees creating real records to earn points`).toBe('OPPORTUNISTIC');
       }
     }
+  });
+
+  it('situational modules stay out of the ONBOARDING track (onboarding: false)', () => {
+    // Deleting the filter in stepsForTrack would silently regrow an admin's
+    // first-day tour from ~33 to ~58 steps (Innovation, 2026-09-04).
+    const steps = stepsForTrack(TOUR_TRACKS.ONBOARDING, { role: 'ADMIN', isModuleEnabled: () => true });
+    expect(steps.some((s) => String(s.moduleKey).startsWith('kiosk-'))).toBe(false);
+    expect(modulesFor({ role: 'ADMIN', isModuleEnabled: () => true }).some((m) => m.key.startsWith('kiosk-')), 'but they stay in Ride University').toBe(true);
   });
 
   it('every module gate is a real tenant module', () => {

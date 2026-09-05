@@ -1353,7 +1353,7 @@
             "body": "Tap “Staff assistance”, pick your name and enter your PIN on the keypad. “Unlock” opens a ten-minute grant in your name — the chip shows who and how long, and it closes on its own.",
             "callouts": {
               "0": "Your name greyed out means you have no PIN yet — set one in your profile first.",
-              "1": "Three wrong PINs lock this kiosk for fifteen minutes.",
+              "1": "Wrong PINs, wrong codes and failed lookups all feed one counter for this kiosk — the screen says how many attempts are left. At zero it locks for fifteen minutes.",
               "2": "“Cancel — back to the guest” closes the panel without a grant."
             }
           },
@@ -1421,7 +1421,7 @@
             "title": "The guest proves it with a code",
             "body": "A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the license name and the check-in continues. It expires in ten minutes.",
             "callouts": {
-              "0": "“Confirm code” — three wrong codes pause codes on this kiosk for a few minutes.",
+              "0": "“Confirm code” — wrong codes count against the kiosk’s shared attempt counter; the screen says how many are left before it locks.",
               "1": "“Resend” has a cooldown so the inbox is not flooded."
             }
           },
@@ -1588,11 +1588,11 @@
             "title": "Quick check",
             "body": "One question before this module closes.",
             "check": {
-              "question": "The kiosk shows “This kiosk is temporarily locked” after a colleague mistyped their PIN three times. A guest is waiting and no admin is around. What do you do?",
+              "question": "The kiosk shows “This kiosk is temporarily locked” after a colleague ran its attempt counter down with wrong PINs. A guest is waiting and no admin is around. What do you do?",
               "options": {
                 "A": {
                   "text": "Keep trying PINs until one works",
-                  "why": "The lock is there because of failed PINs. More attempts extend it and leave the guest standing."
+                  "why": "While locked, every attempt is refused before it is even counted — it does nothing except keep the guest standing there."
                 },
                 "B": {
                   "text": "Finish the guest at the counter; the kiosk unlocks itself in fifteen minutes — or an admin clears it now with a new pairing code",
@@ -1763,7 +1763,7 @@
           "cant-scan": "Escalates: “A team member is on the way”. After several failed reads the kiosk does this on its own.",
           "connect": "Shown when verification fails: open the chat with Valet, or scan again.",
           "entry": "Your door into the panel, from the escalation screen. Employees with a PIN only.",
-          "unlock": "Name + PIN opens a TEN-MINUTE grant in your name (“Ana — 9:58 left”). Three failures lock the kiosk for fifteen minutes.",
+          "unlock": "Name + PIN opens a TEN-MINUTE grant in your name (“Ana — 9:58 left”). Wrong PINs share one attempt counter with lookups and codes; at zero the kiosk locks for fifteen minutes.",
           "cancel": "Closes the panel without a grant; the guest is exactly where they were.",
           "capture": "Photos of the FRONT and BACK of the physical license. Both are required.",
           "verify": "Runs the real rules — name, age, validity. YOUR PIN DOES NOT SKIP THEM.",

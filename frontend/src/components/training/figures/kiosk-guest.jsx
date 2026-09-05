@@ -256,11 +256,10 @@ export function Locked() {
       <Line x={W / 2} y={121} anchor="middle" text="🔒" size={24} />
       <Line x={W / 2} y={166} anchor="middle" text={t('kiosk.assistLockedTitle', 'This kiosk is temporarily locked')} size={18} weight={700} color={K.title} max={50} />
       <Lines x={W / 2} y={186} anchor="middle" text={t('kiosk.assistLockedBody', 'Too many attempts — the kiosk pauses staff unlock and lookups for a few minutes. An admin can issue a new pairing code to clear it right away.')} size={11.5} color={K.muted} max={80} rows={3} gap={13} />
+      <Callout n={2} x={W / 2 + 250} y={208} />
       <rect x={W / 2 - 70} y="236" width="140" height="28" rx="14" fill={K.warn} />
       <Line x={W / 2} y={255} anchor="middle" text="14:59" size={14} weight={700} color={K.warnInk} />
       <Callout n={1} x={W / 2 + 86} y={250} />
-      <Line x={W / 2} y={292} anchor="middle" text={t('kiosk.lookupLockedTitle', 'Let’s get you some help')} size={12} color={K.deep} weight={600} />
-      <Callout n={2} x={W / 2 + 120} y={288} />
     </KioskFrame>
   );
 }

@@ -250,7 +250,7 @@ export const INTENTS = [
     key: 'kiosk-cant-scan',
     aliases: {
       en: ['kiosk cannot scan', 'kiosk scan failed', 'license wont scan kiosk', 'kiosk staff pin', 'unlock kiosk', 'kiosk manual id'],
-      es: ['kiosk no escanea', 'licencia no escanea en el kiosk', 'kiosk pin', 'desbloquear kiosk', 'entrar id a mano', 'asistencia del personal kiosk'],
+      es: ['kiosk no escanea', 'kiosko no escanea', 'licencia no escanea en el kiosk', 'kiosk pin', 'desbloquear kiosk', 'entrar id a mano', 'asistencia del personal kiosk'],
     },
     tourModuleKey: 'kiosk-cant-scan',
     route: null,
@@ -265,7 +265,7 @@ export const INTENTS = [
     key: 'kiosk-name-mismatch',
     aliases: {
       en: ['kiosk name mismatch', 'name does not match kiosk', 'kiosk wrong name', 'name code kiosk', 'kiosk confirm name'],
-      es: ['kiosk nombre no coincide', 'nombre no coincide en el kiosk', 'codigo de nombre kiosk', 'confirmar nombre kiosk', 'reservacion a nombre de otro kiosk'],
+      es: ['kiosk nombre no coincide', 'kiosko nombre no coincide', 'nombre no coincide en el kiosk', 'codigo de nombre kiosk', 'confirmar nombre kiosk', 'reservacion a nombre de otro kiosk'],
     },
     tourModuleKey: 'kiosk-name-mismatch',
     route: null,
@@ -280,7 +280,7 @@ export const INTENTS = [
     key: 'kiosk-valet-help',
     aliases: {
       en: ['kiosk help chat', 'valet kiosk', 'remote agent kiosk', 'kiosk remote help', 'who hands the keys kiosk'],
-      es: ['chat de ayuda kiosk', 'valet kiosk', 'agente remoto kiosk', 'ayuda remota kiosk', 'quien entrega las llaves kiosk'],
+      es: ['chat de ayuda kiosk', 'chat de ayuda kiosko', 'valet kiosk', 'agente remoto kiosk', 'ayuda remota kiosk', 'quien entrega las llaves kiosk'],
     },
     tourModuleKey: 'kiosk-valet-help',
     route: null,
@@ -295,7 +295,7 @@ export const INTENTS = [
     key: 'kiosk-payment',
     aliases: {
       en: ['kiosk payment', 'kiosk qr payment', 'kiosk waiting for payment', 'kiosk payment failed', 'kiosk stuck payment'],
-      es: ['pago kiosk', 'pago por qr kiosk', 'kiosk esperando el pago', 'pago no paso kiosk', 'kiosk trancado en el pago'],
+      es: ['pago kiosk', 'pago kiosko', 'pago por qr kiosk', 'kiosk esperando el pago', 'pago no paso kiosk', 'kiosk trancado en el pago'],
     },
     tourModuleKey: 'kiosk-payment',
     route: null,
@@ -310,7 +310,7 @@ export const INTENTS = [
     key: 'kiosk-brakes',
     aliases: {
       en: ['kiosk locked', 'kiosk still there', 'kiosk reset', 'kiosk not my reservation', 'kiosk blocked'],
-      es: ['kiosk bloqueado', 'kiosk sigues ahi', 'kiosk se reinicia', 'kiosk no es mi reservacion', 'kiosk trancado'],
+      es: ['kiosk bloqueado', 'kiosko bloqueado', 'kiosk sigues ahi', 'kiosk se reinicia', 'kiosk no es mi reservacion', 'kiosk trancado'],
     },
     tourModuleKey: 'kiosk-brakes',
     route: null,
@@ -325,7 +325,7 @@ export const INTENTS = [
     key: 'kiosk-done-keys',
     aliases: {
       en: ['kiosk keys', 'kiosk all set', 'kiosk contract copy', 'kiosk printed contract', 'kiosk inspection link'],
-      es: ['llaves kiosk', 'kiosk listo', 'copia del contrato kiosk', 'contrato impreso kiosk', 'enlace de inspeccion kiosk'],
+      es: ['llaves kiosk', 'llaves kiosko', 'kiosk listo', 'copia del contrato kiosk', 'contrato impreso kiosk', 'enlace de inspeccion kiosk'],
     },
     tourModuleKey: 'kiosk-done-keys',
     route: null,
@@ -340,7 +340,7 @@ export const INTENTS = [
     key: 'kiosk-grant-valet',
     aliases: {
       en: ['valet kiosk access', 'give valet kiosk', 'kiosk module service account', 'valet cannot see kiosk'],
-      es: ['acceso kiosk valet', 'darle kiosk a valet', 'modulo kiosk cuenta de servicio', 'valet no ve el kiosk'],
+      es: ['acceso kiosk valet', 'acceso kiosko valet', 'darle kiosk a valet', 'modulo kiosk cuenta de servicio', 'valet no ve el kiosk'],
     },
     tourModuleKey: 'kiosk-grant-valet',
     route: '/people',
