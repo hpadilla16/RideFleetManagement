@@ -1513,7 +1513,7 @@
       },
       "kiosk-payment": {
         "title": "El pago falla o el kiosk no avanza",
-        "summary": "Próximamente en tu sede: el link y el QR, y qué hacer cuando la pantalla no avanza.",
+        "summary": "El link y el QR, y qué hacer cuando la pantalla no avanza.",
         "gotcha": "Nunca cobres a mano lo que el kiosk está cobrando. Una pantalla «trancada» casi siempre es un pago que aterrizó hace unos segundos — mira en Reservations → Payments antes de tocar el terminal. Y si alguna vez aterrizan dos pagos (un QR viejo que quedó abierto en el teléfono), reembolsa el extra; nunca vuelvas a cobrar.",
         "steps": {
           "kiosk-fig-pay-qr": {

@@ -608,3 +608,43 @@ test('B2 (intent half): a fresh mint never inherits the previous link or amount'
   assert.equal(row.paymentIntentAmount, null, 'nor the amount it was minted for');
   assert.ok(row.paymentIntentPriorRefs.includes('OLDREF1'), 'but the old reference stays resolvable for a late payment');
 });
+
+
+/* ───── "Is kiosk payment live at MY counter?" (Ride University gate, 2026-09-05) ───── */
+import { kioskPaymentLiveForLocations, kioskPaymentEnvGateReason } from './kiosk-payment-guards.js';
+
+const LIVE_KEYS = ['KIOSK_PAYMENT_LIVE', 'KIOSK_PAYMENT_LIVE_ALLOW_PROD', 'KIOSK_PAYMENT_LIVE_UNTIL', 'KIOSK_PAYMENT_LOCATION_ALLOWLIST', 'NODE_ENV'];
+function withEnv(patch, fn) {
+  const saved = Object.fromEntries(LIVE_KEYS.map((k) => [k, process.env[k]]));
+  for (const k of LIVE_KEYS) delete process.env[k];
+  Object.assign(process.env, patch);
+  try { return fn(); } finally {
+    for (const k of LIVE_KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+}
+const OPEN = { KIOSK_PAYMENT_LIVE: 'true', KIOSK_PAYMENT_LIVE_UNTIL: new Date(Date.now() + 3600e3).toISOString(), KIOSK_PAYMENT_LOCATION_ALLOWLIST: 'loc1,loc2' };
+
+test('live-for-locations: flag off → false, whatever the allowlist says', () => {
+  withEnv({ ...OPEN, KIOSK_PAYMENT_LIVE: 'false' }, () => assert.equal(kioskPaymentLiveForLocations(['loc1']), false));
+});
+test('live-for-locations: the env gate is the SAME one the transaction guard uses', () => {
+  withEnv({ ...OPEN, KIOSK_PAYMENT_LIVE_UNTIL: new Date(Date.now() - 1000).toISOString() }, () => {
+    assert.equal(kioskPaymentEnvGateReason(), 'WINDOW_EXPIRED');
+    assert.equal(kioskPaymentLiveForLocations(['loc1']), false);
+    assert.throws(() => assertKioskPaymentAllowed({ amount: 1, reservationId: 'r', deviceId: 'd', locationId: 'loc1' }), (e) => e instanceof KioskError);
+  });
+  withEnv({ ...OPEN, NODE_ENV: 'production' }, () => assert.equal(kioskPaymentLiveForLocations(['loc1']), false, 'prod needs the double key'));
+  withEnv({ ...OPEN, NODE_ENV: 'production', KIOSK_PAYMENT_LIVE_ALLOW_PROD: 'true' }, () => assert.equal(kioskPaymentLiveForLocations(['loc1']), true));
+});
+test('live-for-locations: my location must be allowlisted; an unscoped user counts as everywhere', () => {
+  withEnv(OPEN, () => {
+    assert.equal(kioskPaymentLiveForLocations(['loc1']), true);
+    assert.equal(kioskPaymentLiveForLocations(['loc9']), false, 'another counter');
+    assert.equal(kioskPaymentLiveForLocations(['loc9', 'loc2']), true, 'any of mine');
+    assert.equal(kioskPaymentLiveForLocations([]), true, 'unscoped sees every location');
+    assert.equal(kioskPaymentLiveForLocations(null), true);
+  });
+  withEnv({ ...OPEN, KIOSK_PAYMENT_LOCATION_ALLOWLIST: '' }, () => {
+    assert.equal(kioskPaymentLiveForLocations([]), false, 'no allowlist = not live, even unscoped');
+  });
+});

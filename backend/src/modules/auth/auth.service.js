@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { kioskPaymentLiveForLocations } from '../kiosk/kiosk-payment-guards.js';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../../lib/prisma.js';
 import { getJwtExpiresIn, getJwtSecret } from './auth.config.js';
@@ -175,6 +176,7 @@ function parseLocationIds(raw) {
 async function buildSessionUser(user) {
   if (!user) return null;
   const moduleAccess = await getEffectiveModuleAccessForUser(user);
+  const locationIds = parseLocationIds(user.locationIds);
   return {
     id: user.id,
     email: user.email,
@@ -184,7 +186,15 @@ async function buildSessionUser(user) {
     createdByUserId: user.createdByUserId || null,
     hostProfileId: user.hostProfileId || user.hostProfile?.id || null,
     screenLockExempt: !!user.screenLockExempt,
-    locationIds: parseLocationIds(user.locationIds),
+    locationIds,
+    // Feature reality for THIS person's counter (2026-09-05). Non-secret
+    // booleans the frontend uses to stop showing things that are not live where
+    // they work — Ride University hides the kiosk-payment module on it. Derived
+    // from the same env gate the payment guard enforces, so the two cannot
+    // disagree. Absent/false means "not live": consumers must fail closed.
+    features: {
+      kioskPaymentLive: kioskPaymentLiveForLocations(locationIds),
+    },
     // Program scoping (2026-07-02): raw enum value (RENTAL_ONLY | LOANER_ONLY
     // | BOTH). Consumers resolve the ADMIN/SUPER_ADMIN bypass via
     // userProgramScope() in lib/tenant-scope.js — same split as locationIds.

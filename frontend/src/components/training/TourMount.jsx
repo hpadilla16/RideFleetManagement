@@ -35,6 +35,8 @@ export function TourMount() {
         // matching isModuleEnabled's own default, so a stale cached user can
         // only ever show MORE of the tour, never hide a module wrongly.
         isModuleEnabled: (key) => me?.moduleAccess?.[key] !== false,
+        // Feature reality from the server; absent means not live (fail-closed).
+        hasFeature: (key) => me?.features?.[key] === true,
       });
     } catch { /* no cached user — customer-facing pages, nothing to tour */ }
   }, []);

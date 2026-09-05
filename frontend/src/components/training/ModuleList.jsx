@@ -37,6 +37,8 @@ export function ModuleList({ token, me }) {
   const viewer = useMemo(() => ({
     role: me?.role,
     isModuleEnabled: (key) => me?.moduleAccess?.[key] !== false,
+    // Feature reality from the server; absent means not live (fail-closed).
+    hasFeature: (key) => me?.features?.[key] === true,
   }), [me]);
 
   const mine = useMemo(() => modulesFor(viewer), [viewer]);

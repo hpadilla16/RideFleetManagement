@@ -90,6 +90,25 @@ describe('role filtering — an agent must never be toured through Settings', ()
   });
 });
 
+describe('feature gating — a module about something not live here does not exist here', () => {
+  const base = { role: 'AGENT', isModuleEnabled: () => true };
+  it('hides kiosk-payment when the viewer has no features at all (fail-closed)', () => {
+    expect(modulesFor(base).map((m) => m.key)).not.toContain('kiosk-payment');
+  });
+  it('hides it when the feature is false, shows it when true', () => {
+    expect(modulesFor({ ...base, hasFeature: () => false }).map((m) => m.key)).not.toContain('kiosk-payment');
+    expect(modulesFor({ ...base, hasFeature: (k) => k === 'kioskPaymentLive' }).map((m) => m.key)).toContain('kiosk-payment');
+  });
+  it('the other kiosk modules do not depend on it', () => {
+    const keys = modulesFor(base).map((m) => m.key);
+    expect(keys).toContain('kiosk-cant-scan');
+    expect(keys).toContain('kiosk-brakes');
+  });
+  it('every requiresFeature names a known feature key', () => {
+    for (const m of allModules()) if (m.requiresFeature) expect(['kioskPaymentLive']).toContain(m.requiresFeature);
+  });
+});
+
 describe('tenant module gating', () => {
   it('drops modules whose tenant module is off', () => {
     const noMarket = { role: 'ADMIN', isModuleEnabled: (g) => g !== 'marketIntelligence' };
