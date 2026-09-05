@@ -1700,6 +1700,11 @@
     "waitingNextScreen": "Sigue — abre la siguiente pantalla y la guía continúa ahí.",
     "skipThisPart": "Saltar esta parte",
     "restart": "Empezar de nuevo",
+    "heroTitle": "Aprende el sistema, una tarea a la vez.",
+    "heroBody": "Módulos de entrenamiento que completas haciendo el trabajo real, más los playbooks en los que tu equipo ya confía.",
+    "takeTheTour": "Hacer el recorrido",
+    "showcaseMode": "Modo demostración",
+    "showcaseHint": "Modo presentador para demos — muestra todo el producto, avanza con las flechas del teclado",
     "restartHint": "Borra este módulo y lo tomas desde el principio",
     "glossary": {
       "kiosk": {
