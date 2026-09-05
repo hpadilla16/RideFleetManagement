@@ -40,6 +40,11 @@
  *   step.check    — a question the person must answer before the module
  *                   closes. Wrong answers explain themselves and cost nothing.
  *                   It is what makes a reading module more than a Next button.
+ *   module.requiresFeature — a key of the viewer's `features` (from /api/auth/me)
+ *                   that must be true for the module to exist for them at all.
+ *                   Training a feature that is not live at someone's counter
+ *                   teaches a button that does nothing; fail-closed — no
+ *                   features object, no module (Hector, 2026-09-05).
  *   module.onboarding — false keeps the module OUT of the ONBOARDING track (it
  *                   stays in Ride University and the copilot). The kiosk
  *                   situations are things you look up when they happen, not a
@@ -837,9 +842,10 @@ export const COURSES = [
       {
         key: 'kiosk-payment',
         title: 'The payment fails or the kiosk does not move on',
-        summary: 'Coming soon at your location: the link and QR, and what to do when the screen does not advance.',
+        summary: 'The link and QR, and what to do when the screen does not advance.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'kiosk',
+        requiresFeature: 'kioskPaymentLive',
         onboarding: false,
         kind: 'ON_DEMAND',
         verify: null,
@@ -1039,9 +1045,13 @@ export function findModule(key) {
 export function modulesFor(viewer = {}) {
   const role = String(viewer.role || '').toUpperCase();
   const enabled = typeof viewer.isModuleEnabled === 'function' ? viewer.isModuleEnabled : () => true;
+  const hasFeature = typeof viewer.hasFeature === 'function' ? viewer.hasFeature : () => false;
   return allModules().filter((m) => {
     if (role && Array.isArray(m.roles) && !m.roles.includes(role)) return false;
     if (m.gate && !enabled(m.gate)) return false;
+    // Fail-closed, unlike gates: a gate absent means "tenant has it", a feature
+    // absent means "not live here".
+    if (m.requiresFeature && !hasFeature(m.requiresFeature)) return false;
     return true;
   });
 }

@@ -657,6 +657,11 @@ function AnswerCard({ intentKey, lang, ft, viewer, onTeach, onGo, onArticle }) {
           {ft('copilot.adminOnly', "That screen needs an admin — here's what they'll do.")}
         </div>
       )}
+      {ctas.notLive && (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-3, #736a8b)' }}>
+          {ft('copilot.notLive', "Not live at your counter yet — here's what it will do when it is.")}
+        </div>
+      )}
       <div style={ctaRow}>
         {ctas.teach && (
           <button type="button" onClick={() => onTeach(intent)} style={ctaPrimary}>

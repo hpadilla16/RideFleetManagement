@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { viewerFromMe } from '../../lib/training/viewer';
 import { USER_KEY } from '../../lib/client';
 import { Copilot } from './Copilot';
 
@@ -29,12 +30,7 @@ export function CopilotMount() {
       if (!raw) return;
       const me = JSON.parse(raw);
       if (!me?.role) return;
-      setViewer({
-        role: me.role,
-        // Same default as TourMount: absent means enabled, so a stale cached
-        // user can only ever show MORE, never wrongly hide a module.
-        isModuleEnabled: (key) => me?.moduleAccess?.[key] !== false,
-      });
+      setViewer(viewerFromMe(me));
     } catch { /* no cached user — customer-facing page, no copilot */ }
   }, []);
 

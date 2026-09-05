@@ -37,6 +37,7 @@
 
 import logger from '../../lib/logger.js';
 import { KioskError } from './kiosk-device.service.js';
+import { kioskPaymentEnvGateReason } from '../../lib/kiosk-payment-live.js';
 
 export const DEFAULT_MAX_AMOUNT = 5;
 
@@ -68,24 +69,20 @@ export function kioskPaymentMaxAmount() {
  * KioskError(403 KIOSK_PAYMENT_BLOCKED) with a `reason` naming the first gate
  * that refused (audit trail; never leaked to the guest screen verbatim).
  */
+// The env gate and the per-location answer live in lib/ (pure, no logger) so
+// auth.service.js can build /api/auth/me from the SAME definition of "live".
+export { kioskPaymentEnvGateReason, kioskPaymentLiveForLocations, kioskPaymentLiveForUser } from '../../lib/kiosk-payment-live.js';
+
 export function assertKioskPaymentAllowed({ amount, reservationId, deviceId, locationId } = {}) {
   const block = (reason, message) => {
     logger.warn('[kiosk-payment-guard] BLOCKED', { reason, reservationId, deviceId, locationId });
     throw new KioskError(message || 'Kiosk live payment is not enabled', 403, 'KIOSK_PAYMENT_BLOCKED', { reason });
   };
 
-  // 1 + 2 — kill switch, with a production double key.
-  if (!envFlag('KIOSK_PAYMENT_LIVE')) block('FLAG_OFF');
-  if (process.env.NODE_ENV === 'production' && !envFlag('KIOSK_PAYMENT_LIVE_ALLOW_PROD')) {
-    block('PROD_DOUBLE_KEY_MISSING');
-  }
-
-  // 6 — auto-expiring flag: an ISO timestamp past which the switch self-disables.
-  const until = String(process.env.KIOSK_PAYMENT_LIVE_UNTIL || '').trim();
-  if (!until) block('NO_EXPIRY_SET', 'Kiosk live payment requires an expiry window');
-  const untilTs = new Date(until).getTime();
-  if (!Number.isFinite(untilTs)) block('BAD_EXPIRY');
-  if (Date.now() > untilTs) block('WINDOW_EXPIRED');
+  // 1 + 2 + 6 — the environment gate, shared with kioskPaymentLiveForLocations.
+  const envReason = kioskPaymentEnvGateReason();
+  if (envReason === 'NO_EXPIRY_SET') block(envReason, 'Kiosk live payment requires an expiry window');
+  if (envReason) block(envReason);
 
   // 3 — hard server-side amount ceiling on the amount actually being sent.
   const amt = Number(amount);

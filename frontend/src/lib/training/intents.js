@@ -690,18 +690,27 @@ export function ctasFor(intent, viewer = {}) {
   if (!intent) return { teach: false, go: null, article: null, adminOnly: false };
   let teach = false;
   let adminOnly = false;
+  let notLive = false;
   if (intent.tourModuleKey) {
     const allowed = modulesFor(viewer).some((m) => m.key === intent.tourModuleKey);
     if (allowed) teach = true;
-    else adminOnly = true;
+    else {
+      // Withheld because the FEATURE is not live at this counter — not because
+      // of who is asking. Saying "an admin does that" here would be a lie.
+      const mod = findModule(intent.tourModuleKey);
+      const hasFeature = typeof viewer.hasFeature === 'function' ? viewer.hasFeature : () => false;
+      if (mod?.requiresFeature && !hasFeature(mod.requiresFeature)) notLive = true;
+      else adminOnly = true;
+    }
   }
   return {
     teach,
     // A role-gated intent hides navigation too: sending an agent to a screen
     // they cannot use is the same broken promise as touring them through it.
-    go: adminOnly ? null : (intent.route || null),
+    go: (adminOnly || notLive) ? null : (intent.route || null),
     article: intent.articleSlug || null,
     adminOnly,
+    notLive,
   };
 }
 

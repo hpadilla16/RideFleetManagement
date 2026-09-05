@@ -1513,7 +1513,7 @@
       },
       "kiosk-payment": {
         "title": "The payment fails or the kiosk does not move on",
-        "summary": "Coming soon at your location: the link and QR, and what to do when the screen does not advance.",
+        "summary": "The link and QR, and what to do when the screen does not advance.",
         "gotcha": "Never charge by hand what the kiosk is charging. A “stuck” screen is usually a payment that landed a few seconds ago — look in Reservations → Payments before touching the terminal. And if two payments ever land (an old QR left open on the phone), refund the extra one; never re-charge.",
         "steps": {
           "kiosk-fig-pay-qr": {
@@ -1835,6 +1835,7 @@
     "done": "Did you get it done?",
     "doneOpportunistic": "The module marks itself complete when the real record exists — walking it does not count as doing it.",
     "adminOnly": "That screen needs an admin — here's what they'll do.",
+    "notLive": "Not live at your counter yet — here's what it will do when it is.",
     "footer": "Explains and guides · never performs actions",
     "preflight": {
       "label": "Pre-flight · before teaching",

@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { viewerFromMe } from '../../lib/training/viewer';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../lib/client';
 import { COURSES, modulesFor, pointsAvailable, courseReference } from '../../lib/training/curriculum.js';
@@ -34,13 +35,10 @@ export function ModuleList({ token, me }) {
   // standing there asking what a button does.
   const [glossaryOpen, setGlossaryOpen] = useState(false);
 
-  const viewer = useMemo(() => ({
-    role: me?.role,
-    isModuleEnabled: (key) => me?.moduleAccess?.[key] !== false,
-  }), [me]);
+  const viewer = useMemo(() => (viewerFromMe(me)), [me]);
 
-  const mine = useMemo(() => modulesFor(viewer), [viewer]);
-  const available = useMemo(() => pointsAvailable(viewer), [viewer]);
+  const mine = useMemo(() => modulesFor(viewer || {}), [viewer]);
+  const available = useMemo(() => pointsAvailable(viewer || {}), [viewer]);
 
   const load = useCallback(async () => {
     try {

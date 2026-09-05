@@ -157,6 +157,17 @@ describe('ctasFor — role & gate awareness (guardrail 4)', () => {
     expect(ctas.article).toBe('security-basics-for-agents');
   });
 
+  it('a feature that is not live at the counter withholds the tour too (kiosk-payment)', () => {
+    const intent = findIntent('kiosk-payment');
+    const off = ctasFor(intent, { role: 'AGENT', isModuleEnabled: () => true });
+    expect(off.teach).toBe(false);
+    expect(off.adminOnly, 'not live is not "an admin does that"').toBe(false);
+    expect(off.notLive).toBe(true);
+    expect(off.go, 'no navigation to a screen that is not live').toBeNull();
+    const on = ctasFor(intent, { role: 'AGENT', isModuleEnabled: () => true, hasFeature: (k) => k === 'kioskPaymentLive' });
+    expect(on.teach).toBe(true);
+  });
+
   it('a tenant module gate withholds the tour the same way a role does', () => {
     const viewer = { role: 'ADMIN', isModuleEnabled: (key) => key !== 'marketIntelligence' };
     const ctas = ctasFor(findIntent('market-pricing'), viewer);
