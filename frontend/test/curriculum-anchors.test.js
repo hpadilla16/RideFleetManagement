@@ -13,7 +13,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allModules } from '../src/lib/training/curriculum.js';
+import { allModules, isVirtualStep } from '../src/lib/training/curriculum.js';
+import { FIGURES } from '../src/components/training/figures/index.js';
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
@@ -68,11 +69,56 @@ function placedAnchorCounts() {
   return counts;
 }
 
+/**
+ * Only the steps that point at an ELEMENT. A drawn step (`figure`) or an asked
+ * one (`check`) lives inside the tour card — its anchor is an identity for
+ * keys and progress, not a place in the DOM, and is checked below against the
+ * figure registry instead.
+ */
 const curriculumAnchors = () => {
   const set = new Set();
-  for (const m of allModules()) for (const s of m.steps || []) set.add(s.anchor);
+  for (const m of allModules()) for (const s of m.steps || []) if (!isVirtualStep(s)) set.add(s.anchor);
   return set;
 };
+
+describe('drawn steps resolve to real figures, the way anchors resolve to elements', () => {
+  const drawn = allModules().flatMap((m) => (m.steps || []).filter((s) => s.figure).map((s) => ({ ...s, moduleKey: m.key })));
+
+  it('every figure a step names is in the registry', () => {
+    const missing = drawn.filter((s) => !FIGURES[s.figure]).map((s) => `${s.moduleKey}/${s.anchor} → ${s.figure}`);
+    expect(missing, `Steps name figures that do not exist:\n  ${missing.join('\n  ')}`).toEqual([]);
+  });
+
+  it('every registered figure is named by a step — no dead drawings', () => {
+    const used = new Set(drawn.map((s) => s.figure));
+    const orphans = Object.keys(FIGURES).filter((k) => !used.has(k));
+    expect(orphans, `Figures nothing points at:\n  ${orphans.join('\n  ')}`).toEqual([]);
+  });
+
+  it('a drawn or asked step never ALSO claims a DOM anchor that exists', () => {
+    // Otherwise the tour would have two ideas of where the step lives.
+    const placed = placedAnchorCounts();
+    const clash = allModules().flatMap((m) => (m.steps || []))
+      .filter((s) => isVirtualStep(s) && placed.has(s.anchor)).map((s) => s.anchor);
+    expect(clash).toEqual([]);
+  });
+
+  it('an asked step carries exactly one correct option, and every option explains itself', () => {
+    for (const m of allModules()) {
+      for (const s of m.steps || []) {
+        if (!s.check) continue;
+        const opts = s.check.options || [];
+        expect(opts.length, `${m.key}/${s.anchor} options`).toBeGreaterThanOrEqual(2);
+        expect(opts.filter((o) => o.correct).length, `${m.key}/${s.anchor} must have ONE right answer`).toBe(1);
+        for (const o of opts) {
+          expect(typeof o.key === 'string' && o.key.length, `${m.key}/${s.anchor} option key`).toBeTruthy();
+          expect(typeof o.why === 'string' && o.why.length, `${m.key}/${s.anchor}/${o.key} needs a why`).toBeTruthy();
+        }
+        expect(new Set(opts.map((o) => o.key)).size).toBe(opts.length);
+      }
+    }
+  });
+});
 
 describe('curriculum anchors resolve to real elements', () => {
   const counts = placedAnchorCounts();

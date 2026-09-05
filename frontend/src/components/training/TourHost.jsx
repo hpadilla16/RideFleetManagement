@@ -28,8 +28,9 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 import {
   TOUR_TRACKS, stepsForTrack, stepsForModule, findModule,
-  moduleForStep, moduleRunEnd, recordScopedRunEnd,
+  moduleForStep, moduleRunEnd, recordScopedRunEnd, isVirtualStep,
 } from '../../lib/training/curriculum.js';
+import { figureFor } from './figures/index.js';
 import { stepKey, moduleKey as mKeyOf, trainingText } from '../../lib/training/i18n-keys.js';
 import {
   TOUR_STORAGE_KEY, TOUR_END,
@@ -58,6 +59,8 @@ const SHOWCASE_PARKED_SKIP_MS = 2500;
 /** How often a parked tour checks whether its record is finally open. */
 const WAIT_POLL_MS = 700;
 const CARD_WIDTH = 340;
+/** A drawn or asked step has no element to sit beside; it gets a wider, centred card. */
+const WIDE_CARD_WIDTH = 560;
 const GAP = 12;
 
 const findAnchor = (name) => (typeof document === 'undefined'
@@ -128,8 +131,22 @@ export function TourHost({ viewer }) {
   const cardRef = useRef(null);
   const lastFocused = useRef(null);
   const walkedModules = useRef(new Set());
-
-  const isPresent = useCallback((name) => !!anchorEl(name), []);
+  /**
+   * Anchors that are ALWAYS present: the steps that draw a screen (`figure`)
+   * or ask a question (`check`) instead of pointing at an element. tour-state
+   * only ever asks isPresent(anchor), so the set is kept here and filled from
+   * the step list before the first decision is made — onStart runs before
+   * setSteps has applied, which is why it is a ref and not derived state.
+   */
+  const virtualAnchors = useRef(new Set());
+  const rememberVirtual = (list) => {
+    virtualAnchors.current = new Set((list || []).filter(isVirtualStep).map((s) => s.anchor));
+  };
+  const isPresent = useCallback((name) => virtualAnchors.current.has(name) || !!anchorEl(name), []);
+  // The answer picked on a check step. Reset whenever the step changes. The
+  // ref mirrors "Next is locked" for the keyboard handler, which is bound once.
+  const [pick, setPick] = useState(null);
+  const nextLockedRef = useRef(false);
 
   /**
    * A missing anchor is only BROKEN when the step should have been there.
@@ -203,6 +220,7 @@ export function TourHost({ viewer }) {
       const list = moduleKey ? stepsForModule(moduleKey) : stepsForTrack(track, viewer || {});
       const fresh = startTour({ track, steps: list, moduleKey });
       if (!fresh) return;
+      rememberVirtual(list);
       setSteps(list);
       lastFocused.current = document.activeElement;
       walkedModules.current = new Set();
@@ -230,6 +248,7 @@ export function TourHost({ viewer }) {
     if (!saved || saved.endedAs) return;
     const list = saved.moduleKey ? stepsForModule(saved.moduleKey) : stepsForTrack(saved.track, viewer || {});
     if (!list.length) return;
+    rememberVirtual(list);
     setSteps(list);
     setState(saved);
   }, [state, viewer]);
@@ -260,10 +279,17 @@ export function TourHost({ viewer }) {
   }, [state?.waiting, pathname, steps.length]);
 
   const step = currentStep(state, steps);
+  const virtual = isVirtualStep(step);
+  if (!step?.check) nextLockedRef.current = false;
+
+  useEffect(() => { setPick(null); }, [step?.anchor]);
 
   // ── navigate, then find the element ───────────────────────────────────────
   useEffect(() => {
     if (!step) return undefined;
+    // A drawn or asked step lives in the card itself: nothing to navigate to,
+    // nothing to find, nothing to judge missing.
+    if (isVirtualStep(step)) { setRect(null); return undefined; }
     if (step.route && pathname !== step.route) {
       router.push(step.route);
       return undefined;
@@ -297,7 +323,7 @@ export function TourHost({ viewer }) {
 
   // ── keep the spotlight on the element ─────────────────────────────────────
   useLayoutEffect(() => {
-    if (!step) return undefined;
+    if (!step || isVirtualStep(step)) return undefined;
     const track = () => {
       const el = anchorEl(step.anchor);
       if (el) setRect(el.getBoundingClientRect());
@@ -382,7 +408,7 @@ export function TourHost({ viewer }) {
     if (!step) return undefined;
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); close(); return; }
-      if (e.key === 'ArrowRight') { e.preventDefault(); next(); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); if (nextLockedRef.current) return; next(); return; }
       if (e.key === 'ArrowLeft') { e.preventDefault(); back(); }
     };
     window.addEventListener('keydown', onKey);
@@ -431,7 +457,9 @@ export function TourHost({ viewer }) {
         <span style={{ fontSize: 13.5, fontWeight: 600 }}>
           {state.midTour
             ? t('training.waitingNextScreen', 'Keep going — open the next screen and the guide picks up there.')
-            : t('training.waitingForRecord', 'Open any reservation to start “{{name}}” — the guide continues there.', { name: waitName })}
+            : waitModule?.needsRecordLabel
+              ? t('training.waitingForScreen', 'Open {{where}} to start “{{name}}” — the guide continues there.', { where: waitModule.needsRecordLabel, name: waitName })
+              : t('training.waitingForRecord', 'Open any reservation to start “{{name}}” — the guide continues there.', { name: waitName })}
         </span>
         {!state.midTour && waitModule?.needsRecord && pathname !== waitModule.needsRecord && (
           <button
@@ -439,7 +467,7 @@ export function TourHost({ viewer }) {
             onClick={() => router.push(waitModule.needsRecord)}
             style={{ background: '#fff', color: '#1e1a2b', border: 'none', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}
           >
-            {t('training.needsRecordCta', 'Go to reservations')}
+            {waitModule?.needsRecordLabel ? t('training.goThere', 'Take me there') : t('training.needsRecordCta', 'Go to reservations')}
           </button>
         )}
         {Number.isInteger(state.skipThrough ?? state.resumeThrough)
@@ -489,7 +517,9 @@ export function TourHost({ viewer }) {
           </h3>
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--text-2, #5b5266)' }}>
             {where
-              ? t('training.needsRecordBody', '“{{name}}” is walked inside a reservation — that is why nothing happened. Open any reservation (or use Practice on the demo tenant), then press Start again.', { name: modName })
+              ? (brokenModule?.needsRecordLabel
+                ? t('training.needsScreenBody', '“{{name}}” is walked on another screen — open {{where}}, then press Start again.', { name: modName, where: brokenModule.needsRecordLabel })
+                : t('training.needsRecordBody', '“{{name}}” is walked inside a reservation — that is why nothing happened. Open any reservation (or use Practice on the demo tenant), then press Start again.', { name: modName }))
               : t('training.tourUnavailableBody', 'A step in this guide points at something that is not on screen. Tell an admin so we can fix the guide.')}
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
@@ -498,7 +528,7 @@ export function TourHost({ viewer }) {
             </button>
             {where && (
               <button type="button" onClick={() => { close(); router.push(where); }}>
-                {t('training.needsRecordCta', 'Go to reservations')}
+                {brokenModule?.needsRecordLabel ? t('training.goThere', 'Take me there') : t('training.needsRecordCta', 'Go to reservations')}
               </button>
             )}
           </div>
@@ -527,12 +557,28 @@ export function TourHost({ viewer }) {
   // Card goes below the element, or above when there is no room beneath.
   const vh = window.innerHeight;
   const vw = window.innerWidth;
+  const cardWidth = virtual ? Math.min(WIDE_CARD_WIDTH, vw - 2 * GAP) : CARD_WIDTH;
   const below = rect ? rect.bottom + GAP : vh / 3;
   const roomBelow = rect ? vh - rect.bottom > 220 : true;
-  const top = rect ? (roomBelow ? below : Math.max(GAP, rect.top - 200 - GAP)) : vh / 3;
+  const top = rect
+    ? (roomBelow ? below : Math.max(GAP, rect.top - 200 - GAP))
+    : (virtual ? Math.max(GAP, Math.round(vh * 0.06)) : vh / 3);
   const left = rect
-    ? Math.min(Math.max(GAP, rect.left), Math.max(GAP, vw - CARD_WIDTH - GAP))
-    : Math.max(GAP, (vw - CARD_WIDTH) / 2);
+    ? Math.min(Math.max(GAP, rect.left), Math.max(GAP, vw - cardWidth - GAP))
+    : Math.max(GAP, (vw - cardWidth) / 2);
+
+  // Drawn step: the figure component from the registry, plus its callouts.
+  const Figure = step.figure ? figureFor(step.figure) : null;
+  const callouts = Array.isArray(step.callouts)
+    ? step.callouts.map((text, i) => trainingText(t, stepKey(step.moduleKey, step, `callouts.${i}`), text))
+    : [];
+  // Asked step: Next is locked until the right answer is picked; a wrong pick
+  // explains itself and costs nothing.
+  const check = step.check || null;
+  const picked = check ? (check.options || []).find((o) => o.key === pick) || null : null;
+  const answered = !!picked?.correct;
+  const nextLocked = !!check && !answered;
+  nextLockedRef.current = nextLocked;
 
   return createPortal(
     <div
@@ -569,7 +615,8 @@ export function TourHost({ viewer }) {
         ref={cardRef}
         tabIndex={-1}
         style={{
-          position: 'fixed', top, left, width: CARD_WIDTH, maxWidth: 'calc(100vw - 24px)',
+          position: 'fixed', top, left, width: cardWidth, maxWidth: 'calc(100vw - 24px)',
+          maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
           background: 'var(--surface-1, #fff)', color: 'var(--text-1, #1e1a2b)',
           border: '1px solid var(--border-2, #d9d2ea)', borderRadius: 12,
           padding: '14px 16px', boxShadow: '0 12px 32px rgba(30,20,60,0.22)',
@@ -590,6 +637,68 @@ export function TourHost({ viewer }) {
 
         <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700 }}>{title}</h3>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--text-2, #4a4258)' }}>{body}</p>
+
+        {Figure && (
+          <div data-testid="tour-figure" style={{ margin: '10px 0 0', border: '1px solid var(--border-2, #e6e0f2)', borderRadius: 10, overflow: 'hidden', maxHeight: '38vh' }}>
+            <Figure />
+          </div>
+        )}
+        {callouts.length > 0 && (
+          <ol data-testid="tour-callouts" style={{ margin: '10px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
+            {callouts.map((text, i) => (
+              <li key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', fontSize: 12.5, lineHeight: 1.45, color: 'var(--text-2, #4a4258)' }}>
+                <span aria-hidden="true" style={{ flex: '0 0 20px', height: 20, borderRadius: '50%', background: '#8752FE', color: '#fff', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                <span>{text}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {check && (
+          <div data-testid="tour-check" role="group" aria-label={trainingText(t, stepKey(step.moduleKey, step, 'check.question'), check.question)} style={{ marginTop: 10 }}>
+            <p style={{ margin: '0 0 8px', fontSize: 13.5, fontWeight: 600, lineHeight: 1.45 }}>
+              {trainingText(t, stepKey(step.moduleKey, step, 'check.question'), check.question)}
+            </p>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {(check.options || []).map((o) => {
+                const isPick = pick === o.key;
+                const tone = !isPick ? null : o.correct ? 'ok' : 'bad';
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    onClick={() => setPick(o.key)}
+                    aria-pressed={isPick}
+                    data-testid={`tour-check-option-${o.key}`}
+                    style={{
+                      display: 'flex', gap: 10, alignItems: 'flex-start', textAlign: 'left', cursor: 'pointer',
+                      padding: '8px 11px', borderRadius: 9, fontSize: 13, lineHeight: 1.4,
+                      border: `1px solid ${tone === 'ok' ? '#1f8a5f' : tone === 'bad' ? '#b3261e' : 'var(--border-2, #d9d2ea)'}`,
+                      background: tone === 'ok' ? 'rgba(31,138,95,0.08)' : tone === 'bad' ? 'rgba(179,38,30,0.06)' : 'var(--surface-1, #fff)',
+                      color: 'var(--text-1, #1e1a2b)',
+                    }}
+                  >
+                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, fontWeight: 700, color: 'var(--text-3, #736a8b)', marginTop: 2 }}>{o.key}</span>
+                    <span>{trainingText(t, stepKey(step.moduleKey, step, `check.options.${o.key}.text`), o.text)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {picked && (
+              <p
+                role="status"
+                data-testid="tour-check-why"
+                style={{ margin: '10px 0 0', borderRadius: 8, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.5,
+                  background: picked.correct ? 'rgba(31,138,95,0.08)' : '#f8efe0', color: 'var(--text-2, #4a4258)' }}
+              >
+                <span style={{ display: 'block', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 2, color: picked.correct ? '#1f8a5f' : '#9a5b12' }}>
+                  {picked.correct ? t('training.checkRight', 'Right') : t('training.checkNotQuite', 'Not quite')}
+                </span>
+                {trainingText(t, stepKey(step.moduleKey, step, `check.options.${picked.key}.why`), picked.why)}
+              </p>
+            )}
+          </div>
+        )}
         {gotcha && (
           <p style={{ margin: '10px 0 0', background: '#f8efe0', borderRadius: 8, padding: '8px 10px', fontSize: 12, lineHeight: 1.5, color: 'var(--text-2, #4a4258)' }}>
             <span style={{ display: 'block', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9a5b12', fontWeight: 700, marginBottom: 2 }}>
@@ -603,7 +712,7 @@ export function TourHost({ viewer }) {
           <button type="button" onClick={back} disabled={position <= 1} style={btn(false)}>
             {t('common.back', 'Back')}
           </button>
-          <button type="button" onClick={next} style={btn(true)}>
+          <button type="button" onClick={next} disabled={nextLocked} style={{ ...btn(true), opacity: nextLocked ? 0.5 : 1, cursor: nextLocked ? 'not-allowed' : 'pointer' }}>
             {position >= total ? t('common.done', 'Done') : t('common.next', 'Next')}
           </button>
           <span style={{ flex: 1 }} />

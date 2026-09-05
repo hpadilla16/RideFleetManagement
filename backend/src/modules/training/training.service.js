@@ -65,6 +65,28 @@ async function candidatesFor(verifyType, { tenantId, userId, armedAt }) {
         select: { id: true, recordedByUserId: true, paidAt: true },
         ...common,
       });
+    case 'KIOSK_ASSISTED':
+      // idVerifiedAt, not assistGrantedAt: the grant is cleared when the verify
+      // consumes it (see training-verify.js). The method filter is repeated in
+      // findProof so the decision is testable without a database.
+      return prisma.kioskSession.findMany({
+        where: {
+          tenantId,
+          assistUserId: userId,
+          idVerifiedAt: { gte: armedAt },
+          idVerifyMethod: { in: ['STAFF_OVERRIDE', 'STAFF_NAME_OVERRIDE'] },
+        },
+        select: { id: true, assistUserId: true, idVerifiedAt: true, idVerifyMethod: true },
+        take: 25, orderBy: { idVerifiedAt: 'desc' },
+      });
+    case 'KIOSK_ACCESS_GRANTED':
+      // The JSON containment ({module:'kiosk', to:true}) is decided in
+      // findProof; 25 most recent per-user saves since arming is plenty.
+      return prisma.moduleAccessAuditLog.findMany({
+        where: { tenantId, scope: 'USER', actorUserId: userId, changedAt: { gte: armedAt } },
+        select: { id: true, actorUserId: true, changedAt: true, changed: true },
+        take: 25, orderBy: { changedAt: 'desc' },
+      });
     default:
       return [];
   }

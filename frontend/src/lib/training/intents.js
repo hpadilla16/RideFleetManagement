@@ -241,6 +241,117 @@ export const INTENTS = [
     source: { kind: 'MODULE', label: 'Ride University: The live shuttle tracker' },
   },
 
+  // ── the self-service kiosk: tour-backed, drawn steps (2026-09-04) ─────────
+  // One intent per SITUATION a guest gets into on the iPad. No route: the
+  // screens live on the kiosk and in Valet, so "Te enseño" opens the drawn
+  // walkthrough wherever the person is. No article yet — the modules ARE the
+  // reference, plus the button glossary on the course row.
+  {
+    key: 'kiosk-cant-scan',
+    aliases: {
+      en: ['kiosk cannot scan', 'kiosk scan failed', 'license wont scan kiosk', 'kiosk staff pin', 'unlock kiosk', 'kiosk manual id'],
+      es: ['kiosk no escanea', 'no escanea la licencia', 'kiosk pin', 'desbloquear kiosk', 'entrar id a mano', 'asistencia del personal kiosk'],
+    },
+    tourModuleKey: 'kiosk-cant-scan',
+    route: null,
+    articleSlug: null,
+    summary: {
+      en: 'When the licence will not scan, the guest asks for a person and you verify the ID at the kiosk with your PIN. Your PIN opens a ten-minute window — it does not bend a rule.',
+      es: 'Cuando la licencia no escanea, el huésped pide a una persona y tú verificas el ID en el kiosk con tu PIN. Tu PIN abre diez minutos — no dobla ninguna regla.',
+    },
+    source: { kind: 'MODULE', label: 'Ride University: The guest cannot scan their licence' },
+  },
+  {
+    key: 'kiosk-name-mismatch',
+    aliases: {
+      en: ['kiosk name mismatch', 'name does not match kiosk', 'kiosk wrong name', 'name code kiosk', 'kiosk confirm name'],
+      es: ['kiosk nombre no coincide', 'nombre no coincide', 'codigo de nombre kiosk', 'confirmar nombre kiosk', 'reservacion a nombre de otro kiosk'],
+    },
+    tourModuleKey: 'kiosk-name-mismatch',
+    route: null,
+    articleSlug: null,
+    summary: {
+      en: 'Only the name check is red. The guest can prove the reservation is theirs with a 6-digit code to the contact on file — or you certify the licence in person.',
+      es: 'Solo la comprobación del nombre está en rojo. El huésped puede probar que la reservación es suya con un código de 6 dígitos al contacto en archivo — o tú certificas la licencia en persona.',
+    },
+    source: { kind: 'MODULE', label: 'Ride University: The name on the licence does not match' },
+  },
+  {
+    key: 'kiosk-valet-help',
+    aliases: {
+      en: ['kiosk help chat', 'valet kiosk', 'remote agent kiosk', 'kiosk remote help', 'who hands the keys kiosk'],
+      es: ['chat de ayuda kiosk', 'valet kiosk', 'agente remoto kiosk', 'ayuda remota kiosk', 'quien entrega las llaves kiosk'],
+    },
+    tourModuleKey: 'kiosk-valet-help',
+    route: null,
+    articleSlug: null,
+    summary: {
+      en: 'A Valet agent can unlock, enter the ID from the photos on file and confirm the name — never sign, pay, or open the car. Keys are handed at the front desk, by you.',
+      es: 'Un agente de Valet puede desbloquear, entrar el ID desde las fotos en archivo y confirmar el nombre — nunca firmar, pagar ni abrir el carro. Las llaves las entregas tú en el front desk.',
+    },
+    source: { kind: 'MODULE', label: 'Ride University: The guest asks for help by chat and Valet takes it' },
+  },
+  {
+    key: 'kiosk-payment',
+    aliases: {
+      en: ['kiosk payment', 'kiosk qr payment', 'kiosk waiting for payment', 'kiosk payment failed', 'kiosk stuck payment'],
+      es: ['pago kiosk', 'pago por qr kiosk', 'kiosk esperando el pago', 'pago no paso kiosk', 'kiosk trancado en el pago'],
+    },
+    tourModuleKey: 'kiosk-payment',
+    route: null,
+    articleSlug: null,
+    summary: {
+      en: 'One link, one QR, and the kiosk waits and advances by itself. Never charge by hand what the kiosk is charging — check Reservations → Payments first.',
+      es: 'Un link, un QR, y el kiosk espera y avanza solo. Nunca cobres a mano lo que el kiosk está cobrando — revisa Reservations → Payments primero.',
+    },
+    source: { kind: 'MODULE', label: 'Ride University: The payment fails or the kiosk does not move on' },
+  },
+  {
+    key: 'kiosk-brakes',
+    aliases: {
+      en: ['kiosk locked', 'kiosk still there', 'kiosk reset', 'kiosk not my reservation', 'kiosk blocked'],
+      es: ['kiosk bloqueado', 'kiosk sigues ahi', 'kiosk se reinicia', 'kiosk no es mi reservacion', 'kiosk trancado'],
+    },
+    tourModuleKey: 'kiosk-brakes',
+    route: null,
+    articleSlug: null,
+    summary: {
+      en: 'Inactivity resets the session for privacy; a wrong match is free to undo; too many failed PINs, codes or lookups lock the kiosk for fifteen minutes. Nothing to fix — finish the guest at the counter.',
+      es: 'La inactividad reinicia la sesión por privacidad; una coincidencia equivocada se deshace gratis; demasiados PIN, códigos o búsquedas fallidos bloquean el kiosk quince minutos. Nada que arreglar — termina al huésped en el counter.',
+    },
+    source: { kind: 'MODULE', label: 'Ride University: “Still there?”, “Not my reservation”, and a locked kiosk' },
+  },
+  {
+    key: 'kiosk-done-keys',
+    aliases: {
+      en: ['kiosk keys', 'kiosk all set', 'kiosk contract copy', 'kiosk printed contract', 'kiosk inspection link'],
+      es: ['llaves kiosk', 'kiosk listo', 'copia del contrato kiosk', 'contrato impreso kiosk', 'enlace de inspeccion kiosk'],
+    },
+    tourModuleKey: 'kiosk-done-keys',
+    route: null,
+    articleSlug: null,
+    summary: {
+      en: 'After signing: keys at the counter, contract and receipt by email, and a link to photo-document the car. A printed copy comes from the reservation, not the kiosk.',
+      es: 'Tras firmar: llaves en el counter, contrato y recibo por email, y un enlace para foto-documentar el carro. La copia impresa sale de la reservación, no del kiosk.',
+    },
+    source: { kind: 'MODULE', label: 'Ride University: They signed — keys, contract and the photo walk-around' },
+  },
+  {
+    key: 'kiosk-grant-valet',
+    aliases: {
+      en: ['valet kiosk access', 'give valet kiosk', 'kiosk module service account', 'valet cannot see kiosk'],
+      es: ['acceso kiosk valet', 'darle kiosk a valet', 'modulo kiosk cuenta de servicio', 'valet no ve el kiosk'],
+    },
+    tourModuleKey: 'kiosk-grant-valet',
+    route: '/people',
+    articleSlug: null,
+    summary: {
+      en: 'People → the Valet service account → tick Kiosk. Two switches: the tenant module must also be on in Settings.',
+      es: 'People → la cuenta de servicio de Valet → marcar Kiosk. Dos interruptores: el módulo del tenant también tiene que estar encendido en Settings.',
+    },
+    source: { kind: 'MODULE', label: 'Ride University: Give Valet access to the kiosk' },
+  },
+
   // ── admin work: tour-backed, role-gated ───────────────────────────────────
   {
     key: 'users-and-locations',

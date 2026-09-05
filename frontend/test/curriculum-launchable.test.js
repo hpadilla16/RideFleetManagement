@@ -13,7 +13,7 @@
  * guidance instead of dying.
  */
 import { describe, it, expect } from 'vitest';
-import { allModules, stepsForModule } from '../src/lib/training/curriculum.js';
+import { allModules, stepsForModule, isVirtualStep } from '../src/lib/training/curriculum.js';
 import { startTour, settleStart, advance, waitForRecord, resumeAt, TOUR_END } from '../src/lib/training/tour-state.js';
 
 describe('every module can be started from Ride University', () => {
@@ -21,7 +21,9 @@ describe('every module can be started from Ride University', () => {
     const stranded = allModules()
       .filter((m) => {
         const first = (m.steps || [])[0];
-        return first && !first.route && !m.needsRecord;
+        // A drawn or asked first step lives inside the tour card — it is present
+        // on every page, so the module can always start (kiosk course, 2026-09-04).
+        return first && !first.route && !m.needsRecord && !isVirtualStep(first);
       })
       .map((m) => m.key);
     expect(

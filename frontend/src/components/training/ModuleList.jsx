@@ -16,8 +16,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../lib/client';
-import { COURSES, modulesFor, pointsAvailable } from '../../lib/training/curriculum.js';
-import { moduleKey as mKey, trainingText } from '../../lib/training/i18n-keys.js';
+import { COURSES, modulesFor, pointsAvailable, courseReference } from '../../lib/training/curriculum.js';
+import { courseKey as cKey, moduleKey as mKey, trainingText } from '../../lib/training/i18n-keys.js';
+import { KIOSK_GLOSSARY, glossaryKey } from '../../lib/training/kiosk-glossary.js';
+import { KioskButtonGlossary } from './KioskButtonGlossary';
 import { enterPractice, inPracticeMode, practiceBlockedByImpersonation } from '../../lib/training/practice';
 import { TOUR_START_EVENT, TOUR_MODULE_DONE_EVENT } from './TourHost';
 
@@ -27,6 +29,10 @@ export function ModuleList({ token, me }) {
   const [justCompleted, setJustCompleted] = useState([]);
   const [busyKey, setBusyKey] = useState(null);
   const [practiceError, setPracticeError] = useState('');
+  // Reference material open (the kiosk button glossary). Not a module: no
+  // progress row, no points — it is the thing you open when a guest is
+  // standing there asking what a button does.
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   const viewer = useMemo(() => ({
     role: me?.role,
@@ -179,7 +185,7 @@ export function ModuleList({ token, me }) {
         if (!modules.length) return null;
         return (
           <div key={course.key} style={{ marginBottom: 14 }}>
-            <div className="label" style={{ marginBottom: 6 }}>{course.title}</div>
+            <div className="label" style={{ marginBottom: 6 }}>{trainingText(t, cKey(course, 'title'), course.title)}</div>
             <div className="stack" style={{ gap: 6 }}>
               {modules.map((m) => {
                 const row = byKey.get(m.key);
@@ -239,10 +245,35 @@ export function ModuleList({ token, me }) {
                   </div>
                 );
               })}
+              {courseReference(course) === KIOSK_GLOSSARY.key && (
+                <div
+                  className="row-between"
+                  data-testid="course-reference-row"
+                  style={{
+                    alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                    padding: '10px 12px', borderRadius: 10,
+                    border: '1px dashed var(--border-2, #e6e0f2)',
+                    background: 'var(--surface-2, #f7f5fd)',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>
+                      {trainingText(t, glossaryKey('title'), KIOSK_GLOSSARY.title)}
+                    </div>
+                    <div className="ui-muted" style={{ fontSize: 12.5 }}>
+                      {trainingText(t, glossaryKey('summary'), KIOSK_GLOSSARY.summary)}
+                    </div>
+                  </div>
+                  <button type="button" className="button-subtle" onClick={() => setGlossaryOpen(true)}>
+                    {t('training.openReference', 'Open')}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         );
       })}
+      <KioskButtonGlossary open={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
     </section>
   );
 }

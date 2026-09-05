@@ -52,7 +52,7 @@ describe('curriculum integrity', () => {
   it('every module gate is a real tenant module', () => {
     // A typo here silently hides a module from everyone, forever.
     const known = new Set(['reservations', 'reports', 'settings', 'people', 'marketIntelligence',
-      'dashboard', 'quotes', 'planner', 'vehicles', 'customers', 'tolls', 'citations', 'maintenance']);
+      'dashboard', 'quotes', 'planner', 'vehicles', 'customers', 'tolls', 'citations', 'maintenance', 'kiosk']);
     for (const m of allModules()) {
       if (m.gate) expect(known, `${m.key} gates on an unknown module: ${m.gate}`).toContain(m.gate);
     }
