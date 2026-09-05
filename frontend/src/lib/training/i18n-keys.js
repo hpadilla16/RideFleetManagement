@@ -30,7 +30,18 @@ export function moduleKey(module, field) {
   return `${NS}.modules.${module?.key || 'unknown'}.${field}`;
 }
 
-/** `training.modules.<moduleKey>.steps.<anchor>.<field>` — title, body */
+/**
+ * `training.modules.<moduleKey>.steps.<anchor>.<field>` — title, body, and for
+ * the kiosk course's richer steps a dotted path: `callouts.0`, `check.question`,
+ * `check.options.A.text`, `check.options.A.why`.
+ *
+ * CALLOUTS ARE THE ONE POSITIONAL KEY HERE, on purpose. A callout is "what the
+ * numbered marker N on the drawing means" — its identity IS its number, the same
+ * number drawn on the figure — so reordering callouts without redrawing the
+ * figure would be wrong regardless of translation. The i18n test asserts the
+ * Spanish index set equals the curriculum's (no missing, no extras), which is
+ * the drift the positional key could otherwise hide.
+ */
 export function stepKey(module, step, field) {
   const mk = typeof module === 'string' ? module : module?.key;
   return `${NS}.modules.${mk || 'unknown'}.steps.${step?.anchor || 'unknown'}.${field}`;

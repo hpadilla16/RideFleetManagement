@@ -8,6 +8,9 @@ import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
 import { MODULE_DEFINITIONS, buildDefaultUserModuleAccess } from '../../lib/moduleAccess';
 
+/** The one module checkbox Ride University points a tour step at. */
+const MODULE_TOUR_ANCHOR = { module: 'kiosk' };
+
 const EMPTY_PERSON = {
   personType: 'EMPLOYEE',
   role: 'AGENT',
@@ -768,11 +771,27 @@ function Inner({ token, me, logout }) {
                 <div className="service-checks-grid">
                   {MODULE_DEFINITIONS.filter((item) => item.key !== 'tenants').map((item) => (
                     <label key={item.key} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={isModuleChecked(userModuleAccess, item.key)}
-                        onChange={(e) => setUserModuleAccess((current) => ({ ...current, [item.key]: e.target.checked }))}
-                      /> {item.label}
+                      {item.key === MODULE_TOUR_ANCHOR.module ? (
+                        // Ride University anchors the "give Valet access to the kiosk"
+                        // module (kiosk-grant-valet) on this one checkbox. A wrapper
+                        // with a literal attribute, so the anchor scanner counts
+                        // exactly one placement and no stray literal.
+                        <span data-tour="person-module-kiosk" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <input
+                            type="checkbox"
+                            checked={isModuleChecked(userModuleAccess, item.key)}
+                            onChange={(e) => setUserModuleAccess((current) => ({ ...current, [item.key]: e.target.checked }))}
+                          /> {item.label}
+                        </span>
+                      ) : (
+                        <>
+                          <input
+                            type="checkbox"
+                            checked={isModuleChecked(userModuleAccess, item.key)}
+                            onChange={(e) => setUserModuleAccess((current) => ({ ...current, [item.key]: e.target.checked }))}
+                          /> {item.label}
+                        </>
+                      )}
                     </label>
                   ))}
                 </div>

@@ -21,6 +21,24 @@
  *   RESERVATION_CHECKED_OUT  CheckoutSession.startedByUserId + finishedAt
  *   RESERVATION_CHECKED_IN   RentalAgreement.closedByUserId
  *   PAYMENT_RECORDED         ReservationPayment.recordedByUserId
+ *   KIOSK_ASSISTED_ID        KioskSession.assistUserId + idVerifiedAt, method
+ *                            STAFF_OVERRIDE (typed the license in, in person)
+ *   KIOSK_ASSISTED_NAME      same row, method STAFF_NAME_OVERRIDE (vouched for
+ *                            the name only). Two types, not one: they are two
+ *                            modules, and one act must not award both. assistGrantedAt
+ *                            is the wrong timestamp: it is CLEARED the moment the
+ *                            verify consumes the grant, so a proof read from it
+ *                            would vanish at exactly the moment it became true.
+ *   KIOSK_ACCESS_GRANTED     ModuleAccessAuditLog.actorUserId + changedAt, where
+ *                            `changed` contains {module:'kiosk', to:true}. This is
+ *                            the DEDICATED access-change record, not the generic
+ *                            AuditLog rejected above — one row per save, actor
+ *                            and tenant on it, indexed by changedAt.
+ *
+ * NOT PROVABLE, on purpose: a REMOTE override. Valet reaches this server as one
+ * service account, so KioskSession.assistUserId names the account, never the
+ * human agent. A module about remote help is therefore reading, with a check —
+ * anything else would award points to nobody or to the wrong someone.
  */
 
 export const VERIFY_TYPES = Object.freeze([
@@ -28,6 +46,9 @@ export const VERIFY_TYPES = Object.freeze([
   'RESERVATION_CHECKED_OUT',
   'RESERVATION_CHECKED_IN',
   'PAYMENT_RECORDED',
+  'KIOSK_ASSISTED_ID',
+  'KIOSK_ASSISTED_NAME',
+  'KIOSK_ACCESS_GRANTED',
 ]);
 
 /** Which field on which record proves each type — the one mapping, in one place. */
@@ -36,6 +57,26 @@ export const PROOF_SHAPE = Object.freeze({
   RESERVATION_CHECKED_OUT: { model: 'checkoutSession', actorField: 'startedByUserId', atField: 'finishedAt' },
   RESERVATION_CHECKED_IN: { model: 'rentalAgreement', actorField: 'closedByUserId', atField: 'closedAt' },
   PAYMENT_RECORDED: { model: 'reservationPayment', actorField: 'recordedByUserId', atField: 'paidAt' },
+  // `where` narrows by a column value; `match` is a pure predicate over the row
+  // for what a column filter cannot say (a JSON containment). Both optional.
+  KIOSK_ASSISTED_ID: {
+    model: 'kioskSession', actorField: 'assistUserId', atField: 'idVerifiedAt',
+    where: { field: 'idVerifyMethod', in: ['STAFF_OVERRIDE'] },
+  },
+  KIOSK_ASSISTED_NAME: {
+    model: 'kioskSession', actorField: 'assistUserId', atField: 'idVerifiedAt',
+    where: { field: 'idVerifyMethod', in: ['STAFF_NAME_OVERRIDE'] },
+  },
+  KIOSK_ACCESS_GRANTED: {
+    model: 'moduleAccessAuditLog', actorField: 'actorUserId', atField: 'changedAt',
+    // Per-PERSON grants only. The tenant-wide switch in Settings writes the
+    // same {module, to} shape with scope 'TENANT', and that is a different
+    // module (kiosk-grant-valet teaches People, not Settings). Repeated here,
+    // not only in the DB query, so the decision stays testable without one.
+    where: { field: 'scope', in: ['USER'] },
+    match: (row) => Array.isArray(row?.changed)
+      && row.changed.some((c) => c && c.module === 'kiosk' && c.to === true),
+  },
 });
 
 const time = (v) => {
@@ -74,6 +115,11 @@ export function findProof({ verifyType, records = [], userId, armedAt }) {
     // cannot prove anything — a checkout session that was started and never
     // finished is the live example.
     if (at === null || at < armed) continue;
+    // The right person at the right time is not enough when the same record
+    // also stands for something else: an in-person kiosk verify and a remote
+    // one share a row shape and differ only in the method column.
+    if (shape.where && !shape.where.in.includes(row[shape.where.field])) continue;
+    if (typeof shape.match === 'function' && !shape.match(row)) continue;
     return { proved: true, provenBy: row.id || null, at: new Date(at).toISOString() };
   }
   return miss;

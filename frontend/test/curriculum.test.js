@@ -1,14 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  COURSES,
-  TOUR_TRACKS,
-  allModules,
-  findModule,
-  modulesFor,
-  pointsAvailable,
-  stepsForTrack,
-  stepsForModule,
-} from '../src/lib/training/curriculum.js';
+import { COURSES, TOUR_TRACKS, allModules, findModule, modulesFor, pointsAvailable, stepsForTrack, stepsForModule } from '../src/lib/training/curriculum.js';
 
 const AGENT = { role: 'AGENT' };
 const ADMIN = { role: 'ADMIN' };
@@ -49,10 +40,18 @@ describe('curriculum integrity', () => {
     }
   });
 
+  it('situational modules stay out of the ONBOARDING track (onboarding: false)', () => {
+    // Deleting the filter in stepsForTrack would silently regrow an admin's
+    // first-day tour from ~33 to ~58 steps (Innovation, 2026-09-04).
+    const steps = stepsForTrack(TOUR_TRACKS.ONBOARDING, { role: 'ADMIN', isModuleEnabled: () => true });
+    expect(steps.some((s) => String(s.moduleKey).startsWith('kiosk-'))).toBe(false);
+    expect(modulesFor({ role: 'ADMIN', isModuleEnabled: () => true }).some((m) => m.key.startsWith('kiosk-')), 'but they stay in Ride University').toBe(true);
+  });
+
   it('every module gate is a real tenant module', () => {
     // A typo here silently hides a module from everyone, forever.
     const known = new Set(['reservations', 'reports', 'settings', 'people', 'marketIntelligence',
-      'dashboard', 'quotes', 'planner', 'vehicles', 'customers', 'tolls', 'citations', 'maintenance']);
+      'dashboard', 'quotes', 'planner', 'vehicles', 'customers', 'tolls', 'citations', 'maintenance', 'kiosk']);
     for (const m of allModules()) {
       if (m.gate) expect(known, `${m.key} gates on an unknown module: ${m.gate}`).toContain(m.gate);
     }

@@ -177,3 +177,82 @@ test('standing with nothing available does not divide by zero', () => {
   assert.equal(standing([], 0).percent, 0);
   assert.equal(standing(null, 50).percent, 0);
 });
+
+/* ───── Ride University · kiosk course (2026-09-04) ───── */
+
+test('kiosk: an IN-PERSON staff verify after arming proves KIOSK_ASSISTED_ID', () => {
+  const armedAt = new Date('2026-09-04T10:00:00Z');
+  const out = findProof({
+    verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt,
+    records: [{ id: 'ks1', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: 'STAFF_OVERRIDE' }],
+  });
+  assert.equal(out.proved, true);
+  assert.equal(out.provenBy, 'ks1');
+});
+
+test('kiosk: vouching for the NAME proves the name module — and NOT the manual-ID one (one act, one module)', () => {
+  const rec = [{ id: 'ks2', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: 'STAFF_NAME_OVERRIDE' }];
+  const armedAt = new Date('2026-09-04T10:00:00Z');
+  assert.equal(findProof({ verifyType: 'KIOSK_ASSISTED_NAME', userId: 'u1', armedAt, records: rec }).proved, true);
+  assert.equal(findProof({ verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt, records: rec }).proved, false, 'a name vouch is not a manual ID entry');
+  const typed = [{ id: 'ks9', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: 'STAFF_OVERRIDE' }];
+  assert.equal(findProof({ verifyType: 'KIOSK_ASSISTED_NAME', userId: 'u1', armedAt, records: typed }).proved, false, 'and a manual ID entry is not a name vouch');
+});
+
+test('kiosk: a REMOTE override never proves the in-person module, even with the same actor', () => {
+  // In production the remote actor is the Valet service account anyway; this
+  // pins that the METHOD is what decides, not the actor column alone.
+  for (const method of ['REMOTE_AGENT_OVERRIDE', 'REMOTE_AGENT_NAME_OVERRIDE', 'SCAN', 'SCAN_NAME_UPDATED', null]) {
+    const out = findProof({
+      verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt: new Date('2026-09-04T10:00:00Z'),
+      records: [{ id: 'ks3', assistUserId: 'u1', idVerifiedAt: '2026-09-04T10:30:00Z', idVerifyMethod: method }],
+    });
+    assert.equal(out.proved, false, `method ${method} must not prove it`);
+  }
+});
+
+test('kiosk: a verify that predates arming, or a grant that was never consumed, proves nothing', () => {
+  const armedAt = new Date('2026-09-04T10:00:00Z');
+  assert.equal(findProof({
+    verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt,
+    records: [{ id: 'old', assistUserId: 'u1', idVerifiedAt: '2026-09-04T09:00:00Z', idVerifyMethod: 'STAFF_OVERRIDE' }],
+  }).proved, false, 'before arming');
+  assert.equal(findProof({
+    verifyType: 'KIOSK_ASSISTED_ID', userId: 'u1', armedAt,
+    // unlocked, never verified: no idVerifiedAt
+    records: [{ id: 'open', assistUserId: 'u1', idVerifiedAt: null, idVerifyMethod: null, assistGrantedAt: '2026-09-04T10:30:00Z' }],
+  }).proved, false, 'a grant is not a verify');
+});
+
+test('kiosk admin: granting the kiosk module to a user proves KIOSK_ACCESS_GRANTED', () => {
+  const out = findProof({
+    verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt: new Date('2026-09-04T10:00:00Z'),
+    records: [{ id: 'mal1', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'tolls', from: true, to: false }, { module: 'kiosk', from: false, to: true }] }],
+  });
+  assert.equal(out.proved, true);
+  assert.equal(out.provenBy, 'mal1');
+});
+
+test('kiosk admin: REVOKING kiosk, or changing some other module, does not count', () => {
+  const armedAt = new Date('2026-09-04T10:00:00Z');
+  assert.equal(findProof({
+    verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt,
+    records: [{ id: 'x', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'kiosk', from: true, to: false }] }],
+  }).proved, false, 'revoke');
+  assert.equal(findProof({
+    verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt,
+    records: [{ id: 'y', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'tolls', from: false, to: true }] }],
+  }).proved, false, 'other module');
+  assert.equal(findProof({
+    verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt,
+    records: [{ id: 'z', scope: 'USER', actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: null }],
+  }).proved, false, 'malformed changed');
+});
+
+test('kiosk admin: the TENANT-wide switch in Settings is a different module — it does not prove the People one', () => {
+  const out = findProof({
+    verifyType: 'KIOSK_ACCESS_GRANTED', userId: 'admin1', armedAt: new Date('2026-09-04T10:00:00Z'),
+    records: [{ id: 't1', scope: 'TENANT', targetUserId: null, actorUserId: 'admin1', changedAt: '2026-09-04T10:05:00Z', changed: [{ module: 'kiosk', from: false, to: true }] }],
+  });
+  assert.equal(out.proved, false);
+});

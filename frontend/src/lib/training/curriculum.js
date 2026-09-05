@@ -32,6 +32,19 @@
  *   module.points — weighted by how expensive the task is to get wrong, not by
  *                   how long it takes.
  *   module.showcase — position in the convention track, or null to leave it out.
+ *   step.figure   — INSTEAD of a live element: the step draws a screen the tour
+ *                   cannot reach (the guest's iPad, the Valet console) from the
+ *                   figure registry. Still carries a unique `anchor` so keys,
+ *                   tests and progress have one identity to hold. `callouts`
+ *                   number what the drawing marks.
+ *   step.check    — a question the person must answer before the module
+ *                   closes. Wrong answers explain themselves and cost nothing.
+ *                   It is what makes a reading module more than a Next button.
+ *   module.onboarding — false keeps the module OUT of the ONBOARDING track (it
+ *                   stays in Ride University and the copilot). The kiosk
+ *                   situations are things you look up when they happen, not a
+ *                   first-day walkthrough — with them in, an admin's onboarding
+ *                   grew from ~33 to ~58 steps (Innovation, 2026-09-04).
  *   module.needsRecord — some walkthroughs live INSIDE a record (a
  *                   reservation's own page), so their anchors cannot exist
  *                   until one is open. This names where to go find one.
@@ -73,6 +86,15 @@ export const VERIFY = Object.freeze({
   RESERVATION_CHECKED_OUT: 'RESERVATION_CHECKED_OUT',
   RESERVATION_CHECKED_IN: 'RESERVATION_CHECKED_IN',
   PAYMENT_RECORDED: 'PAYMENT_RECORDED',
+  // Kiosk course (2026-09-04). Both are domain records with an actor:
+  //   KIOSK_ASSISTED_ID     KioskSession.assistUserId + idVerifiedAt, method STAFF_OVERRIDE
+  //   KIOSK_ASSISTED_NAME   same row, method STAFF_NAME_OVERRIDE — one act, one module
+  //   KIOSK_ACCESS_GRANTED  ModuleAccessAuditLog.actorUserId, changed ∋ {kiosk → true}
+  // A REMOTE override is deliberately not a verify type: Valet reaches the
+  // server as one service account, so the record cannot name the human.
+  KIOSK_ASSISTED_ID: 'KIOSK_ASSISTED_ID',
+  KIOSK_ASSISTED_NAME: 'KIOSK_ASSISTED_NAME',
+  KIOSK_ACCESS_GRANTED: 'KIOSK_ACCESS_GRANTED',
 });
 
 /**
@@ -600,6 +622,398 @@ export const COURSES = [
       },
     ],
   },
+
+  // -------------------------------------------------------------------------
+  // The self-service kiosk (Hector, 2026-09-04): one module per SITUATION a
+  // guest gets into on the iPad, walked step by step — what they see, what the
+  // employee does, what happens when it goes sideways. Nearly all of it happens
+  // on screens the tour cannot spotlight, so the steps are drawn (`figure`),
+  // and each module closes with a check. The course also owns the button
+  // glossary (`reference`), which is not a module: no points, always open.
+  {
+    key: 'kiosk',
+    title: 'Self-service kiosk',
+    summary: 'What happens on the iPad, what the guest sees, and what to do when they get stuck.',
+    reference: 'kiosk-buttons',
+    modules: [
+      {
+        key: 'kiosk-cant-scan',
+        title: 'The guest cannot scan their license',
+        summary: 'From “I can’t — get help” to verifying the ID yourself with your PIN.',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'kiosk',
+        onboarding: false,
+        kind: 'OPPORTUNISTIC',
+        verify: { type: VERIFY.KIOSK_ASSISTED_ID },
+        points: 15,
+        showcase: null,
+        gotcha: 'Your PIN opens a ten-minute window — it does not bend a rule. Age and license validity run exactly as they do for a scan; the name check is the one thing it skips, because you are holding the physical license in front of the guest and that is what your PIN certifies. If the real date of birth fails, the kiosk is telling the truth: “End assist” and let the counter decide.',
+        steps: [
+          {
+            anchor: 'kiosk-fig-scan-trouble', figure: 'scan-trouble',
+            title: 'Two failed scans',
+            body: 'The guest is on “Scan your driver’s license”, barcode side up, and the reader is not catching it. Glare, a worn card, a laminated copy — it happens. Before anyone is called, the screen already offers two ways around it.',
+            callouts: [
+              '“Upload barcode photo” — a still photo is often readable when the live camera is not.',
+              '“Take a photo instead” reads the FRONT of the license instead, then asks the guest to confirm what it read.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-escalated', figure: 'escalated',
+            title: 'They ask for a person',
+            body: 'The guest taps “I can\'t do this — get help”. The kiosk switches to “A team member is on the way” and notifies the counter. Nothing is lost: the reservation, the step, everything they entered stays in the session.',
+            callouts: [
+              'If they tap 🎧 Help instead, the help chat opens and a Valet agent takes over remotely — that is its own module.',
+              'The small “Staff assist” button at the bottom is your door in.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-staff-pin', figure: 'staff-pin',
+            title: 'Unlock with your PIN',
+            body: 'Tap “Staff assist”, pick your name and enter your PIN on the keypad. “Unlock” opens a ten-minute grant in your name — the chip shows who and how long, and it closes on its own.',
+            callouts: [
+              'Your name greyed out means you have no PIN yet — set one in your profile first.',
+              'Wrong PINs, wrong codes and failed lookups all feed one counter for this kiosk — the screen says how many attempts are left. At zero it locks for fifteen minutes.',
+              '“Cancel — back to guest” closes the panel without a grant.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-staff-manual-id', figure: 'staff-manual-id',
+            title: 'Type the license in, photograph both sides',
+            body: 'Fill in first name, last name, date of birth and expiry exactly as printed. Then “Capture” or “Upload” the FRONT and the BACK of the physical license — both are required, and they are stored with the rental.',
+            callouts: [
+              'The photos are the evidence that a person saw the card. Without both, “Verify & continue” stays off.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-staff-verify', figure: 'staff-verify',
+            title: 'Verify and continue — two rules still run',
+            body: 'Two checks, not three: the age requirement and a license valid through the return date. The name check is deliberately NOT run here — you are holding the physical license in front of the guest, and that is exactly what your PIN certifies. A typo can be corrected and verified again. A real failure cannot be talked past.',
+            callouts: [
+              'A red mark here is the kiosk doing its job — check the fields for a typo first.',
+              '“Verify & continue” runs the two checks again with what you typed.',
+              '“End assist” closes without verifying; the rental is then the counter’s call.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-guest-notice-done', figure: 'guest-notice-done',
+            title: 'What the guest sees now',
+            body: '“ID verified by staff” hands control back with “Continue as guest”. From then on a green notice reads “Your ID was confirmed by Ana Rivera from our team.” — the name is your real user account, and it stays on screen for the rest of the check-in.',
+            callouts: [
+              'The record keeps who, when, and that it was in person — distinct from a remote override.',
+            ],
+          },
+          {
+            anchor: 'kiosk-check-cant-scan',
+            title: 'Quick check',
+            body: 'One question before this module closes.',
+            check: {
+              question: 'You typed the license in and the kiosk says the guest does not meet the minimum age. What do you do?',
+              options: [
+                { key: 'A', text: 'Re-enter a “corrected” date of birth so it passes', why: 'That is falsifying a rental record under your own PIN. The date of birth on the license is the date of birth.' },
+                { key: 'B', text: 'Check for a typo; if the date is real, end the assistance and let the counter decide', correct: true, why: 'Nothing skips the rules — not your PIN, not a remote agent. A real failure is the kiosk doing its job.' },
+                { key: 'C', text: 'Ask Valet to approve it remotely', why: 'Remote agents run the very same checks. There is no override for age or validity anywhere in the system.' },
+              ],
+            },
+          },
+        ],
+      },
+
+      {
+        key: 'kiosk-name-mismatch',
+        title: 'The name on the license does not match',
+        summary: 'The guest’s own way out (a 6-digit code) and yours (certifying the license).',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'kiosk',
+        onboarding: false,
+        kind: 'OPPORTUNISTIC',
+        verify: { type: VERIFY.KIOSK_ASSISTED_NAME },
+        points: 10,
+        showcase: null,
+        gotcha: 'When you confirm the name you are certifying, under your own account, that you looked at the physical license and it belongs to this person. When the guest can prove it themselves with the code, let them — it leaves the cleaner trail.',
+        steps: [
+          {
+            anchor: 'kiosk-fig-name-mismatch', figure: 'name-mismatch',
+            title: 'The license read fine — the name did not match',
+            body: 'Age and validity pass; only the name check is red. Common causes: a maiden name, a second surname, a booking made by a spouse. The kiosk does not fail the guest here — it offers two ways to prove the reservation is theirs.',
+            callouts: [
+              'Two green, one red: this is a NAME problem, not an ID problem.',
+              '“Send my code” — the guest proves it themselves (next step).',
+              '“Connect me to a team member” — a person confirms it, in person or from Valet.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-name-code', figure: 'name-code',
+            title: 'The guest proves it with a code',
+            body: 'A 6-digit code goes to the email or phone ON THE RESERVATION — never to a number the guest types now. Entering it updates the reservation to the license name and the check-in continues. It expires in ten minutes.',
+            callouts: [
+              '“Confirm code” — wrong codes count against the kiosk’s shared attempt counter; the screen says how many are left before it locks.',
+              '“Resend code” has a cooldown so the inbox is not flooded.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-staff-name-confirm', figure: 'staff-name-confirm',
+            title: 'Or you confirm it, in person',
+            body: 'Unlock with your PIN as usual. Instead of the full form the kiosk shows both names side by side. “I verified this license matches the guest” records that YOU looked at the card and vouched — the rental carries your name on that decision.',
+            callouts: [
+              'License name versus reservation name, exactly as each system has them.',
+              'This button is a certification, not a shortcut. If you did not see the card, do not press it.',
+            ],
+          },
+          {
+            anchor: 'kiosk-check-name-mismatch',
+            title: 'Quick check',
+            body: 'One question before this module closes.',
+            check: {
+              question: 'The guest says the reservation was made by her husband, who is not here. The license is hers. What is the right path?',
+              options: [
+                { key: 'A', text: 'Press “I verified this license matches the guest” — it is her license', why: 'Her license is real, but the reservation is not in her name. Certifying the name does not put a driver on someone else’s booking.' },
+                { key: 'B', text: 'Have the guest use “Send my code” — the code goes to the contact on the reservation', correct: true, why: 'If the husband shares the code, the booking updates to her name with his consent on record. If he cannot, the counter decides the rental.' },
+                { key: 'C', text: 'Tell her to start over and search by her own name', why: 'There is no reservation under her name to find. Starting over only erases what she entered.' },
+              ],
+            },
+          },
+        ],
+      },
+
+      {
+        key: 'kiosk-valet-help',
+        title: 'The guest asks for help by chat and Valet takes it',
+        summary: 'What the guest sees, what a remote agent can and cannot do, and why the keys are yours to hand over.',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'kiosk',
+        onboarding: false,
+        kind: 'ON_DEMAND',
+        verify: null,
+        points: 10,
+        showcase: null,
+        gotcha: 'When Valet finishes, the guest still has to walk to you for the key. The green notice on their screen is your cue — have it ready.',
+        steps: [
+          {
+            anchor: 'kiosk-fig-help-chat', figure: 'help-chat',
+            title: '🎧 Help opens a chat with a Valet agent',
+            body: 'The guest can tap Help on any screen. A Valet agent sees which step they are on and what has been verified — never the license photos, never card details. The chat sits over the check-in without ending it.',
+            callouts: [
+              'Help is always in the corner. It never ends the session.',
+              'Closing the chat asks “End help chat?” — the check-in stays where it was.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-guest-notice-now', figure: 'guest-notice-now',
+            title: 'While the agent works, the guest is told',
+            body: 'A violet notice reads “Ana Rivera from our team is helping you with this check-in right now.” for as long as the agent holds a grant (ten minutes, then it closes by itself). The name is the REAL user account behind the action — never a name the console typed. A service account shows “Someone from our team is helping you with this check-in right now.”.',
+            callouts: [
+              'Violet = happening now. It turns green (“your ID was confirmed… remotely”) once the override is applied.',
+              '“✓ Your agent updated your check-in” confirms an action landed.',
+              'Attempts to skip signing or paying from the chat are refused on screen.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-remote-limits', figure: 'remote-limits',
+            title: 'What a remote agent can — and cannot — do',
+            body: 'Can: unlock the session, enter the license by hand from the photos already on file, confirm the name. Cannot: skip verification, sign, pay — and cannot open the car. The remote unlock goes to a lockbox that does not exist yet, so the agent tells the guest to collect the keys at the front desk.',
+            callouts: [
+              'Everything here runs the same rules as the kiosk itself.',
+              'Signature and payment are the guest’s alone, at the kiosk.',
+              'Keys: “Please see a team member at the counter to pick up your keys.” — that is you.',
+            ],
+          },
+          {
+            anchor: 'kiosk-check-valet-keys',
+            title: 'Quick check',
+            body: 'One question before this module closes.',
+            check: {
+              question: 'The guest has signed, and a Valet agent confirmed their identity remotely. Who hands over the key?',
+              options: [
+                { key: 'A', text: 'Valet unlocks the car remotely', why: 'There is no remote unlock. That path leads to a lockbox the location does not have yet.' },
+                { key: 'B', text: 'The front desk — the agent tells the guest to come collect it', correct: true, why: 'Remote help ends at the screen. The car changes hands at the counter, with you.' },
+                { key: 'C', text: 'The kiosk prints a pickup code', why: 'The kiosk prints nothing. The “All set” screen says “Please see a team member at the counter to pick up your keys.”.' },
+              ],
+            },
+          },
+        ],
+      },
+
+      {
+        key: 'kiosk-payment',
+        title: 'The payment fails or the kiosk does not move on',
+        summary: 'Coming soon at your location: the link and QR, and what to do when the screen does not advance.',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'kiosk',
+        onboarding: false,
+        kind: 'ON_DEMAND',
+        verify: null,
+        points: 5,
+        showcase: null,
+        gotcha: 'Never charge by hand what the kiosk is charging. A “stuck” screen is usually a payment that landed a few seconds ago — look in Reservations → Payments before touching the terminal. And if two payments ever land (an old QR left open on the phone), refund the extra one; never re-charge.',
+        steps: [
+          {
+            anchor: 'kiosk-fig-pay-qr', figure: 'pay-qr',
+            title: 'One link, one QR, and the kiosk waits',
+            body: '“Show payment code” creates ONE payment link to the tenant’s hosted payment page and shows it as a QR. The guest scans it and pays on their phone. The kiosk shows “Waiting for payment…” and moves to the signature by itself the moment the server confirms. Pressing “Show payment code” again with the same total shows the SAME link.',
+            callouts: [
+              'The QR is a link to the payment page — the kiosk never sees the card.',
+              '“Waiting for payment…” polls every few seconds. Give it ten to fifteen. A declined card is retried by the guest on their phone, from this same QR.',
+              'What is charged today versus the refundable hold on the card.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-pay-failed', figure: 'pay-failed',
+            title: 'If the total changes',
+            body: '“Change protection & extras” goes back to extras. A new total mints a NEW link and QR; the old one leaves the kiosk screen but is STILL payable if the guest left it open on their phone — there is no way to cancel it at the gateway. Have the guest close the old payment page before scanning the new code. If two payments land, both show under Reservations → Payments: refund the extra one, never re-charge.',
+            callouts: [
+              '“Try again” belongs to the sandbox/failed screen — it is not a link action. Same-total reuse comes from pressing “Show payment code” again.',
+              '“Change protection & extras” — a new total means a new link; the old one is off the screen, not dead.',
+            ],
+          },
+          {
+            anchor: 'kiosk-check-payment',
+            title: 'Quick check',
+            body: 'One question before this module closes.',
+            check: {
+              question: 'The guest says they paid on their phone, but the kiosk still shows “Waiting for payment…”. What do you do?',
+              options: [
+                { key: 'A', text: 'Charge them on the counter terminal so they can move on', why: 'That is the double charge. The kiosk’s payment may have landed seconds ago — the screen just has not polled yet.' },
+                { key: 'B', text: 'Wait ten to fifteen seconds, then check Reservations → Payments', correct: true, why: 'If the payment is there, the kiosk will catch up. If it is not, the guest retries on their phone from the same QR — or you press “Show payment code” again, which shows the same link for the same total.' },
+                { key: 'C', text: 'Tap “Start over” and begin the check-in again', why: 'That erases the session. The payment, if it landed, stays attached to the reservation — but the guest redoes everything.' },
+              ],
+            },
+          },
+        ],
+      },
+
+      {
+        key: 'kiosk-brakes',
+        title: '“Still there?”, “Not my reservation”, and a locked kiosk',
+        summary: 'The three ways the kiosk stops itself: inactivity, a wrong match, and fifteen minutes of lockout.',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'kiosk',
+        onboarding: false,
+        kind: 'ON_DEMAND',
+        verify: null,
+        points: 5,
+        showcase: null,
+        gotcha: 'A locked kiosk is not broken. An admin clears it on the spot by issuing a new pairing code (Ride Fleet → Kiosks); with no admin at hand, finish the guest at the counter — in fifteen minutes it is back by itself. Restarting the iPad changes nothing: the lock lives on the server.',
+        steps: [
+          {
+            anchor: 'kiosk-fig-idle', figure: 'idle',
+            title: '“Are you still there?” — the privacy reset',
+            body: 'After a pause with no touch, the kiosk asks. “I\'m still here — continue” keeps everything. If nobody answers, the countdown reaches zero and the session resets, clearing what was entered — a stranger walking up must never see the last guest’s reservation.',
+            callouts: [
+              '“I\'m still here — continue” keeps every field filled so far.',
+              '“Start over” clears it all on purpose — there is no undo.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-not-mine', figure: 'not-mine',
+            title: '“This isn\'t my reservation”',
+            body: 'The summary shows driver, dates and class before anything else happens. If it is the wrong one, “This isn\'t my reservation” goes back to the search without spending an attempt. Lookups by number have a limited number of tries — the search screen says how many are left — and once spent, the kiosk pauses searches for a few minutes.',
+            callouts: [
+              '“That\'s me — continue” is the guest confirming the match.',
+              '“This isn\'t my reservation” is free — it does not count as a failed attempt.',
+            ],
+          },
+          {
+            anchor: 'kiosk-fig-locked', figure: 'locked',
+            title: 'Locked for fifteen minutes',
+            body: 'Too many wrong PINs, wrong codes or failed lookups, and the kiosk pauses staff unlock and searches. It is protecting the guest data on it. Two ways out: an admin issues a new pairing code from Ride Fleet → Kiosks and the lock clears immediately — or you wait it out and finish the guest at the counter.',
+            callouts: [
+              'There is no timer on screen — the lock simply lifts by itself after fifteen minutes.',
+              'The screen itself says it: an admin can issue a new pairing code to clear it right away.',
+            ],
+          },
+          {
+            anchor: 'kiosk-check-locked',
+            title: 'Quick check',
+            body: 'One question before this module closes.',
+            check: {
+              question: 'The kiosk shows “This kiosk is temporarily locked” after a colleague ran its attempt counter down with wrong PINs. A guest is waiting and no admin is around. What do you do?',
+              options: [
+                { key: 'A', text: 'Keep trying PINs until one works', why: 'While locked, every attempt is refused before it is even counted — it does nothing except keep the guest standing there.' },
+                { key: 'B', text: 'Finish the guest at the counter; the kiosk unlocks itself in fifteen minutes — or an admin clears it now with a new pairing code', correct: true, why: 'The lockout is protection, not a fault. The counter does everything the kiosk does, and Ride Fleet → Kiosks → new pairing code clears it instantly when an admin is available.' },
+                { key: 'C', text: 'Restart the iPad', why: 'The lock lives on the server, not the tablet. A restart changes nothing and loses the guest’s session.' },
+              ],
+            },
+          },
+        ],
+      },
+
+      {
+        key: 'kiosk-done-keys',
+        title: 'They signed: keys, contract and the photo walk-around',
+        summary: 'The “All set!” screen — where the key is, what arrived by email, and the inspection link.',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'kiosk',
+        onboarding: false,
+        kind: 'ON_DEMAND',
+        verify: null,
+        points: 5,
+        showcase: null,
+        gotcha: 'The screen resets itself after a 30-second countdown. If the guest wants a printed contract, print it from the reservation — the kiosk cannot.',
+        steps: [
+          {
+            anchor: 'kiosk-fig-done', figure: 'done',
+            title: '“All set!” — three things to point at',
+            body: 'Keys: “Please see a team member at the counter to pick up your keys.” Contract and receipt: already in their email. Before leaving: a QR (or emailed link) to photo-document the car’s condition — the same inspection the counter would do, done by the guest on their phone.',
+            callouts: [
+              'Keys are handed by you, at the counter — unless your location is set to Lockbox in Ride Fleet → Kiosks, in which case the screen sends the guest to the lockbox instead.',
+              'Contract and receipt went to the email on the reservation.',
+              'The inspection link is how damage disputes are settled later — encourage it.',
+            ],
+          },
+          {
+            anchor: 'kiosk-check-done',
+            title: 'Quick check',
+            body: 'One question before this module closes.',
+            check: {
+              question: 'The guest at “All set!” asks for a printed copy of the contract. What do you do?',
+              options: [
+                { key: 'A', text: 'Tap the screen before it resets and print from the kiosk', why: 'The kiosk has no printer and no print button. The “All set!” screen only resets.' },
+                { key: 'B', text: 'Print it from the reservation on your own screen', correct: true, why: 'Every signed agreement is on the reservation. The kiosk already emailed it; you can print it.' },
+                { key: 'C', text: 'Tell them it is email-only', why: 'It is in their email, but a printed copy is a normal request — and you can fulfil it in seconds.' },
+              ],
+            },
+          },
+        ],
+      },
+
+      {
+        key: 'kiosk-grant-valet',
+        title: 'Give Valet access to the kiosk',
+        summary: 'People → the Valet service account → the Kiosk module. Without it, Valet cannot see kiosk sessions.',
+        roles: ['ADMIN', 'SUPER_ADMIN'],
+        gate: 'kiosk',
+        onboarding: false,
+        kind: 'OPPORTUNISTIC',
+        needsRecord: '/people',
+        needsRecordLabel: 'the Valet service account in People',
+        verify: { type: VERIFY.KIOSK_ACCESS_GRANTED },
+        points: 5,
+        showcase: null,
+        gotcha: 'Two switches, not one: the Kiosk module must be on for the company (Settings) AND ticked on the service account. Access is cached per user for a few minutes, so a change may take a moment to reach Valet.',
+        steps: [
+          {
+            anchor: 'person-module-kiosk',
+            title: 'Tick “Kiosk” on the Valet service account',
+            body: 'Open the Valet service account in People, scroll to User Module Access, tick Kiosk and save. This is what lets a Valet agent see where a guest is stuck and help from the console. Every change here is recorded with your name.',
+          },
+          {
+            anchor: 'kiosk-check-grant',
+            title: 'Quick check',
+            body: 'One question before this module closes.',
+            check: {
+              question: 'Valet reports “we cannot see the kiosk sessions” for a new location. Kiosk is ticked on the service account. What else can it be?',
+              options: [
+                { key: 'A', text: 'The Kiosk module is off for the company in Settings — the user tick does nothing on its own', correct: true, why: 'Tenant module settings apply on top of per-user access. Both must be on.' },
+                { key: 'B', text: 'Valet needs a PIN like an employee', why: 'PINs are for in-person unlock at the kiosk. Remote access is the service account plus the module.' },
+                { key: 'C', text: 'Each kiosk must be paired to Valet individually', why: 'Pairing binds an iPad to the location. Valet reads sessions through the module, not through pairing.' },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -652,6 +1066,7 @@ export function stepsForTrack(track, viewer = {}) {
       .flatMap((m) => (m.steps || []).map((s) => ({ ...s, moduleKey: m.key, moduleTitle: m.title })));
   }
   return modulesFor(viewer)
+    .filter((m) => m.onboarding !== false)
     .flatMap((m) => (m.steps || []).map((s) => ({ ...s, moduleKey: m.key, moduleTitle: m.title })));
 }
 
@@ -705,6 +1120,16 @@ export function recordScopedRunEnd(steps, startIndex) {
     end = i;
   }
   return end;
+}
+
+/** Courses that carry reference material (a glossary) beside their modules. */
+export function courseReference(course) {
+  return course?.reference || null;
+}
+
+/** Is this step drawn or asked, rather than pointed at an element on a page? */
+export function isVirtualStep(step) {
+  return !!(step && (step.figure || step.check));
 }
 
 /** The steps of one module, for the guided-practice launcher. */

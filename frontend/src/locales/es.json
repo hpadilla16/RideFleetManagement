@@ -1066,6 +1066,10 @@
       "running-it": {
         "title": "Administrando la operación",
         "summary": "Se configura pocas veces, y sale caro hacerlo mal."
+      },
+      "kiosk": {
+        "title": "Kiosk de autoservicio",
+        "summary": "Qué pasa en el iPad, qué ve el huésped, y qué hacer cuando se tranca."
       }
     },
     "modules": {
@@ -1322,6 +1326,355 @@
             "body": "Los clientes que recogen en una sede con tracker activo reciben un enlace personal y con expiración por email y SMS. Ven la guagua moverse en un mapa en vivo, saben exactamente dónde pararse, y con un toque solicitan el pickup — que aparece en esta pantalla para el equipo de piso. Los toques y llamadas repetidas se funden en la misma solicitud: un cliente ansioso es UNA guagua, no tres."
           }
         }
+      },
+      "kiosk-cant-scan": {
+        "title": "El huésped no puede escanear su licencia",
+        "summary": "Del «No puedo — pedir ayuda» a verificar el ID tú mismo con tu PIN.",
+        "gotcha": "Tu PIN abre una ventana de diez minutos — no dobla ninguna regla. Edad y validez de la licencia corren exactamente igual que con un escaneo; la comprobación del nombre es lo único que se salta, porque tú tienes la licencia física frente al huésped y eso es justo lo que tu PIN certifica. Si la fecha de nacimiento real no pasa, el kiosk está diciendo la verdad: «Terminar asistencia» y que el counter decida.",
+        "steps": {
+          "kiosk-fig-scan-trouble": {
+            "title": "Dos escaneos fallidos",
+            "body": "El huésped está en «Escanea tu licencia de conducir», con el código de barras hacia la cámara, y el lector no lo agarra. Reflejo, tarjeta gastada, copia laminada — pasa. Antes de llamar a nadie, la pantalla ya ofrece dos salidas.",
+            "callouts": {
+              "0": "«Subir foto del código de barras» — una foto fija muchas veces se lee cuando la cámara en vivo no.",
+              "1": "«Tomar una foto» lee el FRENTE de la licencia, y luego le pide al huésped confirmar lo que leyó."
+            }
+          },
+          "kiosk-fig-escalated": {
+            "title": "Piden a una persona",
+            "body": "El huésped toca «No puedo — pedir ayuda». El kiosk cambia a «Un miembro del equipo va en camino» y avisa al counter. No se pierde nada: la reservación, el paso y todo lo que entró se quedan en la sesión.",
+            "callouts": {
+              "0": "Si en vez de eso toca 🎧 Ayuda, se abre el chat y un agente de Valet toma el caso remoto — ese es otro módulo.",
+              "1": "El botón pequeño «Asistencia del personal» de abajo es tu puerta de entrada."
+            }
+          },
+          "kiosk-fig-staff-pin": {
+            "title": "Desbloquea con tu PIN",
+            "body": "Toca «Asistencia del personal», escoge tu nombre y entra tu PIN en el teclado. «Desbloquear» abre un permiso de diez minutos a tu nombre — el chip dice quién y cuánto queda, y se cierra solo.",
+            "callouts": {
+              "0": "Tu nombre en gris significa que todavía no tienes PIN — configúralo primero en tu perfil.",
+              "1": "PIN incorrectos, códigos incorrectos y búsquedas fallidas alimentan un solo contador de este kiosk — la pantalla dice cuántos intentos quedan. En cero, se bloquea quince minutos.",
+              "2": "«Cancelar — volver al cliente» cierra el panel sin permiso."
+            }
+          },
+          "kiosk-fig-staff-manual-id": {
+            "title": "Teclea la licencia y fotografía ambos lados",
+            "body": "Llena nombre, apellido, fecha de nacimiento y expiración exactamente como están impresos. Luego «Capturar» o «Subir» el FRENTE y el ATRÁS de la licencia física — las dos son obligatorias y se guardan con la renta.",
+            "callouts": {
+              "0": "Las fotos son la evidencia de que una persona vio la tarjeta. Sin las dos, «Verificar y continuar» sigue apagado."
+            }
+          },
+          "kiosk-fig-staff-verify": {
+            "title": "Verificar y continuar — dos reglas siguen corriendo",
+            "body": "Dos comprobaciones, no tres: el requisito de edad y una licencia válida hasta la fecha de devolución. La comprobación del nombre NO se corre aquí a propósito — tú tienes la licencia física frente al huésped, y eso es exactamente lo que tu PIN certifica. Un error de tecleo se corrige y se verifica otra vez. Un fallo real no se negocia.",
+            "callouts": {
+              "0": "Una marca roja aquí es el kiosk haciendo su trabajo — revisa primero si tecleaste mal.",
+              "1": "«Verificar y continuar» corre las dos comprobaciones otra vez con lo que escribiste.",
+              "2": "«Terminar asistencia» cierra sin verificar; la renta pasa a ser decisión del counter."
+            }
+          },
+          "kiosk-fig-guest-notice-done": {
+            "title": "Lo que ve el huésped ahora",
+            "body": "«ID verificado por el personal» devuelve el control con «Continuar como cliente». Desde ahí, un aviso verde dice «Ana Rivera, de nuestro equipo, confirmó tu identificación» — el nombre es tu usuario real, y se queda en pantalla el resto del check-in.",
+            "callouts": {
+              "0": "El registro guarda quién, cuándo, y que fue en persona — distinto de un override remoto."
+            }
+          },
+          "kiosk-check-cant-scan": {
+            "title": "Chequeo rápido",
+            "body": "Una pregunta antes de cerrar este módulo.",
+            "check": {
+              "question": "Tecleaste la licencia y el kiosk dice que el huésped no cumple la edad mínima. ¿Qué haces?",
+              "options": {
+                "A": {
+                  "text": "Vuelvo a entrar una fecha de nacimiento «corregida» para que pase",
+                  "why": "Eso es falsificar un registro de renta bajo tu propio PIN. La fecha de nacimiento de la licencia es la fecha de nacimiento."
+                },
+                "B": {
+                  "text": "Reviso si tecleé mal; si la fecha es real, termino la asistencia y que el counter decida",
+                  "why": "Nada salta las reglas — ni tu PIN, ni un agente remoto. Un fallo real es el kiosk haciendo su trabajo."
+                },
+                "C": {
+                  "text": "Le pido a Valet que lo apruebe remoto",
+                  "why": "Los agentes remotos corren exactamente las mismas comprobaciones. No existe un override de edad o validez en ningún lugar del sistema."
+                }
+              }
+            }
+          }
+        }
+      },
+      "kiosk-name-mismatch": {
+        "title": "El nombre de la licencia no coincide",
+        "summary": "La salida del propio huésped (un código de 6 dígitos) y la tuya (certificar la licencia).",
+        "gotcha": "Cuando confirmas el nombre estás certificando, bajo tu propia cuenta, que miraste la licencia física y que pertenece a esta persona. Cuando el huésped puede probarlo él mismo con el código, déjalo — deja el rastro más limpio.",
+        "steps": {
+          "kiosk-fig-name-mismatch": {
+            "title": "La licencia se leyó bien — el nombre no coincidió",
+            "body": "Edad y validez pasan; solo la comprobación del nombre está en rojo. Causas comunes: apellido de soltera, segundo apellido, una reservación hecha por el cónyuge. El kiosk no rechaza al huésped aquí — le ofrece dos formas de probar que la reservación es suya.",
+            "callouts": {
+              "0": "Dos verdes, uno rojo: esto es un problema de NOMBRE, no de ID.",
+              "1": "«Enviar mi código» — el huésped lo prueba él mismo (siguiente paso).",
+              "2": "«Conéctame con el equipo» — una persona lo confirma, en persona o desde Valet."
+            }
+          },
+          "kiosk-fig-name-code": {
+            "title": "El huésped lo prueba con un código",
+            "body": "Un código de 6 dígitos va al email o teléfono DE LA RESERVACIÓN — nunca a un número que el huésped escriba ahora. Al entrarlo, la reservación se actualiza al nombre de la licencia y el check-in continúa. Expira en diez minutos.",
+            "callouts": {
+              "0": "«Confirmar código» — los códigos incorrectos cuentan contra el contador compartido de intentos del kiosk; la pantalla dice cuántos quedan antes de bloquearse.",
+              "1": "«Reenviar» tiene espera para no inundar la bandeja."
+            }
+          },
+          "kiosk-fig-staff-name-confirm": {
+            "title": "O lo confirmas tú, en persona",
+            "body": "Desbloquea con tu PIN como siempre. En vez del formulario completo, el kiosk muestra los dos nombres lado a lado. «Verifiqué que esta licencia es del cliente» registra que TÚ miraste la tarjeta y diste fe — la renta lleva tu nombre en esa decisión.",
+            "callouts": {
+              "0": "Nombre en la licencia versus nombre en la reservación, exactamente como cada sistema los tiene.",
+              "1": "Este botón es una certificación, no un atajo. Si no viste la tarjeta, no lo toques."
+            }
+          },
+          "kiosk-check-name-mismatch": {
+            "title": "Chequeo rápido",
+            "body": "Una pregunta antes de cerrar este módulo.",
+            "check": {
+              "question": "La huésped dice que la reservación la hizo su esposo, que no está. La licencia es de ella. ¿Cuál es el camino correcto?",
+              "options": {
+                "A": {
+                  "text": "Tocar «Verifiqué que esta licencia es del cliente» — la licencia es de ella",
+                  "why": "Su licencia es real, pero la reservación no está a su nombre. Certificar el nombre no pone a un conductor en la reservación de otra persona."
+                },
+                "B": {
+                  "text": "Que la huésped use «Enviar mi código» — el código va al contacto de la reservación",
+                  "why": "Si el esposo comparte el código, la reservación pasa a nombre de ella con su consentimiento registrado. Si no puede, el counter decide la renta."
+                },
+                "C": {
+                  "text": "Decirle que empiece de nuevo y busque por su propio nombre",
+                  "why": "No hay ninguna reservación a su nombre que encontrar. Empezar de nuevo solo borra lo que ya entró."
+                }
+              }
+            }
+          }
+        }
+      },
+      "kiosk-valet-help": {
+        "title": "El huésped pide ayuda por el chat y Valet lo atiende",
+        "summary": "Qué ve el huésped, qué puede y qué no puede hacer un agente remoto, y por qué las llaves las entregas tú.",
+        "gotcha": "Cuando Valet termina, el huésped todavía tiene que caminar hasta ti por la llave. El aviso verde en su pantalla es tu señal — tenla lista.",
+        "steps": {
+          "kiosk-fig-help-chat": {
+            "title": "🎧 Ayuda abre un chat con un agente de Valet",
+            "body": "El huésped puede tocar Ayuda en cualquier pantalla. Un agente de Valet ve en qué paso está y qué se ha verificado — nunca las fotos de la licencia, nunca datos de tarjeta. El chat se pone encima del check-in sin terminarlo.",
+            "callouts": {
+              "0": "Ayuda siempre está en la esquina. Nunca termina la sesión.",
+              "1": "Cerrar el chat pregunta «¿Cerrar el chat de ayuda?» — el check-in se queda donde estaba."
+            }
+          },
+          "kiosk-fig-guest-notice-now": {
+            "title": "Mientras el agente trabaja, al huésped se le avisa",
+            "body": "Un aviso violeta dice «Ana Rivera, de nuestro equipo, te está ayudando con este check-in ahora mismo» mientras el agente tenga permiso (diez minutos; luego se cierra solo). El nombre es la cuenta REAL detrás de la acción — nunca un nombre que la consola escriba. Una cuenta de servicio muestra «alguien de nuestro equipo».",
+            "callouts": {
+              "0": "Violeta = está pasando ahora. Se pone verde («confirmó tu identificación… de forma remota») cuando el override se aplica.",
+              "1": "«✓ Tu agente actualizó tu check-in» confirma que una acción aterrizó.",
+              "2": "Los intentos de saltar firma o pago desde el chat se rechazan en pantalla."
+            }
+          },
+          "kiosk-fig-remote-limits": {
+            "title": "Qué puede — y qué no puede — hacer un agente remoto",
+            "body": "Puede: desbloquear la sesión, entrar la licencia a mano desde las fotos ya en archivo, confirmar el nombre. No puede: saltar la verificación, firmar, pagar — ni abrir el carro. El desbloqueo remoto va a un lockbox que todavía no existe, así que el agente le dice al huésped que recoja las llaves en el front desk.",
+            "callouts": {
+              "0": "Todo esto corre las mismas reglas que el kiosk.",
+              "1": "Firma y pago son solo del huésped, en el kiosk.",
+              "2": "Llaves: «Pasa por el counter» — ese eres tú."
+            }
+          },
+          "kiosk-check-valet-keys": {
+            "title": "Chequeo rápido",
+            "body": "Una pregunta antes de cerrar este módulo.",
+            "check": {
+              "question": "El huésped ya firmó y un agente de Valet confirmó su identidad de forma remota. ¿Quién entrega la llave?",
+              "options": {
+                "A": {
+                  "text": "Valet abre el carro remotamente",
+                  "why": "No hay desbloqueo remoto. Ese camino lleva a un lockbox que la sede todavía no tiene."
+                },
+                "B": {
+                  "text": "El front desk — el agente le dice al huésped que pase a recogerla",
+                  "why": "La ayuda remota termina en la pantalla. El carro cambia de manos en el counter, contigo."
+                },
+                "C": {
+                  "text": "El kiosk imprime un código de recogida",
+                  "why": "El kiosk no imprime nada. La pantalla de «¡Listo!» dice «Pasa por el counter»."
+                }
+              }
+            }
+          }
+        }
+      },
+      "kiosk-payment": {
+        "title": "El pago falla o el kiosk no avanza",
+        "summary": "Próximamente en tu sede: el link y el QR, y qué hacer cuando la pantalla no avanza.",
+        "gotcha": "Nunca cobres a mano lo que el kiosk está cobrando. Una pantalla «trancada» casi siempre es un pago que aterrizó hace unos segundos — mira en Reservations → Payments antes de tocar el terminal. Y si alguna vez aterrizan dos pagos (un QR viejo que quedó abierto en el teléfono), reembolsa el extra; nunca vuelvas a cobrar.",
+        "steps": {
+          "kiosk-fig-pay-qr": {
+            "title": "Un link, un QR, y el kiosk espera",
+            "body": "«Mostrar código de pago» crea UN link a la página de pago del tenant y lo muestra como QR. El huésped lo escanea y paga en su teléfono. El kiosk muestra «Esperando el pago…» y pasa solo a la firma en el momento en que el servidor confirma. Tocar «Mostrar código de pago» otra vez con el mismo total muestra el MISMO link.",
+            "callouts": {
+              "0": "El QR es un link a la página de pago — el kiosk nunca ve la tarjeta.",
+              "1": "«Esperando el pago…» consulta cada pocos segundos. Dale de diez a quince. Una tarjeta declinada la reintenta el huésped en su teléfono, desde este mismo QR.",
+              "2": "Lo que se cobra hoy versus la retención reembolsable en la tarjeta."
+            }
+          },
+          "kiosk-fig-pay-failed": {
+            "title": "Si el total cambia",
+            "body": "«Cambiar protección y extras» vuelve a los extras. Un total nuevo genera un link y un QR NUEVOS; el viejo sale de la pantalla del kiosk pero SIGUE siendo pagable si el huésped lo dejó abierto en su teléfono — no hay forma de cancelarlo en el gateway. Pídele al huésped que cierre la página de pago vieja antes de escanear el código nuevo. Si aterrizan dos pagos, los dos salen en Reservations → Payments: reembolsa el extra, nunca vuelvas a cobrar.",
+            "callouts": {
+              "0": "«Intentar de nuevo» pertenece a la pantalla de sandbox/fallo — no es una acción sobre el link. La reutilización con el mismo total viene de tocar «Mostrar código de pago» otra vez.",
+              "1": "«Cambiar protección y extras» — un total nuevo significa un link nuevo; el viejo sale de la pantalla, pero no muere."
+            }
+          },
+          "kiosk-check-payment": {
+            "title": "Chequeo rápido",
+            "body": "Una pregunta antes de cerrar este módulo.",
+            "check": {
+              "question": "El huésped dice que pagó en su teléfono, pero el kiosk sigue en «Esperando el pago…». ¿Qué haces?",
+              "options": {
+                "A": {
+                  "text": "Le cobro en el terminal del counter para que pueda seguir",
+                  "why": "Ese es el doble cobro. El pago del kiosk pudo haber aterrizado hace segundos — la pantalla simplemente no ha consultado todavía."
+                },
+                "B": {
+                  "text": "Espero de diez a quince segundos y reviso Reservations → Payments",
+                  "why": "Si el pago está ahí, el kiosk se pone al día. Si no está, el huésped reintenta en su teléfono desde el mismo QR — o tú tocas «Mostrar código de pago» otra vez, que muestra el mismo link para el mismo total."
+                },
+                "C": {
+                  "text": "Toco «Empezar de nuevo» y arranco el check-in otra vez",
+                  "why": "Eso borra la sesión. El pago, si aterrizó, se queda pegado a la reservación — pero el huésped repite todo."
+                }
+              }
+            }
+          }
+        }
+      },
+      "kiosk-brakes": {
+        "title": "«¿Sigues ahí?», «No es mi reservación» y un kiosk bloqueado",
+        "summary": "Las tres formas en que el kiosk se frena solo: inactividad, una coincidencia equivocada, y quince minutos de bloqueo.",
+        "gotcha": "Un kiosk bloqueado no está roto. Un admin lo limpia al momento emitiendo un código de pareo nuevo (Ride Fleet → Kiosks); si no hay admin a mano, atiende al huésped en el counter — en quince minutos vuelve solo. Reiniciar el iPad no cambia nada: el bloqueo vive en el servidor.",
+        "steps": {
+          "kiosk-fig-idle": {
+            "title": "«¿Sigues ahí?» — el reinicio por privacidad",
+            "body": "Tras una pausa sin tocar la pantalla, el kiosk pregunta. «Sigo aquí — continuar» conserva todo. Si nadie contesta, la cuenta regresiva llega a cero y la sesión se reinicia, borrando lo entrado — un extraño que se acerque jamás debe ver la reservación del huésped anterior.",
+            "callouts": {
+              "0": "«Sigo aquí — continuar» conserva cada campo llenado hasta ahí.",
+              "1": "«Empezar de nuevo» lo borra todo a propósito — no hay deshacer."
+            }
+          },
+          "kiosk-fig-not-mine": {
+            "title": "«Esta no es mi reservación»",
+            "body": "El resumen muestra conductor, fechas y clase antes de que pase nada más. Si es la equivocada, «Esta no es mi reservación» vuelve a la búsqueda sin gastar un intento. Las búsquedas por número tienen intentos limitados — la pantalla de búsqueda dice cuántos quedan — y agotados, el kiosk pausa las búsquedas unos minutos.",
+            "callouts": {
+              "0": "«Soy yo — continuar» es el huésped confirmando la coincidencia.",
+              "1": "«Esta no es mi reservación» es gratis — no cuenta como intento fallido."
+            }
+          },
+          "kiosk-fig-locked": {
+            "title": "Bloqueado por quince minutos",
+            "body": "Demasiados PIN incorrectos, códigos incorrectos o búsquedas fallidas, y el kiosk pausa el desbloqueo del personal y las búsquedas. Está protegiendo los datos del huésped que tiene dentro. Dos salidas: un admin emite un código de pareo nuevo desde Ride Fleet → Kiosks y el bloqueo se limpia al momento — o lo esperas y terminas al huésped en el counter.",
+            "callouts": {
+              "0": "No hay reloj en pantalla — el bloqueo simplemente se levanta solo a los quince minutos.",
+              "1": "La propia pantalla lo dice: un admin puede emitir un código de pareo nuevo para limpiarlo al momento."
+            }
+          },
+          "kiosk-check-locked": {
+            "title": "Chequeo rápido",
+            "body": "Una pregunta antes de cerrar este módulo.",
+            "check": {
+              "question": "El kiosk muestra «Este kiosk está bloqueado temporalmente» después de que un compañero agotó el contador de intentos con PIN incorrectos. Hay un huésped esperando y no hay ningún admin cerca. ¿Qué haces?",
+              "options": {
+                "A": {
+                  "text": "Seguir probando PIN hasta que alguno funcione",
+                  "why": "Mientras está bloqueado, cada intento se rechaza antes siquiera de contarse — no hace nada, salvo dejar al huésped parado."
+                },
+                "B": {
+                  "text": "Terminar al huésped en el counter; el kiosk se desbloquea solo en quince minutos — o un admin lo limpia ahora con un código de pareo nuevo",
+                  "why": "El bloqueo es protección, no una falla. El counter hace todo lo que hace el kiosk, y Ride Fleet → Kiosks → código de pareo nuevo lo limpia al instante cuando hay un admin disponible."
+                },
+                "C": {
+                  "text": "Reiniciar el iPad",
+                  "why": "El bloqueo vive en el servidor, no en la tableta. Reiniciar no cambia nada y pierde la sesión del huésped."
+                }
+              }
+            }
+          }
+        }
+      },
+      "kiosk-done-keys": {
+        "title": "Ya firmaron: llaves, contrato y la ronda de fotos",
+        "summary": "La pantalla «¡Listo!» — dónde está la llave, qué llegó por email, y el enlace de inspección.",
+        "gotcha": "La pantalla se reinicia sola tras una cuenta regresiva de 30 segundos. Si el huésped quiere el contrato impreso, imprímelo desde la reservación — el kiosk no puede.",
+        "steps": {
+          "kiosk-fig-done": {
+            "title": "«¡Listo!» — tres cosas que señalar",
+            "body": "Llaves: «Pasa por el counter — un miembro del equipo te entrega las llaves.» Contrato y recibo: ya están en su email. Antes de salir: un QR (o enlace por email) para foto-documentar la condición del carro — la misma inspección que haría el counter, hecha por el huésped en su teléfono.",
+            "callouts": {
+              "0": "Las llaves las entregas tú, en el counter — salvo que tu sede esté configurada en Lockbox en Ride Fleet → Kiosks, y entonces la pantalla manda al huésped al lockbox.",
+              "1": "Contrato y recibo fueron al email de la reservación.",
+              "2": "El enlace de inspección es cómo se resuelven después las disputas de daños — anímalo."
+            }
+          },
+          "kiosk-check-done": {
+            "title": "Chequeo rápido",
+            "body": "Una pregunta antes de cerrar este módulo.",
+            "check": {
+              "question": "El huésped, en «¡Listo!», pide una copia impresa del contrato. ¿Qué haces?",
+              "options": {
+                "A": {
+                  "text": "Toco la pantalla antes de que se reinicie e imprimo desde el kiosk",
+                  "why": "El kiosk no tiene impresora ni botón de imprimir. La pantalla «¡Listo!» solo se reinicia."
+                },
+                "B": {
+                  "text": "Lo imprimo desde la reservación en mi propia pantalla",
+                  "why": "Todo contrato firmado está en la reservación. El kiosk ya lo envió por email; tú puedes imprimirlo."
+                },
+                "C": {
+                  "text": "Le digo que es solo por email",
+                  "why": "Está en su email, pero una copia impresa es un pedido normal — y lo resuelves en segundos."
+                }
+              }
+            }
+          }
+        }
+      },
+      "kiosk-grant-valet": {
+        "title": "Dar a Valet acceso al kiosk",
+        "summary": "People → la cuenta de servicio de Valet → el módulo Kiosk. Sin esto, Valet no ve las sesiones del kiosk.",
+        "gotcha": "Dos interruptores, no uno: el módulo Kiosk tiene que estar encendido para la empresa (Settings) Y marcado en la cuenta de servicio. El acceso se cachea por usuario unos minutos, así que un cambio puede tardar un momento en llegar a Valet.",
+        "steps": {
+          "person-module-kiosk": {
+            "title": "Marca «Kiosk» en la cuenta de servicio de Valet",
+            "body": "Abre la cuenta de servicio de Valet en People, baja hasta User Module Access, marca Kiosk y guarda. Esto es lo que permite a un agente de Valet ver dónde se trancó un huésped y ayudar desde la consola. Cada cambio aquí queda registrado con tu nombre."
+          },
+          "kiosk-check-grant": {
+            "title": "Chequeo rápido",
+            "body": "Una pregunta antes de cerrar este módulo.",
+            "check": {
+              "question": "Valet reporta «no vemos las sesiones del kiosk» en una sede nueva. Kiosk está marcado en la cuenta de servicio. ¿Qué más puede ser?",
+              "options": {
+                "A": {
+                  "text": "El módulo Kiosk está apagado para la empresa en Settings — la marca por usuario no hace nada sola",
+                  "why": "La configuración de módulos del tenant aplica por encima del acceso por usuario. Los dos tienen que estar encendidos."
+                },
+                "B": {
+                  "text": "Valet necesita un PIN como un empleado",
+                  "why": "Los PIN son para el desbloqueo en persona en el kiosk. El acceso remoto es la cuenta de servicio más el módulo."
+                },
+                "C": {
+                  "text": "Cada kiosk debe parearse con Valet individualmente",
+                  "why": "El pareo amarra un iPad a la sede. Valet lee las sesiones a través del módulo, no del pareo."
+                }
+              }
+            }
+          }
+        }
       }
     },
     "gotchaLabel": "Dónde se traba la gente",
@@ -1347,7 +1700,111 @@
     "waitingNextScreen": "Sigue — abre la siguiente pantalla y la guía continúa ahí.",
     "skipThisPart": "Saltar esta parte",
     "restart": "Empezar de nuevo",
-    "restartHint": "Borra este módulo y lo tomas desde el principio"
+    "restartHint": "Borra este módulo y lo tomas desde el principio",
+    "glossary": {
+      "kiosk": {
+        "title": "¿Qué hace cada botón?",
+        "summary": "Todos los botones del kiosk y del panel del personal, por pantalla.",
+        "groups": {
+          "bar": {
+            "title": "Siempre en pantalla"
+          },
+          "lookup": {
+            "title": "Bienvenida y búsqueda de la reservación"
+          },
+          "id": {
+            "title": "Licencia de conducir"
+          },
+          "staff": {
+            "title": "Panel del personal (PIN)"
+          },
+          "name": {
+            "title": "El nombre no coincide (la salida del propio huésped)"
+          },
+          "chat": {
+            "title": "Chat de ayuda (Valet, remoto)"
+          },
+          "extras": {
+            "title": "Protección y extras · Selfie"
+          },
+          "pay": {
+            "title": "Pago"
+          },
+          "sign": {
+            "title": "Firma y ¡Listo!"
+          },
+          "pair": {
+            "title": "Pareo (admin)"
+          }
+        },
+        "entries": {
+          "help": "Abre el chat de ayuda con un agente de Valet. Nunca termina la sesión ni pierde un paso.",
+          "back": "Un paso atrás sin perder lo entrado. En la pantalla de pago también descarta el código QR mostrado.",
+          "start-over": "Borra TODO lo que el huésped entró y vuelve a la bienvenida. No hay deshacer.",
+          "still-here": "Responde a «¿Sigues ahí?». Si nadie toca, la sesión se reinicia sola por privacidad.",
+          "get-help": "Aparecen tras un error genérico: escalar a un miembro del equipo, o repetir la acción que falló.",
+          "pickup": "Va a «Encuentra tu reservación».",
+          "walkup": "Rentas walk-up. Hoy muestra «llegan muy pronto» y manda al huésped al counter.",
+          "scan-qr": "El QR del email de confirmación. Hoy muestra «llega pronto» — se escribe el número de confirmación.",
+          "find": "Busca por número de confirmación. Los intentos son limitados; agotados, el kiosk pausa las búsquedas unos minutos.",
+          "by-name": "Apellido más el día del pickup, o el teléfono en archivo. Si hay varias coincidencias, el kiosk pide un dato más.",
+          "thats-me": "Confirma la reservación encontrada — o vuelve a buscar sin gastar un intento.",
+          "scan": "Lee el código PDF417 de ATRÁS y llena nombre, número de licencia, fecha de nacimiento y expiración. «Detener escaneo» apaga la cámara.",
+          "upload-barcode": "Una foto fija del código de barras — muchas veces se lee cuando la cámara en vivo no.",
+          "photo": "Lee el FRENTE de la licencia desde una foto y luego muestra «¿Está correcto?» con lo leído. «Repetir» empieza de nuevo.",
+          "confirm-read": "El huésped confirma que los campos leídos de la foto son suyos.",
+          "upload-id": "Cuando no hay cámara.",
+          "cant-scan": "Escala: «Un miembro del equipo va en camino» — se avisa al counter. Nada escala solo; lo toca el huésped (o tú).",
+          "connect": "Aparecen cuando la verificación falla: abrir el chat con Valet, o escanear otra vez.",
+          "entry": "Tu puerta de entrada al panel, desde la pantalla de escalado. Solo empleados con PIN.",
+          "unlock": "Nombre + PIN abre un permiso de DIEZ MINUTOS a tu nombre («Ana — quedan 9:58»). Los PIN incorrectos comparten un contador de intentos con las búsquedas y los códigos; en cero, el kiosk se bloquea quince minutos.",
+          "cancel": "Cierra el panel sin permiso; el huésped queda exactamente donde estaba.",
+          "capture": "Fotos del FRENTE y ATRÁS de la licencia física. Las dos son obligatorias.",
+          "verify": "Corre dos reglas reales — edad y validez de la licencia. La comprobación del nombre se salta aquí a propósito (tú tienes la licencia en la mano). TU PIN NO SALTA LAS OTRAS DOS.",
+          "name-confirm": "Certificas que el nombre coincide tras revisar la licencia física. Queda registrado a tu nombre.",
+          "continue-guest": "Devuelve el control al huésped — o cierra sin verificar, y el counter decide la renta.",
+          "send-code": "Envía un código de 6 dígitos al email o teléfono DE LA RESERVACIÓN. Expira en 10 minutos.",
+          "confirm-code": "Valida el código y actualiza la reservación al nombre de la licencia. Reenviar tiene espera; los intentos son limitados.",
+          "not-eligible": "Aquí no hay botón: la corrección la hace el personal con «Verifiqué que esta licencia es del cliente».",
+          "close-chat": "Termina la conversación, con confirmación. El check-in no se pierde.",
+          "agent-can": "El agente puede DESBLOQUEAR, ENTRAR EL ID A MANO (con las fotos ya en archivo) y CONFIRMAR EL NOMBRE. El huésped ve este aviso y la pastilla violeta/verde.",
+          "agent-cannot": "El agente no puede saltar la verificación, firmar ni pagar — ni abrir el carro. Las llaves se entregan en el front desk.",
+          "add-extras": "Suma lo marcado al total (los precios son para los días de la renta), o continúa sin extras. Todas las opciones incluyen el depósito.",
+          "selfie": "Selfie de identidad. «Subir una foto» cuando no hay cámara.",
+          "show-qr": "Crea UN link de pago a la página de pago del tenant y muestra su QR. El huésped paga en su teléfono; el kiosk muestra «Esperando el pago…» y avanza solo.",
+          "retry": "Solo en la pantalla de sandbox/fallo; no es una acción sobre el link. Una tarjeta declinada real la reintenta el huésped en su teléfono desde el mismo QR. Tocar «Mostrar código de pago» otra vez muestra el mismo link para el mismo total.",
+          "change-extras": "Vuelve a extras. Un total nuevo genera un link NUEVO; el anterior sale de la pantalla pero sigue pagable si el huésped lo dejó abierto en su teléfono — pídele que lo cierre. Si aterrizan dos pagos = reembolsa el extra, nunca vuelvas a cobrar.",
+          "simulate": "Sello de sandbox para ambientes de prueba. En producción sigue en pantalla pero se niega («El pago sandbox no está habilitado…») — nunca lo toques frente a un huésped.",
+          "pay-rule": "NUNCA cobres a mano lo que el kiosk está cobrando. Si no avanza, espera de 10 a 15 segundos y revisa Reservations → Payments.",
+          "initial-all": "Aplica las iniciales dibujadas una vez a cada sección; también se puede tocar sección por sección.",
+          "read-agreement": "Despliega el texto completo del contrato.",
+          "sign-finish": "Bloqueado mientras falten iniciales, el pago o la verificación de ID — el kiosk dice cuál.",
+          "done": "La pantalla «¡Listo!» no tiene botones: llaves en el counter (o en el lockbox, si tu sede lo tiene configurado), contrato y recibo por email, un QR para foto-documentar el carro. Se reinicia tras una cuenta regresiva de 30 segundos.",
+          "pair": "Código de seis dígitos de Ride Fleet → Kiosks → Pair. Los intentos son limitados; agotados, pide un código nuevo."
+        },
+        "legend": "Violeta = el huésped · violeta oscuro = personal · con borde = secundario · rojo = deshace algo · texto plano = un mensaje, no un botón."
+      }
+    },
+    "waitingForScreen": "Abre {{where}} para empezar «{{name}}» — la guía sigue ahí.",
+    "goThere": "Llévame",
+    "needsScreenBody": "«{{name}}» se recorre en otra pantalla — abre {{where}} y toca Empezar otra vez.",
+    "openReference": "Abrir",
+    "checkRight": "Correcto",
+    "checkNotQuite": "No exactamente",
+    "figures": {
+      "where-guest": "En el iPad del huésped",
+      "where-staff": "Panel del personal en el iPad",
+      "chat-guest": "Hola, no puedo escanear la licencia…",
+      "chat-agent": "Ya te veo en el paso de ID. Te ayudo.",
+      "remote-cannot-skip": "Saltar la verificación de ID",
+      "remote-cannot-sign": "Firmar o pagar por el huésped",
+      "remote-cannot-car": "Abrir el carro — llaves en el counter"
+    },
+    "proof": {
+      "byWork": "Se prueba haciéndolo de verdad",
+      "readingCheck": "Lectura + chequeo",
+      "adminOnly": "Solo admin"
+    }
   },
   "copilot": {
     "launcher": "¿Cómo se hace…?",

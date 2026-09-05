@@ -12,6 +12,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COURSES, allModules } from '../src/lib/training/curriculum.js';
 import { courseKey, moduleKey, stepKey, trainingText } from '../src/lib/training/i18n-keys.js';
+import { glossaryKeys } from '../src/lib/training/kiosk-glossary.js';
+import { figureTextKeys } from '../src/lib/training/figure-text.js';
 
 const LOCALES = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'locales');
 const load = (lang) => JSON.parse(readFileSync(join(LOCALES, `${lang}.json`), 'utf8'));
@@ -32,8 +34,22 @@ function expectedKeys() {
     if (m.gotcha) keys.push(moduleKey(m, 'gotcha'));
     for (const s of m.steps || []) {
       keys.push(stepKey(m, s, 'title'), stepKey(m, s, 'body'));
+      // Drawn steps number what the drawing marks; asked steps carry the
+      // question, each option and its explanation. All of it is read aloud to
+      // a Spanish-speaking team, so all of it is a key.
+      (s.callouts || []).forEach((_, i) => keys.push(stepKey(m, s, `callouts.${i}`)));
+      if (s.check) {
+        keys.push(stepKey(m, s, 'check.question'));
+        for (const o of s.check.options || []) {
+          keys.push(stepKey(m, s, `check.options.${o.key}.text`), stepKey(m, s, `check.options.${o.key}.why`));
+        }
+      }
     }
   }
+  // Reference material beside the modules (the kiosk button glossary).
+  keys.push(...glossaryKeys());
+  // The few authored strings drawn inside figures (chat bubbles, eyebrows).
+  keys.push(...figureTextKeys());
   return keys;
 }
 
@@ -45,7 +61,9 @@ describe('curriculum translations', () => {
   it('derives a key for every translatable string', () => {
     // 110 → 119 when the shuttle console module landed (2026-08-28): three
     // steps, plus the module's own title, summary and gotcha.
-    expect(keys.length).toBe(128); // 119 → 128 when the additional-drivers
+    // 128 → 356 with the kiosk course (2026-09-04): 7 modules, 25 steps with
+    // callouts and checks, and the 50-entry button glossary.
+    expect(keys.length).toBe(356); // 119 → 128 when the additional-drivers
     // micro-module landed (2026-09-02, copilot Phase 2): three steps plus the
     // module's own title, summary and gotcha.
     expect(new Set(keys).size, 'two entries derive the same key — one would overwrite the other').toBe(keys.length);
@@ -79,6 +97,24 @@ describe('curriculum translations', () => {
       expect(lookup(en, moduleKey(m, 'title')), `${m.key} title`).toBe(m.title);
       for (const s of m.steps || []) {
         expect(lookup(en, stepKey(m, s, 'body')), `${m.key}/${s.anchor} body`).toBe(s.body);
+        (s.callouts || []).forEach((c, i) => expect(lookup(en, stepKey(m, s, `callouts.${i}`)), `${m.key}/${s.anchor} callout ${i}`).toBe(c));
+        if (s.check) {
+          expect(lookup(en, stepKey(m, s, 'check.question')), `${m.key}/${s.anchor} question`).toBe(s.check.question);
+          for (const o of s.check.options || []) {
+            expect(lookup(en, stepKey(m, s, `check.options.${o.key}.text`)), `${m.key}/${s.anchor}/${o.key} text`).toBe(o.text);
+            expect(lookup(en, stepKey(m, s, `check.options.${o.key}.why`)), `${m.key}/${s.anchor}/${o.key} why`).toBe(o.why);
+          }
+        }
+      }
+    }
+  });
+
+  it('Spanish callouts have exactly the curriculum’s indexes — positional keys cannot hide an extra', () => {
+    for (const m of allModules()) {
+      for (const s of m.steps || []) {
+        if (!s.callouts) continue;
+        const esCallouts = lookup(es, stepKey(m, s, 'callouts')) || {};
+        expect(Object.keys(esCallouts).sort(), `${m.key}/${s.anchor} es callouts`).toEqual(s.callouts.map((_, i) => String(i)).sort());
       }
     }
   });
