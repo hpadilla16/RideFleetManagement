@@ -144,7 +144,7 @@ jobs:
             --dart-define=RIDEOPS_ENV=prod \
             --dart-define=RIDEOPS_API_BASE="$API_BASE" \
             --dart-define=RIDEOPS_SENTRY_DSN="$SENTRY_DSN"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rideops-prod-apk-${{ env.signing }}
           path: rideops/build/app/outputs/flutter-apk/*.apk
