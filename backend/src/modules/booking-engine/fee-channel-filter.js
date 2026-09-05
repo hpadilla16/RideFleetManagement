@@ -14,8 +14,14 @@
  *   - When bookingChannel is missing/unknown, default to WEBSITE so public-
  *     quote paths (which never set bookingChannel) keep their current behavior.
  */
+// Online channels: the public website and partner-program bookings made through it
+// (Partnerships F2, 2026-09-05). A PARTNER reservation is quoted with the website's
+// mandatory fees at checkout; treating it like STAFF here made the first pricing
+// re-sync delete those rows (quoted ≠ synced — QA M1).
+const ONLINE_CHANNELS = new Set(['WEBSITE', 'PARTNER']);
+
 export function filterMandatoryFeesForChannel(fees, bookingChannel) {
-  const isWebsite = String(bookingChannel || 'WEBSITE').toUpperCase() === 'WEBSITE';
+  const isWebsite = ONLINE_CHANNELS.has(String(bookingChannel || 'WEBSITE').toUpperCase());
   return (fees || []).filter((fee) => {
     if (!fee?.isActive || !fee?.mandatory) return false;
     if (fee.displayOnline && !isWebsite) return false;

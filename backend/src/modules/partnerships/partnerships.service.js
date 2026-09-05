@@ -574,6 +574,7 @@ export const partnershipsService = {
       idx += 1;
     }
     if (ops.length) await prisma.$transaction(ops);
+    await prisma.partner.update({ where: { id: partner.id }, data: { updatedAt: new Date() } }); // searchRental cache key = partner.updatedAt
     await audit({
       tenantId, partnerId: partner.id, actor: ctx.actor, action: 'PRICING',
       changed: {
@@ -646,6 +647,7 @@ export const partnershipsService = {
       prisma.partnerService.deleteMany({ where: { partnerId: partner.id } }),
       ...(data.length ? [prisma.partnerService.createMany({ data })] : [])
     ]);
+    await prisma.partner.update({ where: { id: partner.id }, data: { updatedAt: new Date() } }); // searchRental cache key = partner.updatedAt
     await audit({ tenantId, partnerId: partner.id, actor: ctx.actor, action: 'SERVICES', changed: { services: data.map((d) => ({ id: d.additionalServiceId, rateOverride: d.rateOverride, mandatory: d.mandatory })) } });
     return this.getById(partner.id, ctx);
   },
@@ -673,6 +675,7 @@ export const partnershipsService = {
     });
     const count = await prisma.partnerService.count({ where: { partnerId: partner.id } });
     await prisma.partnerService.create({ data: { partnerId: partner.id, additionalServiceId: service.id, mandatory: !!data.mandatory, sortOrder: count } });
+    await prisma.partner.update({ where: { id: partner.id }, data: { updatedAt: new Date() } }); // searchRental cache key = partner.updatedAt
     await audit({ tenantId, partnerId: partner.id, actor: ctx.actor, action: 'SERVICES', changed: { createdService: { id: service.id, name, rate, chargeType } } });
     return this.getById(partner.id, ctx);
   },

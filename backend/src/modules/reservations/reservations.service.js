@@ -1826,6 +1826,13 @@ export const reservationsService = {
         bookingChannel: data.bookingChannel ?? 'STAFF',
         // LAX #4: originator attribution (drives the virtual-agent commission).
         createdByUserId: data.createdByUserId ?? null,
+        // Partnerships F2 (2026-09-05): attribution + what the customer accepted.
+        partnerId: data.partnerId ?? null,
+        partnerTermsVersion: data.partnerTermsVersion ?? null,
+        partnerPreferredVehicleTypeId: data.partnerPreferredVehicleTypeId ?? null,
+        partnerDisclosureAcceptedAt: data.partnerDisclosureAcceptedAt ? new Date(data.partnerDisclosureAcceptedAt) : null,
+        partnerDisclosureVersion: data.partnerDisclosureVersion ?? null,
+        partnerPolicyNumber: data.partnerPolicyNumber ?? null,
         workflowMode: data.workflowMode ?? 'RENTAL',
         loanerBillingMode: data.loanerBillingMode ?? null,
         repairOrderNumber: data.repairOrderNumber ?? null,

@@ -1205,7 +1205,8 @@ reservationsRouter.post('/', async (req, res, next) => {
     }));
     const cfg = parseLocationConfig(pickupLoc?.locationConfig);
     const bookingChannel = String(req.body?.bookingChannel || 'STAFF');
-    const isExternalBooking = bookingChannel === 'WEBSITE' || bookingChannel === 'CAR_SHARING';
+    // PARTNER = a website booking under a partner program (Partnerships F2): same online deposit rules.
+    const isExternalBooking = bookingChannel === 'WEBSITE' || bookingChannel === 'CAR_SHARING' || bookingChannel === 'PARTNER';
     const requireDeposit = isExternalBooking && !!cfg?.requireDeposit;
     const depositMode = String(cfg?.depositMode || 'FIXED').toUpperCase();
     const depositValue = Number(cfg?.depositAmount || 0);

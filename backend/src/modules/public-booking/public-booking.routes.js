@@ -100,10 +100,12 @@ publicBookingRouter.get('/vehicle-classes', bookingReadGuard, async (req, res, n
       pickupLocationId: optionalString(req.query?.pickupLocationId, { fallback: undefined }),
       pickupAt: optionalString(req.query?.pickupAt, { fallback: undefined }),
       returnAt: optionalString(req.query?.returnAt, { fallback: undefined }),
-      limit: optionalNumber(req.query?.limit, 'limit', { integer: true, min: 1, fallback: undefined })
+      limit: optionalNumber(req.query?.limit, 'limit', { integer: true, min: 1, fallback: undefined }),
+      partnerSlug: optionalString(req.query?.partnerSlug, { fallback: undefined })
     });
     res.json(payload);
   } catch (error) {
+    if (error instanceof AppError) return res.status(error.status).json({ error: error.message, code: error.code, reason: error.reason });
     if (/required|not found|not enabled|after/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }
@@ -119,7 +121,9 @@ publicBookingRouter.get('/vehicle-classes/:vehicleTypeId', bookingReadGuard, asy
       ...publicTenantArgs(req),
       pickupLocationId: optionalString(req.query?.pickupLocationId, { fallback: undefined }),
       pickupAt: optionalString(req.query?.pickupAt, { fallback: undefined }),
-      returnAt: optionalString(req.query?.returnAt, { fallback: undefined })
+      returnAt: optionalString(req.query?.returnAt, { fallback: undefined }),
+      // Partnerships F2: the detail page under a program prices from the program too.
+      partnerSlug: optionalString(req.query?.partnerSlug, { fallback: undefined })
     });
     const wanted = String(req.params.vehicleTypeId || '');
     const cls = (payload?.classes || []).find(
@@ -133,6 +137,7 @@ publicBookingRouter.get('/vehicle-classes/:vehicleTypeId', bookingReadGuard, asy
       class: cls
     });
   } catch (error) {
+    if (error instanceof AppError) return res.status(error.status).json({ error: error.message, code: error.code, reason: error.reason });
     if (/required|not found|not enabled|after/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }
@@ -190,6 +195,8 @@ publicBookingRouter.post('/rental-search', bookingWriteGuard, async (req, res, n
     const payload = await publicBookingService.searchRentalQuotes(req.body || {});
     res.json(payload);
   } catch (error) {
+    // Partnerships F2: an unavailable program is 422 with a reason (never online pricing).
+    if (error instanceof AppError) return res.status(error.status).json({ error: error.message, code: error.code, reason: error.reason });
     if (/required|not found|not enabled|after/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }

@@ -240,6 +240,35 @@ function bookingSummaryFromReservation(reservation) {
   };
 }
 
+// One public shape for an add-on line, shared by rental-search results and the
+// vehicle-class payload (the storefront reads the PROGRAM catalog from the class under
+// a partner — Partnerships F2, QA M2).
+function mapPublicAdditionalService(service) {
+  return ({
+    serviceId: service.serviceId,
+    code: service.code,
+    name: service.name,
+    description: service.description || '',
+    unitLabel: service.unitLabel || 'Unit',
+    pricingMode: service.pricingMode || 'FLAT',
+    quantity: Number(service.quantity || 1),
+    rate: money(service.rate),
+    total: money(service.total),
+    taxable: !!service.taxable,
+    mandatory: !!service.mandatory,
+    partnerOnly: !!service.partnerOnly,
+    linkedFee: service.linkedFee ? {
+      feeId: service.linkedFee.feeId,
+      code: service.linkedFee.code || null,
+      name: service.linkedFee.name,
+      description: service.linkedFee.description || '',
+      mode: service.linkedFee.mode || 'FIXED',
+      amount: money(service.linkedFee.amount),
+      taxable: !!service.linkedFee.taxable
+    } : null
+  });
+}
+
 export const publicBookingService = {
   async getBootstrap(input = {}) {
     const payload = await bookingEngineService.getBootstrap(input);
@@ -322,7 +351,9 @@ export const publicBookingService = {
       pickupLocationId: primaryLocationId,
       pickupLocationIds: candidateLocations.map((location) => location.id),
       pickupAt: pickupAt.toISOString(),
-      returnAt: returnAt.toISOString()
+      returnAt: returnAt.toISOString(),
+      // Partnerships F2: the storefront's /rent under a program lists the program's classes/prices.
+      partnerSlug: input?.partnerSlug
     });
 
     const grouped = new Map();
@@ -347,6 +378,10 @@ export const publicBookingService = {
             ...publicVehicleProfile(vehicleType)
           },
           advertisedDailyRate: dailyRate,
+          partnerPricing: result?.quote?.partnerPricing || null,
+          // Add-ons RFM priced for this class in this search (under a partner: the program's
+          // catalog incl. `mandatory`/`partnerOnly`, which the checkout forces server-side).
+          additionalServices: (result?.additionalServices || []).map(mapPublicAdditionalService),
           availableUnits: availabilityCount,
           available: availabilityCount > 0,
           featuredLocation: location
@@ -374,6 +409,7 @@ export const publicBookingService = {
       current.available = current.availableUnits > 0;
       if (dailyRate > 0 && (!current.advertisedDailyRate || dailyRate < current.advertisedDailyRate)) {
         current.advertisedDailyRate = dailyRate;
+        current.additionalServices = (result?.additionalServices || []).map(mapPublicAdditionalService);
         current.featuredLocation = location
           ? {
               id: location.id,
@@ -437,6 +473,7 @@ export const publicBookingService = {
     const payload = await bookingEngineService.searchRental(input);
     return {
       tenant: payload.tenant,
+      partner: payload.partner || null,
       searchType: 'RENTAL',
       pickupLocation: payload.location,
       returnLocationId: input?.returnLocationId || input?.pickupLocationId || null,
@@ -491,30 +528,10 @@ export const publicBookingService = {
           depositMode: result.deposit?.mode || null,
           depositBasis: [],
           securityDepositRequired: !!result.deposit?.securityDepositRequired,
-          securityDepositAmount: money(result.deposit?.securityDepositAmount)
+          securityDepositAmount: money(result.deposit?.securityDepositAmount),
+          partnerPricing: result.quote?.partnerPricing || null
         },
-        additionalServices: (result.additionalServices || []).map((service) => ({
-          serviceId: service.serviceId,
-          code: service.code,
-          name: service.name,
-          description: service.description || '',
-          unitLabel: service.unitLabel || 'Unit',
-          pricingMode: service.pricingMode || 'FLAT',
-          quantity: Number(service.quantity || 1),
-          rate: money(service.rate),
-          total: money(service.total),
-          taxable: !!service.taxable,
-          mandatory: !!service.mandatory,
-          linkedFee: service.linkedFee ? {
-            feeId: service.linkedFee.feeId,
-            code: service.linkedFee.code || null,
-            name: service.linkedFee.name,
-            description: service.linkedFee.description || '',
-            mode: service.linkedFee.mode || 'FIXED',
-            amount: money(service.linkedFee.amount),
-            taxable: !!service.linkedFee.taxable
-          } : null
-        })),
+        additionalServices: (result.additionalServices || []).map(mapPublicAdditionalService),
         mandatoryFees: (result.mandatoryFees || []).map((fee) => ({
           feeId: fee.feeId,
           code: fee.code,

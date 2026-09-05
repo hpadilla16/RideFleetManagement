@@ -14,6 +14,7 @@ import { computeMarketplaceTripPricing, tenantPlatformFeeConfig } from '../car-s
 import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
 import { resolveDeliveryAreaHints } from '../car-sharing/car-sharing-fulfillment.js';
 import { money } from '../../lib/money.js';
+import { AppError } from '../../lib/errors.js';
 import { composeRentalMoney } from '../../lib/rental-money.js';
 import { startOfUtcDay, addUtcDays, ceilTripDays } from '../../lib/date-utils.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
@@ -28,6 +29,16 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { filterMandatoryFeesForChannel } from './fee-channel-filter.js';
 import { stopSalesService } from '../stop-sales/stop-sales.service.js';
+// Partnerships F2 (2026-09-05): partner programs price the public quote from their
+// own book / discount and are stamped on the reservation. See partner-booking.js.
+import {
+  resolvePartnerContext,
+  partnerEligibleTypeIds,
+  applyPartnerDiscount,
+  partnerPricingBlock,
+  partnerCheckoutRequirements,
+  mandatoryPartnerServices
+} from '../partnerships/partner-booking.js';
 export { filterMandatoryFeesForChannel };
 
 function toDate(value) {
@@ -1192,13 +1203,28 @@ export const bookingEngineService = {
     }, 60_000);
   },
 
-  async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupLocationIds = [], pickupAt, returnAt }) {
+  async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupLocationIds = [], pickupAt, returnAt, partnerSlug }) {
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
       throw new Error('pickupAt and returnAt must be valid and returnAt must be after pickupAt');
     }
     if (!pickupLocationId) throw new Error('pickupLocationId is required');
+
+    // Partnerships F2: a program is resolved BEFORE the cache and forces the tenant.
+    // With a partner present there is never a cross-tenant aggregator search, and
+    // an unresolvable program is a 422 here — outside the cache, so a bad request
+    // never pollutes it and never falls back to online pricing.
+    // Public path resolves by SLUG only (Hector 2026-09-05: V1 programs are link/QR).
+    // The program CODE is short and guessable, so it stays a staff-side input
+    // (resolvePartnerContext still accepts it for the counter in F3).
+    let partnerCtx = null;
+    if (partnerSlug) {
+      const partnerTenant = await resolvePublicTenant({ tenantSlug, tenantId });
+      if (!partnerTenant) throw new AppError('tenant is required for a partner program', 422);
+      partnerCtx = await resolvePartnerContext({ tenantId: partnerTenant.id, partnerSlug, pickupLocationId });
+      tenantId = partnerTenant.id;
+    }
 
     // Cache the heavy body. searchRental is the highest-fan-out method in
     // this service: worst case 1 + N×M×6 prisma queries from the nested
@@ -1217,9 +1243,12 @@ export const bookingEngineService = {
     // Public search. Mirrors bootstrap: tenantId-scoped when provided,
     // otherwise cross-tenant aggregator (search returns matches across active
     // tenants).
+    // partner=<id>:<updatedAt> keeps a program search out of the online entry (and
+    // vice-versa) and invalidates the moment the program is edited.
+    const partnerKey = partnerCtx ? `partner=${partnerCtx.partner.id}:${new Date(partnerCtx.partner.updatedAt || 0).getTime()}` : 'partner=';
     const cacheKey = tenantId
-      ? tenantKey(tenantId, 'public', 'searchRental', `slug=${tenantSlug || ''}`, `locs=${cacheLocs.join(',')}`, `pickup=${pickupDate.toISOString()}`, `return=${returnDate.toISOString()}`)
-      : globalKey('public', 'searchRental', `slug=${tenantSlug || ''}`, `id=${tenantId || ''}`, `locs=${cacheLocs.join(',')}`, `pickup=${pickupDate.toISOString()}`, `return=${returnDate.toISOString()}`);
+      ? tenantKey(tenantId, 'public', 'searchRental', `slug=${tenantSlug || ''}`, `locs=${cacheLocs.join(',')}`, `pickup=${pickupDate.toISOString()}`, `return=${returnDate.toISOString()}`, partnerKey)
+      : globalKey('public', 'searchRental', `slug=${tenantSlug || ''}`, `id=${tenantId || ''}`, `locs=${cacheLocs.join(',')}`, `pickup=${pickupDate.toISOString()}`, `return=${returnDate.toISOString()}`, partnerKey);
     return cache.getOrSet(cacheKey, async () => {
       const rentalDays = ceilTripDays(pickupDate, returnDate);
       const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
@@ -1273,40 +1302,69 @@ export const bookingEngineService = {
       // (matches the input filter order), so consumers see the same shape and
       // ordering. Returning null from a task removes that vehicle type from
       // the final results — same semantics as the previous `continue` branch.
-      const eligibleVehicleTypes = vehicleTypes.filter((vt) => !stopSaleBlockedTypeIds.has(vt.id));
+      const partnerTypeIds = partnerCtx ? new Set(partnerEligibleTypeIds(partnerCtx, vehicleTypes.map((vt) => vt.id))) : null;
+      const eligibleVehicleTypes = vehicleTypes
+        .filter((vt) => !stopSaleBlockedTypeIds.has(vt.id))
+        .filter((vt) => !partnerTypeIds || partnerTypeIds.has(vt.id));
       const vehicleTypeResults = await Promise.all(eligibleVehicleTypes.map(async (vehicleType) => {
-        const [revenueRecommendation, availableUnits] = await Promise.all([
-          ratesService.getRevenueRecommendation({
-            vehicleTypeId: vehicleType.id,
-            pickupLocationId: location.id,
-            pickupAt: pickupDate.toISOString(),
-            returnAt: returnDate.toISOString()
-          }, { tenantId: tenant.id }, { displayOnline: true }),
+        const rentalArgs = {
+          vehicleTypeId: vehicleType.id,
+          pickupLocationId: location.id,
+          pickupAt: pickupDate.toISOString(),
+          returnAt: returnDate.toISOString()
+        };
+        const [revenueRecommendation, availableUnits, partnerBookQuote] = await Promise.all([
+          ratesService.getRevenueRecommendation(rentalArgs, { tenantId: tenant.id }, { displayOnline: true }),
           rentalAvailabilityCount({
             tenantId: tenant.id,
             vehicleTypeId: vehicleType.id,
             pickupAt: pickupDate,
             returnAt: returnDate
-          })
+          }),
+          // Partner price book: ONLY that PARTNER rate, fail-closed per class.
+          partnerCtx?.rateId
+            ? ratesService.resolveForRental(rentalArgs, { tenantId: tenant.id }, { rateId: partnerCtx.rateId })
+            : Promise.resolve(null)
         ]);
 
-        if (!revenueRecommendation?.baseQuote) return null;
-        const revenuePricingApplied = !!(revenueRecommendation.enabled && revenueRecommendation.applyToPublicQuotes);
-        const quote = revenuePricingApplied
-          ? {
-              ...revenueRecommendation.baseQuote,
-              dailyRate: revenueRecommendation.recommendedDailyRate,
-              baseTotal: revenueRecommendation.recommendedBaseTotal
-            }
-          : revenueRecommendation.baseQuote;
+        let quote;
+        let revenuePricingApplied = false;
+        let partnerPricing = null;
+        if (partnerCtx) {
+          // A negotiated program price is never yield-managed: revenue pricing is
+          // bypassed. RATE mode quotes from the book; DISCOUNT mode is the online
+          // base quote with an effective daily rate (never a negative charge line).
+          const onlineQuote = revenueRecommendation?.baseQuote || null;
+          quote = partnerCtx.pricingMode === 'RATE'
+            ? partnerBookQuote
+            : applyPartnerDiscount(onlineQuote, partnerCtx.discountPct);
+          if (!quote) return null; // fail-closed: no program price for this class → not offered
+          partnerPricing = partnerPricingBlock(partnerCtx, { onlineQuote, programQuote: quote });
+        } else {
+          if (!revenueRecommendation?.baseQuote) return null;
+          revenuePricingApplied = !!(revenueRecommendation.enabled && revenueRecommendation.applyToPublicQuotes);
+          quote = revenuePricingApplied
+            ? {
+                ...revenueRecommendation.baseQuote,
+                dailyRate: revenueRecommendation.recommendedDailyRate,
+                baseTotal: revenueRecommendation.recommendedBaseTotal
+              }
+            : revenueRecommendation.baseQuote;
+        }
 
         const [additionalServices, insurancePlans, mandatoryFees] = await Promise.all([
-          listPublicAdditionalServices({
-            tenantId: tenant.id,
-            locationId: location.id,
-            vehicleTypeId: vehicleType.id,
-            days: rentalDays
-          }),
+          partnerCtx
+            // The program's catalog (company services at the program price + partner-only
+            // services) REPLACES the public catalog for a partner quote.
+            ? Promise.resolve(partnerCtx.services
+                .filter((service) => isServiceEligibleForVehicleType(service, vehicleType.id))
+                .map((service) => ({ ...computeAdditionalServiceLine(service, rentalDays, service.defaultQty), partnerOnly: !!service.partnerOnly })))
+            : listPublicAdditionalServices({
+                tenantId: tenant.id,
+                locationId: location.id,
+                vehicleTypeId: vehicleType.id,
+                days: rentalDays
+              }),
           listPublicInsurancePlans({
             tenantId: tenant.id,
             locationId: location.id,
@@ -1369,24 +1427,31 @@ export const bookingEngineService = {
             days: Number(quote.days || 0),
             dailyRate: money(quote.dailyRate),
             subtotal: quoteSubtotal,
-            baseDailyRate: money(revenueRecommendation.baseQuote?.dailyRate),
-            baseSubtotal: money(revenueRecommendation.baseQuote?.baseTotal),
+            // Partner quotes keep the ONLINE rate here so the storefront can strike it through.
+            baseDailyRate: money(revenueRecommendation?.baseQuote?.dailyRate ?? quote.dailyRate),
+            baseSubtotal: money(revenueRecommendation?.baseQuote?.baseTotal ?? quote.baseTotal),
             fees: mandatoryFeesTotal,
             taxes,
             total,
             gracePeriodMin: Number(quote.gracePeriodMin || 0),
             source: quote.source || 'GLOBAL',
             revenuePricingApplied,
-            revenueRecommendationMode: revenueRecommendation.recommendationMode || 'ADVISORY',
-            revenueAdjustmentPct: money(revenueRecommendation.adjustmentPct),
-            revenueFactors: Array.isArray(revenueRecommendation.factors) ? revenueRecommendation.factors : [],
-            revenueSummary: revenueRecommendation.summary || '',
-            revenueMetrics: revenueRecommendation.metrics || null,
-            revenueDailyBreakdown: Array.isArray(revenueRecommendation.recommendedDailyBreakdown)
+            revenueRecommendationMode: partnerCtx ? 'PARTNER' : (revenueRecommendation.recommendationMode || 'ADVISORY'),
+            revenueAdjustmentPct: partnerCtx ? 0 : money(revenueRecommendation.adjustmentPct),
+            revenueFactors: !partnerCtx && Array.isArray(revenueRecommendation.factors) ? revenueRecommendation.factors : [],
+            revenueSummary: partnerCtx ? '' : (revenueRecommendation.summary || ''),
+            revenueMetrics: partnerCtx ? null : (revenueRecommendation.metrics || null),
+            revenueDailyBreakdown: !partnerCtx && Array.isArray(revenueRecommendation.recommendedDailyBreakdown)
               ? revenueRecommendation.recommendedDailyBreakdown
-              : []
+              : [],
+            partnerPricing
           },
-          deposit: depositSnapshot({ location, quote, bookingChannel: 'WEBSITE' }),
+          // Insurer preference flow, "confirm at pickup": nothing is collected ONLINE, so only
+          // the due-now part is zeroed; the location's security-deposit rule (the hold at
+          // pickup) rides along, same shape the checkout snapshot writes.
+          deposit: partnerCtx?.noOnlinePayment
+            ? { ...depositSnapshot({ location, quote, bookingChannel: 'PARTNER' }), required: false, mode: null, value: null, amountDue: 0 }
+            : depositSnapshot({ location, quote, bookingChannel: partnerCtx ? 'PARTNER' : 'WEBSITE' }),
           additionalServices,
           mandatoryFees,
           insurancePlans
@@ -1402,6 +1467,7 @@ export const bookingEngineService = {
       location: locations[0] || null,
       pickupAt: pickupDate,
       returnAt: returnDate,
+      partner: partnerCtx ? { ...partnerCtx.partner, pricingMode: partnerCtx.pricingMode, discountPct: partnerCtx.discountPct, noOnlinePayment: partnerCtx.noOnlinePayment, defaultVehicleTypeId: partnerCtx.defaultVehicleTypeId } : null,
       results
     };
     }, 60_000);
@@ -1697,13 +1763,25 @@ export const bookingEngineService = {
     const customer = await upsertPublicCustomer(tenant.id, input?.customer || {});
 
     if (searchType === 'RENTAL') {
+      // Partnerships F2: re-price WITH the program (same cache entry as the search the
+      // customer saw) and decide the class from the program's vehicle mode.
+      const partnerCtx = await resolvePartnerContext({
+        tenantId: tenant.id,
+        partnerSlug: input?.partnerSlug, // slug only on the public path (see searchRental)
+        pickupLocationId: input?.pickupLocationId
+      });
       const search = await this.searchRental({
+        ...(partnerCtx ? { tenantId: tenant.id, partnerSlug: partnerCtx.partner.slug } : {}),
         pickupLocationId: input?.pickupLocationId,
         pickupLocationIds: input?.pickupLocationId ? [input.pickupLocationId] : [],
         pickupAt: input?.pickupAt,
         returnAt: input?.returnAt
       });
-      const selected = (search.results || []).find((row) => row.vehicleType?.id === String(input?.vehicleTypeId || ''));
+      const partnerBooking = partnerCheckoutRequirements(partnerCtx, input, {
+        offeredTypeIds: (search.results || []).map((row) => row.vehicleType?.id).filter(Boolean)
+      });
+      const bookingVehicleTypeId = partnerBooking ? partnerBooking.vehicleTypeId : String(input?.vehicleTypeId || '');
+      const selected = (search.results || []).find((row) => row.vehicleType?.id === bookingVehicleTypeId);
       if (!selected) throw new Error('Selected rental vehicle type is no longer available');
       if (!selected.availability?.available) throw new Error('Selected rental vehicle type is sold out for those dates');
       const insuranceSelection = input?.insuranceSelection || {};
@@ -1734,6 +1812,12 @@ export const bookingEngineService = {
           };
         })
         .filter(Boolean);
+      // Program-mandatory services are added SERVER-SIDE (the client cannot drop them).
+      for (const mandatory of mandatoryPartnerServices(partnerCtx ? selected.additionalServices : [])) {
+        if (!chosenServices.some((service) => service.serviceId === mandatory.serviceId)) {
+          chosenServices.push({ ...mandatory, quantity: Math.max(1, Number(mandatory.quantity || 1)) });
+        }
+      }
 
       const normalizedChosenServices = chosenServices.map((service) => ({
         ...service,
@@ -1791,20 +1875,28 @@ export const bookingEngineService = {
       );
 
       // Recalculate deposit at checkout time with full totals (add-ons, insurance, fees)
-      const checkoutDeposit = depositSnapshot({
-        location: search.location,
-        quote: { ...selected.quote, baseTotal: Number(selected.quote?.baseTotal || selected.quote?.subtotal || 0) },
-        addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal + websiteFeesTotal),
-        bookingChannel: 'WEBSITE',
-        // Checkout knows the renter (the availability listing doesn't), so the
-        // local/non-local deposit rule classifies on real licence/address data.
-        renter: { licenseState: customer?.licenseState, addressState: customer?.state }
-      });
+      const ruleDeposit = depositSnapshot({
+            location: search.location,
+            quote: { ...selected.quote, baseTotal: Number(selected.quote?.baseTotal || selected.quote?.subtotal || 0) },
+            addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal + websiteFeesTotal),
+            bookingChannel: partnerCtx ? 'PARTNER' : 'WEBSITE',
+            // Checkout knows the renter (the availability listing doesn't), so the
+            // local/non-local deposit rule classifies on real licence/address data.
+            renter: { licenseState: customer?.licenseState, addressState: customer?.state }
+          });
+      // Insurer preference flow (Hector 2026-09-05): no number shown, nothing collected
+      // ONLINE — only the due-now deposit is zeroed. The location's security-deposit rule
+      // (the hold at pickup) is a counter matter and stays on the snapshot for check-out.
+      const checkoutDeposit = partnerBooking?.noOnlinePayment
+        ? { ...ruleDeposit, required: false, mode: null, value: null, amountDue: 0 }
+        : ruleDeposit;
 
       const reservation = await reservationsService.create({
-        reservationNumber: generateReservationNumber('WEB'),
-        sourceRef: `PUBLICBOOK:${crypto.randomBytes(8).toString('hex')}`,
-        bookingChannel: 'WEBSITE',
+        reservationNumber: generateReservationNumber(partnerCtx ? 'PTR' : 'WEB'),
+        sourceRef: partnerCtx
+          ? `PARTNER:${partnerCtx.partner.slug}:${crypto.randomBytes(8).toString('hex')}`
+          : `PUBLICBOOK:${crypto.randomBytes(8).toString('hex')}`,
+        bookingChannel: partnerCtx ? 'PARTNER' : 'WEBSITE',
         status: checkoutDeposit?.required ? 'NEW' : 'CONFIRMED',
         customerId: customer.id,
         vehicleTypeId: selected.vehicleType.id,
@@ -1816,7 +1908,10 @@ export const bookingEngineService = {
         estimatedTotal,
         paymentStatus: 'PENDING',
         sendConfirmationEmail: false,
-        notes: '[PUBLIC BOOKING] Created from booking web'
+        ...(partnerBooking ? partnerBooking.stamps : {}),
+        notes: partnerCtx
+          ? `[PARTNER BOOKING] Program "${partnerCtx.partner.name}" (${partnerCtx.partner.code}) via ${partnerCtx.partner.slug}${partnerBooking?.stamps?.partnerPreferredVehicleTypeId ? ' — vehicle type is a PREFERENCE; assign at pickup per coverage' : ''}`
+          : '[PUBLIC BOOKING] Created from booking web'
       }, { tenantId: tenant.id });
 
       const securityDepositRuleJson = checkoutDeposit?.securityDepositRule
@@ -1837,7 +1932,7 @@ export const bookingEngineService = {
           securityDepositRequired: !!checkoutDeposit?.securityDepositRequired,
           securityDepositAmount: checkoutDeposit?.securityDepositAmount ?? 0,
           securityDepositRuleJson,
-          source: 'PUBLIC_BOOKING'
+          source: partnerCtx ? 'PARTNER_BOOKING' : 'PUBLIC_BOOKING'
         },
         update: {
           dailyRate: selected.quote.dailyRate,
@@ -1851,7 +1946,7 @@ export const bookingEngineService = {
           securityDepositRequired: !!checkoutDeposit?.securityDepositRequired,
           securityDepositAmount: checkoutDeposit?.securityDepositAmount ?? 0,
           securityDepositRuleJson,
-          source: 'PUBLIC_BOOKING'
+          source: partnerCtx ? 'PARTNER_BOOKING' : 'PUBLIC_BOOKING'
         }
       });
 
@@ -2018,7 +2113,8 @@ export const bookingEngineService = {
       const customerInfoRequest = await issueCustomerInfoRequest(reservation);
       const [signatureRequest, paymentRequest] = await Promise.all([
         issuePortalRequest('signature', reservation, { sendEmailToCustomer: true }),
-        issuePortalRequest('payment', reservation)
+        // No payment request when the program confirms the amount at pickup.
+        partnerBooking?.noOnlinePayment ? Promise.resolve(null) : issuePortalRequest('payment', reservation)
       ]);
       const nextActions = {
         customerInfo: customerInfoRequest,
@@ -2046,6 +2142,15 @@ export const bookingEngineService = {
       return {
         bookingType: 'RENTAL',
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+        partner: partnerCtx
+          ? {
+              slug: partnerCtx.partner.slug,
+              name: partnerCtx.partner.name,
+              vehicleMode: partnerCtx.partner.vehicleMode,
+              priceConfirmedAtPickup: !!partnerBooking?.noOnlinePayment,
+              preferredVehicleTypeId: partnerBooking?.stamps?.partnerPreferredVehicleTypeId || null
+            }
+          : null,
         customer: {
           id: customer.id,
           firstName: customer.firstName,

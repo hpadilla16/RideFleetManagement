@@ -13,7 +13,7 @@
  */
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
-import { effectiveStatus, hostedUrl } from './partner-rules.js';
+import { effectiveStatus, hostedUrl, applyDiscount } from './partner-rules.js';
 import { logoPublicUrl } from './partnerships.service.js';
 
 function num(value) {
@@ -71,12 +71,41 @@ export const partnerPublicService = {
 
     // Vehicle types the program can show / offer as a preference.
     const priced = new Map((partner.rate?.rateItems || []).filter((it) => num(it.daily) > 0).map((it) => [it.vehicleTypeId, it]));
+    // Discount mode has no book of its own: the landing's "from" price is the tenant's
+    // ONLINE rental rate with the program % applied (lowest daily per class across the
+    // program's locations). Display-only — rental-search re-prices every real quote.
+    const discountPct = !partner.rateId ? num(partner.discountPct) : 0;
+    const discounted = new Map();
+    if (discountPct > 0) {
+      const onlineItems = await prisma.rateItem.findMany({
+        where: {
+          daily: { gt: 0 },
+          rate: {
+            tenantId: tenant.id,
+            purpose: 'RENTAL',
+            displayOnline: true,
+            isActive: true,
+            ...(scopedIds?.length ? { OR: [{ locationId: { in: scopedIds } }, { locationId: null }] } : {})
+          }
+        },
+        select: { vehicleTypeId: true, daily: true, weekly: true, monthly: true }
+      });
+      for (const it of onlineItems) {
+        const prev = discounted.get(it.vehicleTypeId);
+        if (!prev || num(it.daily) < num(prev.daily)) discounted.set(it.vehicleTypeId, it);
+      }
+    }
     const allowed = Array.isArray(partner.allowedVehicleTypeIds) ? partner.allowedVehicleTypeIds.map(String) : null;
+    // Classes the program can actually price (a program price book, or the online book
+    // in discount mode). A preference the search would refuse (no price → dropped by
+    // searchRental) is never offered on the landing (Innovation F2 #3).
+    const priceable = partner.rateId ? new Set(priced.keys()) : new Set(discounted.keys());
     const typeWhere = { tenantId: tenant.id };
-    if (partner.vehicleMode === 'PREFERRED_TYPE') typeWhere.id = { in: allowed || [] };
+    if (partner.vehicleMode === 'PREFERRED_TYPE') typeWhere.id = { in: (allowed || []).filter((id) => priceable.has(id)) };
     else if (partner.vehicleMode === 'ASSIGN_AT_PICKUP') typeWhere.id = partner.defaultVehicleTypeId || '__none__';
     else if (partner.rateId) typeWhere.id = { in: [...priced.keys()].filter((id) => !allowed || allowed.includes(id)) };
-    else if (allowed) typeWhere.id = { in: allowed };
+    else if (allowed) typeWhere.id = { in: allowed.filter((id) => priceable.has(id)) };
+    else if (!partner.rateId) typeWhere.id = { in: [...priceable] };
     const types = await prisma.vehicleType.findMany({
       where: typeWhere,
       select: { id: true, code: true, name: true, description: true, imageUrl: true, passengers: true, bags: true, doors: true, transmission: true },
@@ -125,12 +154,17 @@ export const partnerPublicService = {
       },
       vehicleTypes: types.map((vt) => {
         const it = priced.get(vt.id);
+        if (it) {
+          return { ...vt, programDaily: num(it.daily), programWeekly: num(it.weekly), programMonthly: num(it.monthly) };
+        }
+        const on = discounted.get(vt.id);
+        // Discount mode: online rate minus the program % ("from" price; quotes re-price live).
+        // Weekly/monthly are discounted only when the online book publishes them.
         return {
           ...vt,
-          // Program "from" price per day (rate mode only; discount mode prices come from rental-search).
-          programDaily: it ? num(it.daily) : null,
-          programWeekly: it ? num(it.weekly) : null,
-          programMonthly: it ? num(it.monthly) : null
+          programDaily: on ? applyDiscount(on.daily, discountPct) : null,
+          programWeekly: on && num(on.weekly) > 0 ? applyDiscount(on.weekly, discountPct) : null,
+          programMonthly: on && num(on.monthly) > 0 ? applyDiscount(on.monthly, discountPct) : null
         };
       }),
       services: partner.services
