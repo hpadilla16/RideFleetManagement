@@ -84,6 +84,29 @@ regexes = [
   '''sk_live_LEAK77xy''',
   '''pk_live_LEAK77xy''',
   '''whsec_LEAK77xy''',
+
+  # ── generic-api-key false positives in backend/src/**/*.test.mjs ────────────
+  # Added 2026-09-05, after secret-scan went red on main (runs for 24142b41,
+  # a8c86ed0, 45afafa4). All four are fixture literals that the stock
+  # generic-api-key rule matches on SHAPE (a `key:`/`token`/`ApiKey` word next
+  # to an identifier-looking string). Each was verified with
+  # `git log --all -S<value>` before listing: every one lives in exactly ONE
+  # test file across the full history and in no .env, ops script or workflow.
+  # Listed as exact literals — not a path-wide exemption — so a real secret
+  # committed into a *.test.mjs file still trips the gate.
+  # refund-rails.test.mjs: SPIN idempotency key derived from the notes string
+  '''RFM-RES-1-1756224061''',
+  # telematics-onestepgps.test.mjs: it is the TEST TITLE ("hasApiKey/clearApiKey
+  # work"), not a value at all
+  '''hasApiKey/clearApiKey''',
+  # card-on-file.test.mjs (43f49d71, file no longer at tip): dummy iPOS token.
+  # .gitleaksignore already covers line 65 of that commit by fingerprint; the
+  # same literal recurs on line 72, so allowlist the value instead of chasing
+  # line numbers.
+  '''tok_saved_abc123''',
+  # counter-orchestrator.service.test.mjs (0464d39f, file no longer at tip):
+  # makeRefId input, a fake reservation id
+  '''reservation_xyz_12345678''',
 ]
 
 # Example/template files that only ever contain placeholders.
