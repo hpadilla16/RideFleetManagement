@@ -1,9 +1,11 @@
 /**
  * Is kiosk payment LIVE — for a transaction, and for a person's counter?
  *
- * Pure, dependency-free on purpose: auth.service.js builds /api/auth/me from
- * it, and auth is the lowest layer — it must not pull the kiosk feature module
- * (prisma, logger, KioskError) into its boot chain. The kiosk payment guard
+ * Kept out of the kiosk feature module on purpose: auth.service.js builds
+ * /api/auth/me from it, and auth is the lowest layer — it must not pull the
+ * kiosk module (logger, KioskError) into its boot chain. Prisma is loaded
+ * LAZILY and only on the unscoped-tenant path, so this file stays importable
+ * in database-free suites. The kiosk payment guard
  * imports the same functions, so the guard and the /me flag can never disagree
  * about what "live" means.
  */
@@ -56,14 +58,26 @@ export function kioskPaymentLiveForLocations(locationIds = [], now = Date.now())
  * switch is off, and a SUPER_ADMIN (no tenant) never touches the database
  * here. `deps.prisma` is injectable for tests.
  */
-export async function kioskPaymentLiveForUser({ tenantId = null, locationIds = [] } = {}, deps = {}) {
+export async function kioskPaymentLiveForUser({ role = null, tenantId = null, locationIds = [] } = {}, deps = {}) {
   if (kioskPaymentEnvGateReason()) return false;
   const allowed = kioskPaymentLocationAllowlist();
   if (!allowed.length) return false;
   const mine = (Array.isArray(locationIds) ? locationIds : []).map((v) => String(v)).filter(Boolean);
   if (mine.length) return mine.some((id) => allowed.includes(id));
-  if (!tenantId) return true; // SUPER_ADMIN: every tenant, every location
-  const prisma = deps.prisma || (await import('./prisma.js')).prisma;
-  const rows = await prisma.location.findMany({ where: { tenantId, id: { in: allowed } }, select: { id: true } });
-  return rows.length > 0;
+  // SUPER_ADMIN is a ROLE, not "tenantId is null" (a super admin may carry a
+  // home tenant — tenant-scope.js keys the bypass on role too). Every tenant,
+  // every location, no query.
+  if (String(role || '').toUpperCase() === 'SUPER_ADMIN') return true;
+  // Unscoped tenant user: live only if THEIR tenant owns an allowlisted counter.
+  // No tenant to check against → closed.
+  if (!tenantId) return false;
+  try {
+    const prisma = deps.prisma || (await import('./prisma.js')).prisma;
+    const rows = await prisma.location.findMany({ where: { tenantId, id: { in: allowed } }, select: { id: true } });
+    return rows.length > 0;
+  } catch {
+    // A display-only flag must never turn a Location hiccup into a logged-out
+    // session (buildSessionUser sits under requireAuth). Closed, quietly.
+    return false;
+  }
 }

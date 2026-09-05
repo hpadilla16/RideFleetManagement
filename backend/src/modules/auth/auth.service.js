@@ -193,7 +193,7 @@ async function buildSessionUser(user) {
     // from the same env gate the payment guard enforces, so the two cannot
     // disagree. Absent/false means "not live": consumers must fail closed.
     features: {
-      kioskPaymentLive: await kioskPaymentLiveForUser({ tenantId: user.tenantId || null, locationIds }),
+      kioskPaymentLive: await kioskPaymentLiveForUser({ role: user.role, tenantId: user.tenantId || null, locationIds }),
     },
     // Program scoping (2026-07-02): raw enum value (RENTAL_ONLY | LOANER_ONLY
     // | BOTH). Consumers resolve the ADMIN/SUPER_ADMIN bypass via

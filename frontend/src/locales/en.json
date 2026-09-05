@@ -1835,6 +1835,7 @@
     "done": "Did you get it done?",
     "doneOpportunistic": "The module marks itself complete when the real record exists — walking it does not count as doing it.",
     "adminOnly": "That screen needs an admin — here's what they'll do.",
+    "notLive": "Not live at your counter yet — here's what it will do when it is.",
     "footer": "Explains and guides · never performs actions",
     "preflight": {
       "label": "Pre-flight · before teaching",

@@ -707,7 +707,7 @@ export function ctasFor(intent, viewer = {}) {
     teach,
     // A role-gated intent hides navigation too: sending an agent to a screen
     // they cannot use is the same broken promise as touring them through it.
-    go: adminOnly ? null : (intent.route || null),
+    go: (adminOnly || notLive) ? null : (intent.route || null),
     article: intent.articleSlug || null,
     adminOnly,
     notLive,

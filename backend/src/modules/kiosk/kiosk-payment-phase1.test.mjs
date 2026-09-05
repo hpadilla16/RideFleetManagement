@@ -653,9 +653,11 @@ import { kioskPaymentLiveForUser } from '../../lib/kiosk-payment-live.js';
 test('live-for-user: an UNSCOPED tenant admin is checked against THEIR tenant\'s locations (one allowlist for all tenants)', async () => {
   const fakePrisma = { location: { findMany: async ({ where }) => (where.tenantId === 'intl' ? [{ id: 'loc1' }] : []) } };
   await withEnvAsync(OPEN, async () => {
-    assert.equal(await kioskPaymentLiveForUser({ tenantId: 'intl', locationIds: [] }, { prisma: fakePrisma }), true, 'International owns loc1');
-    assert.equal(await kioskPaymentLiveForUser({ tenantId: 'zezgo', locationIds: [] }, { prisma: fakePrisma }), false, 'Zezgo owns none of the allowlisted counters');
-    assert.equal(await kioskPaymentLiveForUser({ tenantId: null, locationIds: [] }, { prisma: { location: { findMany: async () => { throw new Error('must not query'); } } } }), true, 'SUPER_ADMIN: no tenant, no query');
+    assert.equal(await kioskPaymentLiveForUser({ role: 'ADMIN', tenantId: 'intl', locationIds: [] }, { prisma: fakePrisma }), true, 'International owns loc1');
+    assert.equal(await kioskPaymentLiveForUser({ role: 'ADMIN', tenantId: 'zezgo', locationIds: [] }, { prisma: fakePrisma }), false, 'Zezgo owns none of the allowlisted counters');
+    assert.equal(await kioskPaymentLiveForUser({ role: 'SUPER_ADMIN', tenantId: 'intl', locationIds: [] }, { prisma: { location: { findMany: async () => { throw new Error('must not query'); } } } }), true, 'SUPER_ADMIN by ROLE, even with a home tenant: no query');
+    assert.equal(await kioskPaymentLiveForUser({ role: 'ADMIN', tenantId: null, locationIds: [] }, { prisma: { location: { findMany: async () => { throw new Error('must not query'); } } } }), false, 'a tenant role with no tenant has nothing to check against → closed');
+    assert.equal(await kioskPaymentLiveForUser({ role: 'ADMIN', tenantId: 'intl', locationIds: [] }, { prisma: { location: { findMany: async () => { throw new Error('db hiccup'); } } } }), false, 'a failing query is CLOSED, never a thrown session');
     assert.equal(await kioskPaymentLiveForUser({ tenantId: 'zezgo', locationIds: ['loc2'] }, { prisma: { location: { findMany: async () => { throw new Error('must not query'); } } } }), true, 'scoped: answered from the ids, no query');
   });
   await withEnvAsync({ ...OPEN, KIOSK_PAYMENT_LIVE: 'false' }, async () => {

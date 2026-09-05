@@ -1835,6 +1835,7 @@
     "done": "¿Lo lograste?",
     "doneOpportunistic": "El módulo se marca completo cuando existe el récord real — caminarlo no cuenta como hacerlo.",
     "adminOnly": "Esa pantalla la maneja un admin — esto es lo que va a hacer.",
+    "notLive": "Todavía no está activo en tu sede — esto es lo que hará cuando lo esté.",
     "footer": "Explica y guía · nunca ejecuta acciones",
     "preflight": {
       "label": "Pre-flight · antes de enseñar",
