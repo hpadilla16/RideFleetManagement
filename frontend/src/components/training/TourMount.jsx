@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { viewerFromMe } from '../../lib/training/viewer';
 import { USER_KEY } from '../../lib/client';
 import { TourHost } from './TourHost';
 
@@ -29,15 +30,7 @@ export function TourMount() {
       if (!raw) return;
       const me = JSON.parse(raw);
       if (!me?.role) return;
-      setViewer({
-        role: me.role,
-        // Curriculum gates are per-tenant module keys. Absent means enabled,
-        // matching isModuleEnabled's own default, so a stale cached user can
-        // only ever show MORE of the tour, never hide a module wrongly.
-        isModuleEnabled: (key) => me?.moduleAccess?.[key] !== false,
-        // Feature reality from the server; absent means not live (fail-closed).
-        hasFeature: (key) => me?.features?.[key] === true,
-      });
+      setViewer(viewerFromMe(me));
     } catch { /* no cached user — customer-facing pages, nothing to tour */ }
   }, []);
 

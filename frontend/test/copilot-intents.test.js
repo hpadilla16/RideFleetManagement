@@ -161,6 +161,8 @@ describe('ctasFor — role & gate awareness (guardrail 4)', () => {
     const intent = findIntent('kiosk-payment');
     const off = ctasFor(intent, { role: 'AGENT', isModuleEnabled: () => true });
     expect(off.teach).toBe(false);
+    expect(off.adminOnly, 'not live is not "an admin does that"').toBe(false);
+    expect(off.notLive).toBe(true);
     const on = ctasFor(intent, { role: 'AGENT', isModuleEnabled: () => true, hasFeature: (k) => k === 'kioskPaymentLive' });
     expect(on.teach).toBe(true);
   });

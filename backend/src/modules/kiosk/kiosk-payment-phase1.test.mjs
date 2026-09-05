@@ -648,3 +648,25 @@ test('live-for-locations: my location must be allowlisted; an unscoped user coun
     assert.equal(kioskPaymentLiveForLocations([]), false, 'no allowlist = not live, even unscoped');
   });
 });
+
+import { kioskPaymentLiveForUser } from '../../lib/kiosk-payment-live.js';
+test('live-for-user: an UNSCOPED tenant admin is checked against THEIR tenant\'s locations (one allowlist for all tenants)', async () => {
+  const fakePrisma = { location: { findMany: async ({ where }) => (where.tenantId === 'intl' ? [{ id: 'loc1' }] : []) } };
+  await withEnvAsync(OPEN, async () => {
+    assert.equal(await kioskPaymentLiveForUser({ tenantId: 'intl', locationIds: [] }, { prisma: fakePrisma }), true, 'International owns loc1');
+    assert.equal(await kioskPaymentLiveForUser({ tenantId: 'zezgo', locationIds: [] }, { prisma: fakePrisma }), false, 'Zezgo owns none of the allowlisted counters');
+    assert.equal(await kioskPaymentLiveForUser({ tenantId: null, locationIds: [] }, { prisma: { location: { findMany: async () => { throw new Error('must not query'); } } } }), true, 'SUPER_ADMIN: no tenant, no query');
+    assert.equal(await kioskPaymentLiveForUser({ tenantId: 'zezgo', locationIds: ['loc2'] }, { prisma: { location: { findMany: async () => { throw new Error('must not query'); } } } }), true, 'scoped: answered from the ids, no query');
+  });
+  await withEnvAsync({ ...OPEN, KIOSK_PAYMENT_LIVE: 'false' }, async () => {
+    assert.equal(await kioskPaymentLiveForUser({ tenantId: 'intl', locationIds: [] }, { prisma: { location: { findMany: async () => { throw new Error('gate closed: must not query'); } } } }), false);
+  });
+});
+async function withEnvAsync(patch, fn) {
+  const saved = Object.fromEntries(LIVE_KEYS.map((k) => [k, process.env[k]]));
+  for (const k of LIVE_KEYS) delete process.env[k];
+  Object.assign(process.env, patch);
+  try { return await fn(); } finally {
+    for (const k of LIVE_KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+}

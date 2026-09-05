@@ -37,6 +37,7 @@
 
 import logger from '../../lib/logger.js';
 import { KioskError } from './kiosk-device.service.js';
+import { kioskPaymentEnvGateReason } from '../../lib/kiosk-payment-live.js';
 
 export const DEFAULT_MAX_AMOUNT = 5;
 
@@ -68,45 +69,9 @@ export function kioskPaymentMaxAmount() {
  * KioskError(403 KIOSK_PAYMENT_BLOCKED) with a `reason` naming the first gate
  * that refused (audit trail; never leaked to the guest screen verbatim).
  */
-/**
- * The ENVIRONMENT half of the gate — kill switch, prod double key, expiry
- * window — as a reason string, or null when it is open. Shared by the
- * per-transaction assert below and by the per-user "is this live for my
- * counter?" answer that /api/auth/me exposes, so the two can never disagree
- * about what "live" means.
- */
-export function kioskPaymentEnvGateReason(now = Date.now()) {
-  // 1 + 2 — kill switch, with a production double key.
-  if (!envFlag('KIOSK_PAYMENT_LIVE')) return 'FLAG_OFF';
-  if (process.env.NODE_ENV === 'production' && !envFlag('KIOSK_PAYMENT_LIVE_ALLOW_PROD')) return 'PROD_DOUBLE_KEY_MISSING';
-  // 6 — auto-expiring flag: an ISO timestamp past which the switch self-disables.
-  const until = String(process.env.KIOSK_PAYMENT_LIVE_UNTIL || '').trim();
-  if (!until) return 'NO_EXPIRY_SET';
-  const untilTs = new Date(until).getTime();
-  if (!Number.isFinite(untilTs)) return 'BAD_EXPIRY';
-  if (now > untilTs) return 'WINDOW_EXPIRED';
-  return null;
-}
-
-/**
- * Is kiosk payment live at THIS person's counter? (Ride University, 2026-09-05:
- * the payment module is hidden until the feature is real where they work.)
- *
- * True only when the env gate is open AND the location allowlist names one of
- * the person's locations. A person scoped to no location sees every location,
- * so any allowlisted location counts for them. Reservation and device
- * allowlists are per-transaction and deliberately NOT consulted here — they
- * say which rental may pay, not whether the feature exists at the counter.
- * Fail-closed on every branch: no allowlist, no live.
- */
-export function kioskPaymentLiveForLocations(locationIds = [], now = Date.now()) {
-  if (kioskPaymentEnvGateReason(now)) return false;
-  const allowed = envList('KIOSK_PAYMENT_LOCATION_ALLOWLIST');
-  if (!allowed.length) return false;
-  const mine = (Array.isArray(locationIds) ? locationIds : []).map((v) => String(v)).filter(Boolean);
-  if (!mine.length) return true; // unscoped user: sees every location, one of which is live
-  return mine.some((id) => allowed.includes(id));
-}
+// The env gate and the per-location answer live in lib/ (pure, no logger) so
+// auth.service.js can build /api/auth/me from the SAME definition of "live".
+export { kioskPaymentEnvGateReason, kioskPaymentLiveForLocations, kioskPaymentLiveForUser } from '../../lib/kiosk-payment-live.js';
 
 export function assertKioskPaymentAllowed({ amount, reservationId, deviceId, locationId } = {}) {
   const block = (reason, message) => {
