@@ -90,6 +90,7 @@ import { globalSearchRouter } from './modules/search/global-search.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
 import { shuttleRequestsRouter } from './modules/shuttle/shuttle-requests.routes.js';
 import { quotesRouter } from './modules/quotes/quotes.routes.js';
+import { partnershipsRouter } from './modules/partnerships/partnerships.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
 // Phase 0 (2026-06-09): the toll auto-sync scheduler MOVED to the worker
 // process (src/worker.js) — its sweeps spawn headless Chromium pages and that
@@ -350,6 +351,11 @@ app.use('/api/shuttle-monitor', requireAuth, tenantRateLimit, requireModuleAcces
 app.use('/api/shuttle-zones', tenantRateLimit, shuttleZonesRouter);
 // Quotes module (2026-07-17) — doc/quotes-module-plan-2026-07-17.md
 app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes'), quotesRouter);
+// Partnerships module (2026-09-05) — doc/partnerships-module-plan-2026-09-05.md.
+// ADMIN/OPS configuration surface (prices, terms, hosted page + QR); tenant
+// opt-in via Tenant.partnershipsEnabled (module-access normalize). The public
+// landing lives on publicBookingRouter (/api/public/booking/partners/:slug).
+app.use('/api/partnerships', requireAuth, tenantRateLimit, requireModuleAccess('partnerships'), requireRole('ADMIN', 'OPS'), partnershipsRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, tenantRateLimit, knowledgeBaseRouter);

@@ -41,6 +41,10 @@ export const MODULE_KEYS = [
   'citations',
   'kiosk',
   'marketIntelligence',
+  // Partnerships (2026-09-05): commercial alliances with their own terms, price
+  // book and hosted page. Tenant opt-in (Tenant.partnershipsEnabled, like
+  // marketIntelligence); default ON for ADMIN/OPS, OFF for agents and hosts.
+  'partnerships',
   'settings',
   'security',
   'tenants'
@@ -54,7 +58,8 @@ export const MODULE_KEYS = [
 export const MODULE_DENIED_HINTS = {
   paymentActions:
     'You can still record a payment taken on the card terminal — ask an admin if ' +
-    'you need to charge or refund a card.'
+    'you need to charge or refund a card.',
+  partnerships: 'Ask an admin to open Partnerships for you, or to turn the module on for the company.'
 };
 
 export const MODULE_LABELS = {
@@ -77,6 +82,7 @@ export const MODULE_LABELS = {
   citations: 'Citations',
   kiosk: 'Kiosk',
   marketIntelligence: 'Market Intelligence',
+  partnerships: 'Partnerships',
   settings: 'Settings',
   security: 'Security',
   tenants: 'Tenants'
@@ -110,6 +116,7 @@ function hostRoleModuleMap() {
     citations: false,
     kiosk: false,
     marketIntelligence: false,
+    partnerships: false,
     settings: false,
     security: false,
     tenants: false
@@ -169,6 +176,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       settings: true,
       security: true,
       marketIntelligence: true,
+      partnerships: true,
       tenants: false
     };
   }
@@ -197,6 +205,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       settings: false,
       security: false,
       marketIntelligence: true,
+      partnerships: true,
       tenants: false
     };
   }
@@ -227,6 +236,8 @@ export function roleAllowedModuleMap(roleOrUser) {
     settings: false,
     security: false,
     marketIntelligence: true,
+    // Partnerships is an ADMIN/OPS configuration surface (prices, terms, QR).
+    partnerships: false,
     tenants: false
   };
 }
@@ -257,6 +268,7 @@ export function defaultTenantModuleConfig(tenant = null) {
     // normalizeTenantModuleConfig below.
     kiosk: false,
     marketIntelligence: !!tenant?.marketIntelligenceEnabled,
+    partnerships: !!tenant?.partnershipsEnabled,
     settings: true,
     security: true,
     tenants: false
@@ -278,6 +290,9 @@ function normalizeTenantModuleConfig(raw = {}, tenant = null) {
     // Kiosk is default-OFF: only an EXPLICIT true in the stored config enables it.
     kiosk: (raw || {})?.kiosk === true,
     marketIntelligence: !!parsed.marketIntelligence && !!tenant?.marketIntelligenceEnabled,
+    // Same beta.307 shape as marketIntelligence: the tenant entitlement is the
+    // ceiling; the stored switch can only turn it OFF below that ceiling.
+    partnerships: !!parsed.partnerships && !!tenant?.partnershipsEnabled,
     tenants: false
   };
   return next;
@@ -299,7 +314,8 @@ export async function getTenantModuleConfig(tenantId) {
       carSharingEnabled: true,
       dealershipLoanerEnabled: true,
       tollsEnabled: true,
-      marketIntelligenceEnabled: true
+      marketIntelligenceEnabled: true,
+      partnershipsEnabled: true
     });
   }
   const tenant = await prisma.tenant.findUnique({
@@ -309,7 +325,8 @@ export async function getTenantModuleConfig(tenantId) {
       carSharingEnabled: true,
       dealershipLoanerEnabled: true,
       tollsEnabled: true,
-      marketIntelligenceEnabled: true
+      marketIntelligenceEnabled: true,
+      partnershipsEnabled: true
     }
   });
   if (!tenant) return defaultTenantModuleConfig(null);
@@ -330,12 +347,14 @@ export async function updateTenantModuleConfig(tenantId, payload = {}) {
     // marketIntelligenceEnabled MUST be selected: normalizeTenantModuleConfig
     // gates marketIntelligence on it, so omitting it forced the module OFF on
     // every save (the tenant-modules toggle would never stick). 2026-07-14.
+    // partnershipsEnabled likewise (2026-09-05) — same trap, same fix.
     select: {
       id: true,
       carSharingEnabled: true,
       dealershipLoanerEnabled: true,
       tollsEnabled: true,
-      marketIntelligenceEnabled: true
+      marketIntelligenceEnabled: true,
+      partnershipsEnabled: true
     }
   });
   if (!tenant) throw new Error('Tenant not found');

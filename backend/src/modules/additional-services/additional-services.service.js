@@ -76,11 +76,15 @@ async function resolveScopedLinkedFeeId(linkedFeeId, scope = {}) {
 }
 
 export const additionalServicesService = {
-  list({ locationId, activeOnly = false, tenantId } = {}) {
+  list({ locationId, activeOnly = false, tenantId, includePartnerOnly = false } = {}) {
     return listWithLinkedFee({
       where: {
         ...(tenantId ? { tenantId } : {}),
         ...(locationId ? { OR: [{ locationId }, { locationId: null }] } : {}),
+        // Partner-only services (AdditionalService.partnerId) are edited from
+        // /partnerships; the general Settings list hides them so nobody flips
+        // one displayOnline by hand (partnerships.test.mjs guard).
+        ...(includePartnerOnly ? {} : { partnerId: null }),
         isActive: activeOnly ? true : undefined
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]

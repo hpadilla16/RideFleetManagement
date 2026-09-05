@@ -63,7 +63,10 @@ export const NAV_SECTIONS = [
   ] },
   { key: 'growth', labelKey: 'nav.sectionGrowth', items: [
     { href: '/market', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'marketIntelligence', tour: 'nav-market', icon: 'trend' },
-    { href: '/suggestions', labelKey: 'nav.pricingSuggestions', adminOnly: true, moduleKey: 'marketIntelligence', icon: 'percent' }
+    { href: '/suggestions', labelKey: 'nav.pricingSuggestions', adminOnly: true, moduleKey: 'marketIntelligence', icon: 'percent' },
+    // Partnerships (2026-09-05, approved mockup): alliances with their own
+    // price book, terms and hosted page + QR. Tenant opt-in via module access.
+    { href: '/partnerships', labelKey: 'nav.partnerships', adminOnly: true, moduleKey: 'partnerships', icon: 'handshake' }
   ] },
   { key: 'admin', labelKey: 'nav.sectionAdmin', items: [
     { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people', tour: 'nav-people', icon: 'idcard' },
@@ -106,6 +109,7 @@ const NAV_ICON_PATHS = {
   chart: '<path d="M3 3v18h18"/><path d="M8 17v-5M13 17V8M18 17v-3"/>',
   trend: '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
   percent: '<circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/><path d="M19 5 5 19"/>',
+  handshake: '<path d="M11 17 8.5 14.5a2 2 0 0 1 0-2.8l1.4-1.4"/><path d="m14 8-1.6 1.6a2 2 0 0 0 0 2.8l.6.6a2 2 0 0 0 2.8 0L17 11.8"/><path d="M2 9.5 5.5 6l4 1.5L13 6l4.5 1L22 9.5"/><path d="m17 12 2.5 2.5-4 4-1.5-1.5"/><path d="m7 12-2.5 2.5 4 4L10 17"/>',
   idcard: '<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="9" r="2.5"/><path d="M8 16.5a4 4 0 0 1 8 0"/>',
   lifebuoy: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.7 5.7 3.4 3.4M18.3 5.7l-3.4 3.4M18.3 18.3l-3.4-3.4M5.7 18.3l3.4-3.4"/>',
   grad: '<path d="M22 9 12 4 2 9l10 5z"/><path d="M6 11.5V16c0 1.4 2.7 2.8 6 2.8s6-1.4 6-2.8v-4.5"/><path d="M22 9v5"/>',

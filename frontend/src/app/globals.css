@@ -1448,6 +1448,13 @@ label input[type="radio"],
 :root[data-theme='dark'] .status-chip.neutral { background: var(--surface-3); border-color: var(--border); color: var(--text-2); }
 :root[data-theme='dark'] .eyebrow { color: #c0a8ff; }
 :root[data-theme='dark'] .hero-pill { background: var(--p-50); color: #d9c9ff; border-color: var(--border-brand); }
+/* Partnerships (2026-09-05): readiness pills are <button>s that jump to a tab. Keep the
+   pill look on hover instead of the global button:hover fill (which repaints them --p-700). */
+button.hero-pill { box-shadow: none; cursor: pointer; }
+button.hero-pill:hover { background: var(--p-50); border-color: var(--border-brand); color: var(--p-800); box-shadow: none; }
+button.hero-pill-warn:hover { background: var(--warn-bg); border-color: var(--warn-bd); color: var(--warn-tx); }
+button.hero-pill:focus-visible { outline: 2px solid var(--p-500); outline-offset: 2px; }
+:root[data-theme='dark'] button.hero-pill:hover { color: #d9c9ff; }
 :root[data-theme='dark'] .surface-note { background: rgba(135,82,254,.10); color: var(--text-2); }
 :root[data-theme='dark'] .badge { background: var(--p-50); color: #d9c9ff; }
 :root[data-theme='dark'] tbody tr:nth-child(even) td { background: rgba(255,255,255,.02); }

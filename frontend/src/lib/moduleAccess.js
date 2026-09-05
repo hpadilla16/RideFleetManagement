@@ -58,6 +58,9 @@ export const MODULE_DEFINITIONS = [
   { key: 'citations', label: 'Citations' },
   { key: 'kiosk', label: 'Kiosk' },
   { key: 'marketIntelligence', label: 'Market Intelligence' },
+  // Partnerships (2026-09-05): commercial alliances with their own terms, price
+  // book and hosted page + QR. Tenant opt-in; ADMIN/OPS by default.
+  { key: 'partnerships', label: 'Partnerships' },
   { key: 'settings', label: 'Settings' },
   { key: 'security', label: 'Security' },
   { key: 'tenants', label: 'Tenants' }
@@ -92,12 +95,12 @@ export const ROLE_DEFAULT_MODULES = {
     'dashboard', 'reservations', 'paymentActions', 'vehicles', 'maintenance', 'customers',
     'people', 'planner', 'quotes', 'reports', 'carSharing', 'hostApp', 'employeeApp',
     'issueCenter', 'loaner', 'tolls', 'citations', 'kiosk', 'marketIntelligence',
-    'settings', 'security'
+    'partnerships', 'settings', 'security'
   ],
   OPS: [
     'dashboard', 'reservations', 'paymentActions', 'vehicles', 'maintenance', 'customers',
     'planner', 'quotes', 'reports', 'carSharing', 'hostApp', 'employeeApp', 'issueCenter',
-    'loaner', 'tolls', 'citations', 'kiosk', 'marketIntelligence'
+    'loaner', 'tolls', 'citations', 'kiosk', 'marketIntelligence', 'partnerships'
   ],
   // AGENT / counter staff. paymentActions is deliberately absent — Hector opens
   // it per person from the People screen when an agent genuinely needs it.
@@ -158,6 +161,7 @@ export function pathnameToModule(pathname = '') {
   // Admin pages only (/kiosks) — the public kiosk app (/kiosk) is device-token
   // authed and is NOT gated by user module access.
   if (path.startsWith('/kiosks')) return 'kiosk';
+  if (path.startsWith('/partnerships')) return 'partnerships';
   if (path.startsWith('/settings/security')) return 'security';
   if (path.startsWith('/settings')) return 'settings';
   if (path.startsWith('/tenants')) return 'tenants';

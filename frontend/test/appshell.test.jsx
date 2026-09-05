@@ -103,6 +103,9 @@ const OLD_FLAT_NAV = [
   { href: '/kiosks', moduleKey: 'kiosk' },
   { href: '/market', adminOnly: true, moduleKey: 'marketIntelligence' },
   { href: '/suggestions', adminOnly: true, moduleKey: 'marketIntelligence' },
+  // Partnerships (2026-09-05): alliance programs — Growth section, ADMIN/OPS
+  // config surface (adminOnly) behind the tenant opt-in module.
+  { href: '/partnerships', adminOnly: true, moduleKey: 'partnerships' },
   { href: '/knowledge-base' },
   { href: '/settings', moduleKey: 'settings' },
   { href: '/tenants', superOnly: true, moduleKey: 'tenants' },
@@ -230,9 +233,10 @@ describe('AppShell sectioned sidebar (2026-08-24 redesign)', () => {
   });
 
   it('renders no header for a section whose items are all gated away', () => {
-    // Growth = Market Intelligence + Pricing Suggestions, both adminOnly on the
-    // marketIntelligence module. Turn the module off: the whole section vanishes.
-    moduleAccessMocks.isModuleEnabled.mockImplementation((me, key) => key !== 'marketIntelligence');
+    // Growth = Market Intelligence + Pricing Suggestions (marketIntelligence
+    // module) + Partnerships (its own module, 2026-09-05). Turn both modules
+    // off: the whole section vanishes.
+    moduleAccessMocks.isModuleEnabled.mockImplementation((me, key) => key !== 'marketIntelligence' && key !== 'partnerships');
     render(<AppShell me={mockMe} logout={vi.fn()}>Content</AppShell>);
     expect(screen.queryByText('nav.marketIntelligence')).not.toBeInTheDocument();
     expect(screen.queryByText('nav.pricingSuggestions')).not.toBeInTheDocument();

@@ -116,6 +116,7 @@ async function loadActiveCatalog(tenantId, locationId) {
     where: {
       tenantId,
       isActive: true,
+      partnerId: null, // partner-only services never reach the kiosk (partnerships.test.mjs guard)
       ...(locationId ? { OR: [{ locationId }, { locationId: null }] } : {}),
     },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -144,7 +145,7 @@ async function assertServiceIdsInCatalog(tenantId, ids, label) {
   const clean = normalizeIdList(ids);
   if (!clean.length) return clean;
   const found = await prisma.additionalService.findMany({
-    where: { tenantId, isActive: true, id: { in: clean } },
+    where: { tenantId, isActive: true, partnerId: null, id: { in: clean } },
     select: { id: true },
   });
   const known = new Set(found.map((row) => row.id));

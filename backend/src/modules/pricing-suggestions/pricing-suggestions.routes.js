@@ -62,7 +62,8 @@ pricingRulesRouter.post('/', async (req, res, next) => {
 
     // Verify the rate belongs to the tenant before letting them attach a rule.
     const rate = await prisma.rate.findFirst({
-      where: { id: body.rateId, ...tenantWhere(scope) },
+      // Partnerships (2026-09-05): PricingRule never attaches to a partner (or loaner) book.
+      where: { id: body.rateId, ...tenantWhere(scope), purpose: { notIn: ['LOANER', 'PARTNER'] } },
       select: { id: true, tenantId: true },
     });
     if (!rate) return res.status(404).json({ error: 'Rate not found in your tenant' });

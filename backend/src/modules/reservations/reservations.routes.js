@@ -604,7 +604,7 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
     const [insurancePlans, additionalServices, rentalSettings, franchiseCfg, brandLocation] = await Promise.all([
       tenantId ? settingsService.getInsurancePlans({ tenantId }) : [],
       tenantId ? withTenantSchema(req.user.tenantId, (db) => db.additionalService.findMany({
-        where: { tenantId, isActive: true, displayOnline: true },
+        where: { tenantId, isActive: true, displayOnline: true, partnerId: null },
         orderBy: { sortOrder: 'asc' },
         select: {
           id: true, code: true, name: true, description: true, rate: true, dailyRate: true, weeklyRate: true, monthlyRate: true,

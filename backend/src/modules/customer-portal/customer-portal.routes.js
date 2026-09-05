@@ -1273,7 +1273,7 @@ customerPortalRouter.get('/customer-info/:token', portalRead, async (req, res, n
     ]);
     const additionalServices = tenantId
       ? await prisma.additionalService.findMany({
-          where: { tenantId, isActive: true, displayOnline: true },
+          where: { tenantId, isActive: true, displayOnline: true, partnerId: null },
           orderBy: { sortOrder: 'asc' },
           // dailyRate/weeklyRate must be returned so the portal UI can show per-day pricing
           // and the POST handler can honor PER_DAY services instead of treating them as flat.

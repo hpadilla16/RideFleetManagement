@@ -18,6 +18,7 @@ import logger from '../../lib/logger.js';
 import { guestMessagingRouter } from '../messaging/messaging.routes.js';
 import { tripChatRouter } from '../messaging/trip-chat.routes.js';
 import { aiSearchRouter } from '../ai-search/ai-search.routes.js';
+import { partnerPublicService } from '../partnerships/partner-public.service.js';
 
 export const publicBookingRouter = Router();
 
@@ -49,6 +50,28 @@ function publicTenantArgs(req) {
     tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined })
   };
 }
+
+// Partnerships (2026-09-05): the hosted landing payload for ONE program.
+// Same tenant scoping as every other public read (X-Tenant-Token forces the
+// tenant; legacy ?tenantSlug otherwise). A program that is not ACTIVE, is
+// outside validFrom/validTo, or belongs to another tenant is a uniform 404
+// with a `reason` — the storefront renders "programa no disponible" and NEVER
+// falls back to online pricing. no-store so a pause propagates instantly.
+publicBookingRouter.get('/partners/:slug', bookingReadGuard, async (req, res, next) => {
+  try {
+    const out = await partnerPublicService.getLanding({
+      ...publicTenantArgs(req),
+      slug: String(req.params.slug || ''),
+      countVisit: req.query?.preview !== '1'
+    });
+    res.set('Cache-Control', 'no-store');
+    if (!out.ok) return res.status(404).json({ error: 'Program not available', reason: out.reason });
+    res.json(out);
+  } catch (e) {
+    if (e instanceof AppError) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
 
 // Public: get all policies, add-ons, protection tiers for checkout display
 publicBookingRouter.get('/policies', bookingReadGuard, async (req, res) => {

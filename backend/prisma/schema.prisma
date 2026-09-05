@@ -534,6 +534,14 @@ model Tenant {
   dealershipLoanerEnabled   Boolean  @default(false)
   tollsEnabled              Boolean  @default(false)
   citationsEnabled          Boolean  @default(false)
+  // Partnerships module (2026-09-05, doc/partnerships-module-plan-2026-09-05.md).
+  // Opt-in per tenant like marketIntelligence: false hides the nav and 403s
+  // /api/partnerships. Enforced in lib/module-access.js normalizeTenantModuleConfig.
+  partnershipsEnabled       Boolean  @default(false)
+  // Where a partner's hosted page lives when the tenant runs its own storefront
+  // (Rent & Go: "https://partners.rentandgopr.com"). Null → RFM serves
+  // /p/<tenantSlug>/<partnerSlug>. Final URL = base + "/" + partner.slug.
+  partnerHostedBaseUrl      String?
   // A tenant that exists to be SHOWN, not operated (Hector, 2026-08-14).
   // Ride University's showcase track only runs against one of these, so a
   // convention demo can never put a real customer's name, licence or card
@@ -624,6 +632,7 @@ model Tenant {
   fleetReconciliationFlags    FleetReconciliationFlag[]
   customers                   Customer[]
   reservations                Reservation[]
+  partners                    Partner[]
   loanerRequests              LoanerRequest[]
   auditLogs                   AuditLog[]
   reservationIncidents        ReservationIncident[]
@@ -1460,6 +1469,22 @@ model Reservation {
 
   bookingChannel String @default("STAFF")
 
+  // Partnerships (2026-09-05): attribution + what the customer accepted. Stamped by
+  // the public checkout when a valid partnerSlug/code is present (F2); F1 only adds
+  // the columns. partnerTermsVersion / partnerDisclosureVersion snapshot WHICH text
+  // the customer accepted so a later edit never rewrites what was agreed.
+  partnerId                     String?
+  partner                       Partner? @relation(fields: [partnerId], references: [id])
+  partnerTermsVersion           Int?
+  // PREFERRED_TYPE (insurance partners): the type the customer ASKED for. vehicleTypeId
+  // carries the same value so the program price for that type is at hand at pickup;
+  // the counter may assign another class — this column keeps the request visible.
+  partnerPreferredVehicleTypeId String?
+  partnerDisclosureAcceptedAt   DateTime?
+  partnerDisclosureVersion      Int?
+  // Optional policy / claim number (PII — redactSensitive covers it by key name).
+  partnerPolicyNumber           String?
+
   // 2026-07-25 (LAX #4, QA B1): WHO originated this reservation (staff create
   // route stamps req.user). Soft reference (no FK churn on User). Read at
   // agreement creation to seed salesOwnerUserId when the originator is a
@@ -1654,6 +1679,7 @@ model Reservation {
   @@index([pickupLocationId, pickupAt])
   @@index([tenantId, createdAt])
   @@index([tenantId, status, pickupAt])
+  @@index([partnerId]) // Partnerships (2026-09-05): matches migration 20260914; keeps `db push` from dropping it
   @@index([repairOrderNumber])
   @@index([customerId])
   @@index([returnAt])
@@ -3117,6 +3143,12 @@ model ReservationAdditionalDriver {
 enum RatePurpose {
   RENTAL
   LOANER
+  // Partnerships (2026-09-05): a partner's negotiated price book. Isolated by
+  // PURPOSE, not by displayOnline — the staff quote path never sets
+  // displayOnline, and candidates sort createdAt desc, so a freshly created
+  // partner rate would otherwise win every counter quote for that class.
+  // Selected ONLY via resolveForRental(options.rateId).
+  PARTNER
 }
 
 model Rate {
@@ -3163,6 +3195,7 @@ model Rate {
   marketScrapeProfiles MarketScrapeProfile[] @relation("MarketScrapeProfileTargetRate")
   pricingRule          PricingRule?
   pricingSuggestions   PricingSuggestion[]
+  partner              Partner?
 
   @@unique([tenantId, rateCode])
   @@index([locationId, isActive])
@@ -3283,6 +3316,11 @@ model AdditionalService {
   displayDescription     String?
   displayPriority        Int                  @default(0)
   isActive               Boolean              @default(true)
+  // Partnerships (2026-09-05): a service that exists ONLY for one partner's
+  // program. Every non-partner catalog (public site, kiosk, counter, portal,
+  // admin list) filters partnerId: null — see partnerships.test.mjs drift guard.
+  partnerId              String?
+  partnerOwner           Partner?             @relation("PartnerOwnedServices", fields: [partnerId], references: [id])
 
   locationId  String?
   location    Location? @relation(fields: [locationId], references: [id])
@@ -3294,10 +3332,145 @@ model AdditionalService {
 
   commissionRules CommissionRule[]
   commissionLines AgreementCommissionLine[]
+  partnerServices PartnerService[]
 
   @@index([locationId, isActive])
   @@index([linkedFeeId])
   @@index([tenantId, isActive])
+  @@index([partnerId])
+}
+
+// =============================================================================
+// Partnerships module (2026-09-05) — doc/partnerships-module-plan-2026-09-05.md
+// A tenant's commercial alliances (insurers, co-ops, hotels): each with its own
+// terms, price book (Rate purpose=PARTNER or discountPct), service catalog and a
+// hosted landing page + QR. Reservations attribute via Reservation.partnerId.
+// =============================================================================
+
+enum PartnerStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  EXPIRED
+}
+
+enum PartnerKind {
+  INSURANCE
+  CORPORATE
+  COOPERATIVE
+  HOTEL
+  OTHER
+}
+
+/// "Show inventory" switch (Hector 2026-09-05):
+///   SHOW_INVENTORY   = ON  → classes with photo + program price
+///   PREFERRED_TYPE   = OFF + kind INSURANCE → customer picks the TYPE they prefer
+///                      and accepts the coverage disclosure (not guaranteed)
+///   ASSIGN_AT_PICKUP = OFF + any other kind → fixed default class, assigned at pickup
+enum PartnerVehicleMode {
+  SHOW_INVENTORY
+  PREFERRED_TYPE
+  ASSIGN_AT_PICKUP
+}
+
+model Partner {
+  id       String        @id @default(cuid())
+  tenantId String
+  tenant   Tenant        @relation(fields: [tenantId], references: [id])
+  /// URL identity: partners.rentandgopr.com/<slug>. Locked once published (printed on QR).
+  slug     String
+  /// Program code the customer / staff can type (Hertz CDP style): "ISLA26".
+  code     String
+  kind     PartnerKind   @default(OTHER)
+  name     String
+  /// "<bucket>:<path>" in the PUBLIC partner-assets bucket (a logo is not PII).
+  logoRef  String?
+  status   PartnerStatus @default(DRAFT)
+  validFrom DateTime?
+  validTo   DateTime?
+
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  /// {es:{eyebrow,heroTitle,heroSubtitle,partnerNote,benefits:[{icon,title,body}],ctaLabel}, en:{...}} — sanitized on write
+  landingJson  Json?
+  /// {es: html, en: html} — the program's own terms — sanitized on write (sanitize-html allowlist)
+  termsJson    Json?
+  /// Bumped on every terms edit; stamped on the reservation as partnerTermsVersion.
+  termsVersion Int     @default(1)
+  showTenantTerms   Boolean @default(true)
+  showTenantContact Boolean @default(true)
+
+  /// Rate with purpose=PARTNER, rateCode "PARTNER-<SLUG>", locationId null, displayOnline false.
+  rateId      String?  @unique
+  rate        Rate?    @relation(fields: [rateId], references: [id])
+  /// Alternative pricing when rateId is null: dailyRate = online × (1 − pct/100).
+  discountPct Decimal? @db.Decimal(5, 2)
+
+  vehicleMode           PartnerVehicleMode @default(SHOW_INVENTORY)
+  /// SHOW_INVENTORY: null = every class with a RateItem · PREFERRED_TYPE: the selectable types (≥1)
+  allowedVehicleTypeIds Json?
+  /// Required in ASSIGN_AT_PICKUP.
+  defaultVehicleTypeId  String?
+  /// PREFERRED_TYPE: {es, en} coverage disclosure the customer must accept — sanitized on write
+  coverageDisclosureJson    Json?
+  coverageDisclosureVersion Int    @default(1)
+  /// CONFIRM_AT_PICKUP (no number, no online payment — Hector 2026-09-05) | TYPE_PRICE
+  preferredTypePricing      String @default("CONFIRM_AT_PICKUP")
+  askPolicyNumber           Boolean @default(false)
+
+  /// null = every location of the tenant
+  locationIds Json?
+
+  visitCount  Int       @default(0)
+  lastVisitAt DateTime?
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  services      PartnerService[]
+  ownedServices AdditionalService[] @relation("PartnerOwnedServices")
+  reservations  Reservation[]
+  auditLogs     PartnerAuditLog[]
+
+  @@unique([tenantId, slug])
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+}
+
+/// Which of the tenant's additional services a program offers, with an optional
+/// program price. `mandatory` is enforced SERVER-SIDE at checkout (F2) — the base
+/// AdditionalService.mandatory is not.
+model PartnerService {
+  id                  String            @id @default(cuid())
+  partnerId           String
+  partner             Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  additionalServiceId String
+  additionalService   AdditionalService @relation(fields: [additionalServiceId], references: [id], onDelete: Cascade)
+  rateOverride        Decimal?          @db.Decimal(10, 2)
+  mandatory           Boolean           @default(false)
+  sortOrder           Int               @default(0)
+
+  @@unique([partnerId, additionalServiceId])
+}
+
+/// AuditLog requires reservationId, so partner CRUD gets its own trail
+/// (same shape as ModuleAccessAuditLog: ids only, `changed` = before/after).
+model PartnerAuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  partnerId   String
+  partner     Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  actorUserId String?
+  actorRole   String?
+  /// CREATE | UPDATE | STATUS | PRICING | TERMS | SERVICES | LOGO
+  action      String
+  changed     Json
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, partnerId, createdAt])
 }
 
 model AppSetting {

@@ -153,7 +153,10 @@ async function ensureLocationCodeBelongsToTenant(locationCode, tenantId) {
 async function ensureTargetRateBelongsToTenant(targetRateId, tenantId) {
   if (!targetRateId) return;
   const rate = await prisma.rate.findFirst({
-    where: { id: targetRateId, ...(tenantId ? { tenantId } : {}) },
+    // Partnerships (2026-09-05): a partner's negotiated book (purpose PARTNER) is
+    // never a Market Intelligence target — auto-apply must not move it. LOANER
+    // books were never meant to be targets either.
+    where: { id: targetRateId, ...(tenantId ? { tenantId } : {}), purpose: { notIn: ['LOANER', 'PARTNER'] } },
     select: { id: true }
   });
   if (!rate) {

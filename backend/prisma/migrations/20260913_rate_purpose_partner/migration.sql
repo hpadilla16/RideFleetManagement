@@ -1,0 +1,11 @@
+-- Partnerships module (2026-09-05, doc/partnerships-module-plan-2026-09-05.md):
+-- a partner's negotiated price book is a Rate with purpose = PARTNER. Isolation
+-- is by PURPOSE (the LOANER pattern), not displayOnline — the staff quote path
+-- never sets displayOnline and sorts createdAt desc, so a fresh partner rate
+-- would otherwise win every counter quote for that class.
+--
+-- Postgres quirk: ALTER TYPE ... ADD VALUE cannot run inside a transaction
+-- block. startup-migrate sends each file as ONE simple-protocol query, so this
+-- file must stay SINGLE-STATEMENT (see 20260824_shuttle_only_program). The
+-- tables that follow live in 20260914_partnerships_module. Re-run = no-op.
+ALTER TYPE "RatePurpose" ADD VALUE IF NOT EXISTS 'PARTNER';
