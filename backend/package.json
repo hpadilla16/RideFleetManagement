@@ -244,9 +244,9 @@
     "test:e2e-kiosk-remote-assist": "node scripts/e2e-kiosk-remote-assist.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-kms": "^3.1116.0",
+    "@aws-sdk/client-kms": "^3.1125.0",
     "@prisma/client": "^6.14.0",
-    "@sentry/node": "^10.46.0",
+    "@sentry/node": "^10.73.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.34.0",
     "cheerio": "^1.2.0",
@@ -259,18 +259,18 @@
     "nodemailer": "^6.10.1",
     "otplib": "^12.0.1",
     "pdf-lib": "^1.17.1",
-    "pdfkit": "^0.17.2",
-    "pg": "^8.13.0",
+    "pdfkit": "^0.20.2",
+    "pg": "^8.23.0",
     "puppeteer": "^24.39.1",
     "qrcode": "^1.5.4",
     "redis": "^4.7.1",
-    "sanitize-html": "^2.17.0",
+    "sanitize-html": "^2.17.7",
     "ssh2-sftp-client": "^12.1.1",
     "stripe": "^16.10.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "playwright-core": "^1.59.1",
+    "playwright-core": "^1.62.1",
     "prisma": "^6.14.0"
   }
 }
