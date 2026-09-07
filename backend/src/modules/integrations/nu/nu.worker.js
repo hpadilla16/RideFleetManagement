@@ -25,6 +25,7 @@
 import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
 import { importCustomerEmailOrNull } from '../../../lib/customer-email.js';
+import { nameOnlyNote } from '../booking-source/customer-autocreate.js';
 import { captureBackendException } from '../../../lib/sentry.js';
 import { registerWorker, enqueueJob } from '../../../lib/queue/index.js';
 import { SCRAPER_PRIORITY } from '../../../lib/queue/priorities.js';
@@ -62,7 +63,11 @@ function autoCreateCustomersEnabled() {
 
 const CUSTOMER_PHONE_PLACEHOLDER = '0000000000';
 
-export async function maybeCreateCustomerFromNu(prismaClient, extRes) {
+export async function maybeCreateCustomerFromNu(prismaClient, extRes, opts = {}) {
+  // NU does not opt in to name-only creation (2026-09-07) — the option exists so
+  // the three implementations keep deciding identically for identical input,
+  // which booking-source.test.mjs asserts. Only Economy passes it true so far.
+  const { allowNameOnly = false } = opts;
   const firstName = (extRes.customerFirstName || '').trim();
   const lastName = (extRes.customerLastName || '').trim();
   // Writer #13 of the customer-email inventory (lib/customer-email.js). IMPORT
@@ -77,7 +82,8 @@ export async function maybeCreateCustomerFromNu(prismaClient, extRes) {
   const phone = (extRes.customerPhone || '').trim();
 
   if (!firstName || !lastName) return null;
-  if (!email && !phone) return null;
+  const nameOnly = !email && !phone;
+  if (nameOnly && !allowNameOnly) return null;
 
   if (email) {
     const existing = await prismaClient.customer.findFirst({
@@ -95,6 +101,7 @@ export async function maybeCreateCustomerFromNu(prismaClient, extRes) {
       email: email || null,
       phone: phone || CUSTOMER_PHONE_PLACEHOLDER,
       country: extRes.customerCountry || null,
+      ...(nameOnly ? { notes: nameOnlyNote('NU', extRes.externalRef) } : {}),
     },
     select: { id: true, firstName: true, lastName: true, email: true, phone: true },
   });

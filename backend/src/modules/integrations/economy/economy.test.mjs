@@ -214,6 +214,30 @@ test('mapRowToExternalReservation: empty-string detail fields never clobber list
   assert.equal(mapped.isPrepaid, null); // absent boolean stays null, not false
 });
 
+test('mapRowToExternalReservation: a MASKED list email is absence, not data', () => {
+  // The portal renders rgEmail as asterisks. Measured 2026-09-07 across 4,000
+  // production rows: asterisks 2,627 times, empty 1,373, and never once a real
+  // address the detail lacked. Storing the mask made 300 rows look as though
+  // they carried contact details while auto-create was refusing them.
+  const row = {
+    rgConfirmation: 'X3', rgClass: 'ccar', rgLocPickup: 'LAXO01',
+    rgDatePickup: '09/19/2026', rgLastName: 'Doe', rgName: 'John',
+    rgEmail: '*********************',
+  };
+  const mapped = mapRowToExternalReservation(row, {
+    detail: { resCustomerEmail: '' }, timeZone: 'America/Los_Angeles',
+  });
+  assert.equal(mapped.customerEmail, null, 'asterisks must never be persisted as an address');
+
+  // The FALLBACK itself survives: only the mask is dropped. If Economy ever
+  // unmasks that column, the list resumes backing the detail with no change.
+  const real = mapRowToExternalReservation(
+    { ...row, rgEmail: 'john@example.com' },
+    { detail: { resCustomerEmail: '' }, timeZone: 'America/Los_Angeles' },
+  );
+  assert.equal(real.customerEmail, 'john@example.com');
+});
+
 test('mapRowToExternalReservation: accepts a positional array row', () => {
   // LOOKUP_COLUMNS order: [conf, booked, class, locPickup, locDrop, datePickup,
   //                        dateDrop, rate, lastName, name, email, iata, status]

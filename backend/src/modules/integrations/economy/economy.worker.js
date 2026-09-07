@@ -27,6 +27,7 @@
 import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
 import { importCustomerEmailOrNull } from '../../../lib/customer-email.js';
+import { nameOnlyNote } from '../booking-source/customer-autocreate.js';
 import { captureBackendException } from '../../../lib/sentry.js';
 import { registerWorker, enqueueJob } from '../../../lib/queue/index.js';
 import { SCRAPER_PRIORITY } from '../../../lib/queue/priorities.js';
@@ -71,7 +72,8 @@ function autoCreateCustomersEnabled() {
 
 const CUSTOMER_PHONE_PLACEHOLDER = '0000000000';
 
-export async function maybeCreateCustomerFromEconomy(prismaClient, extRes) {
+export async function maybeCreateCustomerFromEconomy(prismaClient, extRes, opts = {}) {
+  const { allowNameOnly = false } = opts;
   const firstName = (extRes.customerFirstName || '').trim();
   const lastName = (extRes.customerLastName || '').trim();
   // Writer #12 of the customer-email inventory (lib/customer-email.js). IMPORT
@@ -86,7 +88,11 @@ export async function maybeCreateCustomerFromEconomy(prismaClient, extRes) {
   const phone = (extRes.customerPhone || '').trim();
 
   if (!firstName || !lastName) return null;
-  if (!email && !phone) return null;
+  // Name-only: see the block comment in booking-source/customer-autocreate.js.
+  // Kept byte-for-byte in step with the shared helper — booking-source.test.mjs
+  // asserts the three implementations decide identically.
+  const nameOnly = !email && !phone;
+  if (nameOnly && !allowNameOnly) return null;
 
   if (email) {
     const existing = await prismaClient.customer.findFirst({
@@ -104,6 +110,7 @@ export async function maybeCreateCustomerFromEconomy(prismaClient, extRes) {
       email: email || null,
       phone: phone || CUSTOMER_PHONE_PLACEHOLDER,
       country: extRes.customerCountry || null,
+      ...(nameOnly ? { notes: nameOnlyNote('Economy', extRes.externalRef) } : {}),
     },
     select: { id: true, firstName: true, lastName: true, email: true, phone: true },
   });
@@ -111,6 +118,7 @@ export async function maybeCreateCustomerFromEconomy(prismaClient, extRes) {
     tenantId: extRes.tenantId,
     externalRef: extRes.externalRef,
     customerId: created.id,
+    nameOnly,
   });
   return created;
 }
@@ -196,6 +204,19 @@ function detVal(v) {
   if (v == null) return null;
   const s = String(v).trim();
   return s === '' ? null : s;
+}
+
+/**
+ * A portal-masked value ('*********************') is absence, not data. Any
+ * all-asterisk string collapses to null so it can never be mistaken for a real
+ * address downstream — importCustomerEmailOrNull would reject it anyway, but by
+ * then it has already been persisted and read by a human as "we have an email".
+ */
+export function unmaskedOrNull(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s || /^\*+$/.test(s)) return null;
+  return s;
 }
 
 /**
@@ -288,7 +309,17 @@ export function mapRowToExternalReservation(row, opts = {}) {
     status: 'CONFIRMED', // Economy list rows are confirmed reservations
     customerFirstName: detVal(d.resCustomerName) ?? (firstName != null ? String(firstName).trim() : null),
     customerLastName: detVal(d.resCustomerLastName) ?? (lastName != null ? String(lastName).trim() : null),
-    customerEmail: detVal(d.resCustomerEmail) ?? (email != null ? String(email).trim() : null),
+    // The detail wins, the list still backs it — but a MASKED value is not a
+    // value. The portal renders rgEmail as a row of asterisks: measured
+    // 2026-09-07 over 4,000 rows it was asterisks 2,627 times, empty 1,373, and
+    // ZERO times did it carry a real address the detail lacked. Storing it
+    // turned "no email" into a string that reads like data, and 300 rows sat in
+    // customer_not_found looking as though they had contact details.
+    //
+    // Only the mask is dropped, not the fallback: if Economy ever unmasks that
+    // column for our account, the list resumes backing the detail with no code
+    // change.
+    customerEmail: detVal(d.resCustomerEmail) ?? unmaskedOrNull(email),
     customerPhone: detVal(d.resCustomerPhone),
     // CONFIRMED ABSENT (production key audit 2026-08-26): the RezLight detail
     // payload has NO country field at all — not resCustomerCountry, not any
@@ -525,7 +556,12 @@ export async function economySyncHandler(job) {
           && decision.reason === REVIEW_REASONS.CUSTOMER_NOT_FOUND
           && autoCreateCustomersEnabled()) {
           try {
-            const newCust = await maybeCreateCustomerFromEconomy(prisma, upserted);
+            // Economy hands over bookings with a name and no contact at all
+            // (measured: 736 of 6,196 carry neither email nor phone). Refusing
+            // those left real reservations invisible to the counter, so Economy
+            // opts in to name-only creation. Other sources keep the old rule
+            // until somebody decides the same for them.
+            const newCust = await maybeCreateCustomerFromEconomy(prisma, upserted, { allowNameOnly: true });
             if (newCust) decision = await evaluatePromotion(upserted, promoOpts);
           } catch (createErr) {
             logger.warn('[economy-sync] auto-create customer failed; MANUAL_REVIEW', {

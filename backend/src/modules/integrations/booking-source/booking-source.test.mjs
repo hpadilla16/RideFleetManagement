@@ -97,6 +97,14 @@ function canon(v) {
       Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, canon(x)])
     );
   }
+  // The name-only stamp names the SOURCE it came from, so NU's row and
+  // Economy's row differ there by design (2026-09-07). Parity is "the same
+  // DECISION for the same input", not the same label, so the source word is
+  // normalized away — everything else in the note is still compared, including
+  // the external ref and the prefix a merge pass selects on.
+  if (typeof v === 'string' && v.startsWith('[import:name-only] ')) {
+    return v.replace(/^(\[import:name-only\]) \S+ /, '$1 <source> ');
+  }
   return v;
 }
 
@@ -334,15 +342,32 @@ const AUTOCREATE_CASES = [
     name: 'no email and no phone → null',
     extRes: { tenantId: 't1', externalRef: 'R5', customerFirstName: 'Ana', customerLastName: 'Rivera' },
   },
+  {
+    // 2026-09-07: with the source opted in, a name is enough. All three
+    // implementations must agree on that too, or Economy silently diverges.
+    name: 'no email and no phone, allowNameOnly → creates from the name',
+    extRes: { tenantId: 't1', externalRef: 'R6', customerFirstName: 'Ana', customerLastName: 'Rivera' },
+    opts: { allowNameOnly: true },
+  },
+  {
+    name: 'allowNameOnly does NOT change a row that already has contact',
+    extRes: {
+      tenantId: 't1', externalRef: 'R7',
+      customerFirstName: 'Ana', customerLastName: 'Rivera', customerPhone: '7875550000',
+    },
+    opts: { allowNameOnly: true },
+  },
 ];
 
-for (const { name, extRes } of AUTOCREATE_CASES) {
+for (const { name, extRes, opts } of AUTOCREATE_CASES) {
   test(`autocreate parity: ${name}`, async () => {
     const capA = {}; const capB = {}; const capC = {};
-    const a = await nuWorker.maybeCreateCustomerFromNu(fakeCustomerPrisma(capA), extRes);
-    const b = await economyWorker.maybeCreateCustomerFromEconomy(fakeCustomerPrisma(capB), extRes);
+    // The SAME options go to all three: parity is "identical decision for
+    // identical input", and after 2026-09-07 the input includes allowNameOnly.
+    const a = await nuWorker.maybeCreateCustomerFromNu(fakeCustomerPrisma(capA), extRes, opts);
+    const b = await economyWorker.maybeCreateCustomerFromEconomy(fakeCustomerPrisma(capB), extRes, opts);
     const c = await maybeCreateCustomerFromSource(fakeCustomerPrisma(capC), extRes, {
-      logPrefix: '[nu-sync]', sourceName: 'NU',
+      logPrefix: '[nu-sync]', sourceName: 'NU', ...(opts || {}),
     });
     // Same DB writes (or same absence of them) across all three.
     assert.deepEqual(canon(capC), canon(capA));
@@ -760,4 +785,84 @@ test('shims: tl-international promotion-matcher re-exports the booking-source fu
 
 test('shims: tl-international duplicate-detector re-exports the booking-source function identically', () => {
   assert.equal(tlDetector.findDuplicateReservation, bsDetector.findDuplicateReservation);
+});
+
+// ---------------------------------------------------------------------------
+// Name-only auto-create (2026-09-07). Economy hands over bookings carrying a
+// name and no contact at all — 736 of 6,196 measured. Refusing them left real
+// reservations invisible to the counter on the morning the customer arrived.
+// ---------------------------------------------------------------------------
+const { NAME_ONLY_NOTE_PREFIX, nameOnlyNote } = await import('./customer-autocreate.js');
+
+test('name-only: OFF by default — a contactless row is still refused', async () => {
+  const cap = {};
+  const out = await maybeCreateCustomerFromSource(fakeCustomerPrisma(cap), {
+    tenantId: 't1', externalRef: 'R1', customerFirstName: 'Ana', customerLastName: 'Rivera',
+  }, { sourceName: 'Economy' });
+  assert.equal(out, null);
+  assert.equal(cap.create, undefined, 'nothing may be written when the option is off');
+});
+
+test('name-only: ON creates from the name, with the placeholder phone', async () => {
+  const cap = {};
+  const out = await maybeCreateCustomerFromSource(fakeCustomerPrisma(cap), {
+    tenantId: 't1', externalRef: 'EPRLA1480A06',
+    customerFirstName: ' Ana ', customerLastName: ' Rivera ', customerCountry: 'US',
+  }, { sourceName: 'Economy', allowNameOnly: true });
+
+  assert.ok(out?.id, 'a customer is created');
+  const d = cap.create.data;
+  assert.equal(d.firstName, 'Ana', 'names are still trimmed');
+  assert.equal(d.lastName, 'Rivera');
+  assert.equal(d.email, null, 'no email is invented');
+  assert.equal(d.phone, CUSTOMER_PHONE_PLACEHOLDER, 'the desk completes this at check-in');
+  assert.equal(d.country, 'US');
+});
+
+test('name-only: the row is STAMPED so a merge pass can find this population', async () => {
+  const cap = {};
+  await maybeCreateCustomerFromSource(fakeCustomerPrisma(cap), {
+    tenantId: 't1', externalRef: 'EPRLA1480A06', customerFirstName: 'Ana', customerLastName: 'Rivera',
+  }, { sourceName: 'Economy', allowNameOnly: true });
+
+  const note = cap.create.data.notes;
+  assert.ok(note, 'a name-only customer must be identifiable later');
+  assert.ok(note.startsWith(NAME_ONLY_NOTE_PREFIX), 'the prefix is the stable, greppable half');
+  assert.match(note, /EPRLA1480A06/, 'and it names the booking it came from');
+  assert.equal(note, nameOnlyNote('Economy', 'EPRLA1480A06'));
+});
+
+test('name-only: a row WITH contact is untouched by the option', async () => {
+  const cap = {};
+  await maybeCreateCustomerFromSource(fakeCustomerPrisma(cap), {
+    tenantId: 't1', externalRef: 'R2',
+    customerFirstName: 'Ana', customerLastName: 'Rivera', customerPhone: '7875550000',
+  }, { sourceName: 'Economy', allowNameOnly: true });
+  assert.equal(cap.create.data.phone, '7875550000', 'the real phone wins over the placeholder');
+  assert.equal(cap.create.data.notes, undefined, 'and it carries no merge-candidate stamp');
+});
+
+test('name-only: a missing surname is still refused, option or not', async () => {
+  for (const opts of [{ sourceName: 'Economy' }, { sourceName: 'Economy', allowNameOnly: true }]) {
+    const cap = {};
+    const out = await maybeCreateCustomerFromSource(fakeCustomerPrisma(cap), {
+      tenantId: 't1', externalRef: 'R3', customerFirstName: 'Ana', customerLastName: '',
+    }, opts);
+    assert.equal(out, null, 'half a name is not an identity');
+    assert.equal(cap.create, undefined);
+  }
+});
+
+test('name-only: a masked email counts as NO email, not as contact', async () => {
+  // Economy's list column rgEmail is always asterisks. importCustomerEmailOrNull
+  // rejects it, so such a row must take the name-only path rather than be
+  // refused for "having" an email.
+  const cap = {};
+  const out = await maybeCreateCustomerFromSource(fakeCustomerPrisma(cap), {
+    tenantId: 't1', externalRef: 'R4',
+    customerFirstName: 'Ana', customerLastName: 'Rivera', customerEmail: '*********************',
+  }, { sourceName: 'Economy', allowNameOnly: true });
+  assert.ok(out?.id);
+  assert.equal(cap.create.data.email, null, 'asterisks must never be stored as an address');
+  assert.ok(cap.create.data.notes?.startsWith(NAME_ONLY_NOTE_PREFIX));
 });

@@ -24,6 +24,18 @@ import { importCustomerEmailOrNull } from '../../../lib/customer-email.js';
 export const CUSTOMER_PHONE_PLACEHOLDER = '0000000000';
 
 /**
+ * Stamp for a customer created from a name and nothing else. A stable, greppable
+ * prefix so the merge pass that eventually cleans these up can select exactly
+ * this population instead of guessing from a placeholder phone number (which
+ * predates this and means something slightly different).
+ */
+export const NAME_ONLY_NOTE_PREFIX = '[import:name-only]';
+
+export function nameOnlyNote(sourceName, externalRef) {
+  return `${NAME_ONLY_NOTE_PREFIX} ${sourceName} ${externalRef || '?'} — no contact data from the source; complete at the counter`;
+}
+
+/**
  * Parse a *_AUTO_CREATE_CUSTOMERS-style env flag. Default OFF — auto-creating
  * customers from scraped rows is opt-in per source.
  */
@@ -44,11 +56,17 @@ export function autoCreateEnabledFromEnv(envKey) {
  *   without changing the decision order.
  * @param {string}  opts.logPrefix   e.g. '[nu-sync]'
  * @param {string}  opts.sourceName  e.g. 'NU' — used in the log line only.
+ * @param {boolean=} opts.allowNameOnly  Accept a row that carries NO contact at
+ *   all, creating the customer from the name with a placeholder phone. OFF by
+ *   default; each source opts in for itself (see the block comment below).
  * @returns {Promise<object|null>} the (existing or created) customer, or null
- *   when the row lacks the minimum identity (first+last AND email-or-phone).
+ *   when the row lacks the minimum identity.
  */
 export async function maybeCreateCustomerFromSource(prismaClient, extRes, opts = {}) {
-  const { isEnabled = true, logPrefix = '[booking-source]', sourceName = 'source' } = opts;
+  const {
+    isEnabled = true, logPrefix = '[booking-source]', sourceName = 'source',
+    allowNameOnly = false,
+  } = opts;
   const enabled = typeof isEnabled === 'function' ? isEnabled() : isEnabled;
   if (!enabled) return null;
 
@@ -70,7 +88,24 @@ export async function maybeCreateCustomerFromSource(prismaClient, extRes, opts =
   const phone = (extRes.customerPhone || '').trim();
 
   if (!firstName || !lastName) return null;
-  if (!email && !phone) return null;
+
+  // NAME-ONLY (2026-09-07, Hector: "customer not found deberia ser crear
+  // customer nuevo automatico utilizando info que da economy").
+  //
+  // Some sources hand over a booking with a name and nothing else. Refusing it
+  // does not protect anybody — it just leaves a real reservation invisible to
+  // the counter on the morning the customer shows up. With this on, the name is
+  // enough: the phone becomes the placeholder and the desk completes the record
+  // at check-in, exactly as it already does for a row that had a name but no
+  // phone.
+  //
+  // THE COST, stated plainly: dedup below is by EMAIL. A name-only customer can
+  // never match one, so a repeat renter becomes a new Customer every booking.
+  // We do NOT dedup by name — merging two different people who happen to share
+  // one is a worse failure than a duplicate. The rows are stamped in `notes`
+  // instead, so a later merge pass can find exactly this population.
+  const nameOnly = !email && !phone;
+  if (nameOnly && !allowNameOnly) return null;
 
   if (email) {
     const existing = await prismaClient.customer.findFirst({
@@ -88,6 +123,7 @@ export async function maybeCreateCustomerFromSource(prismaClient, extRes, opts =
       email: email || null,
       phone: phone || CUSTOMER_PHONE_PLACEHOLDER,
       country: extRes.customerCountry || null,
+      ...(nameOnly ? { notes: nameOnlyNote(sourceName, extRes.externalRef) } : {}),
     },
     select: { id: true, firstName: true, lastName: true, email: true, phone: true },
   });
@@ -95,6 +131,7 @@ export async function maybeCreateCustomerFromSource(prismaClient, extRes, opts =
     tenantId: extRes.tenantId,
     externalRef: extRes.externalRef,
     customerId: created.id,
+    nameOnly,
   });
   return created;
 }
