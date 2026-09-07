@@ -86,6 +86,25 @@
  *      away, and the enrichment silently did not happen. Every stage prints
  *      them, mapped through autorental-validation.js to the RFM field behind
  *      each gateway key. ExtData.ARLFlag === 'Y' is the positive signal.
+ *
+ * ── WHAT DEJAVOO SAID (2026-09-07) ───────────────────────────────────────────
+ * "Please confirm whether you are using the CEDP and Auto rental combination
+ *  payload or using them individually? The combination will not work. Using
+ *  any one of them will work independently."
+ *      — Vallipriya Ammaneni, VP Android & Dev Support
+ *
+ * That sentence reads the first nine rungs backwards for us. Rung 5 sent line
+ * items AND the AutoRental block; rungs 7, 8 and 9 sent a CEDP envelope AND
+ * the AutoRental block at the AutoRental endpoint. Every one of them was the
+ * combination, so:
+ *   - rungs 4 and 5 approving with NO ARLFlag is not "we failed to qualify",
+ *     it is the gateway declining to read enriched data it was told to ignore;
+ *   - the instant HTTP 500 on 7/8/9 may be the combination rather than the
+ *     endpoint, which is why rung 11 retries that endpoint with one half only.
+ *
+ * Rungs 10-12 are the shapes that were never tried: AutoRental alone (10),
+ * AutoRental alone at the AutoRental endpoint (11), and CEDP alone (12). Run
+ * 10 first — for MCC 7512 the auto-rental addendum is the program that pays.
  *   2. The gateway ACCEPTS the fields and IGNORES them. Approved, no errors, no
  *      ARLFlag. That is stage 2's real job: an envelope name nobody recognises
  *      produces exactly this, and it is indistinguishable from success unless
@@ -471,6 +490,38 @@ export function buildStages({
         spinL3Envelope: L3_ENVELOPE.CART,
       }),
       endpoint: 'AutoRental',
+    },
+    {
+      n: 10,
+      name: 'AUTO RENTAL ALONE — the rental block, and NOT ONE CEDP field',
+      why: 'Dejavoo, 2026-09-07: "The combination will not work. Using any one of them will work independently." Rungs 5, 7, 8 and 9 all sent BOTH, so this shape has never been tried — and it is the one that should come back with ARLFlag',
+      args: () => ({
+        ...common,
+        // No `charges`, no `taxAmount`: with spinL3LineItems and
+        // spinL3HeaderOnly both OFF, the builder emits no TaxAmount, no
+        // LineItemCount, no PurchaseIdFormatCode and no Level3LineItems —
+        // only the nested AutoRental object.
+        level3: { agreementNumber, autoRental: autoRentalInputs(agreementNumber, 2) },
+      }),
+      cfg: on({ spinL3AutoRental: true, spinL3LineItems: false, spinL3HeaderOnly: false }),
+    },
+    {
+      n: 11,
+      name: 'AUTO RENTAL ALONE, at the AutoRental endpoint',
+      why: 'if rung 10 qualifies on Payment/Sale this is redundant; if it does not, the endpoint is the remaining variable — and the instant 500s on 7/8/9 may have been the combination rather than the endpoint',
+      args: () => ({
+        ...common,
+        level3: { agreementNumber, autoRental: autoRentalInputs(agreementNumber, 2) },
+      }),
+      cfg: on({ spinL3AutoRental: true, spinL3LineItems: false, spinL3HeaderOnly: false }),
+      endpoint: 'AutoRental',
+    },
+    {
+      n: 12,
+      name: 'CEDP ALONE — the line items, and NO AutoRental block',
+      why: 'the other half of the same sentence: this is rung 4 restated as a deliberate posture, so the two independent shapes can be compared side by side on ARLFlag',
+      args: () => withLines(many.rows, many.taxAmount, 2),
+      cfg: on({ spinL3LineItems: true, spinL3AutoRental: false }),
     },
   ];
 }

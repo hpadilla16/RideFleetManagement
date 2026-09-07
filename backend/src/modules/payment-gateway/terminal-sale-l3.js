@@ -132,27 +132,37 @@ const truthy = (v) => String(v ?? '').trim().toLowerCase() === 'true';
  * Every default is the safe one. `enabled` gates the entire family: with it off
  * this module returns an empty payload and the sale body is untouched.
  */
+/**
+ * Tenant answer beats environment — but ONLY when the tenant gave one.
+ *
+ * These flags used to be `tenant === true || truthy(env)`, which has no way to
+ * say NO: a deployment-wide env switch overrode every tenant, so enabling the
+ * program for one merchant enabled it for all of them (2026-09-07). An
+ * UNDEFINED key still means "ask the environment", so a tenant that has never
+ * set a posture behaves exactly as before; `false` now actually means false.
+ */
+function flag(tenantValue, envValue) {
+  if (tenantValue === undefined) return truthy(envValue);
+  return tenantValue === true;
+}
+
 export function getTerminalL3Config(tenantConfig = {}) {
   return {
     // MASTER. Off ⇒ nothing below matters.
-    enabled: tenantConfig.spinL3Enabled === true
-      || truthy(process.env.SPIN_L3_ENABLED),
+    enabled: flag(tenantConfig.spinL3Enabled, process.env.SPIN_L3_ENABLED),
     // Real line items from the agreement's charges.
-    lineItems: tenantConfig.spinL3LineItems === true
-      || truthy(process.env.SPIN_L3_LINE_ITEMS),
+    lineItems: flag(tenantConfig.spinL3LineItems, process.env.SPIN_L3_LINE_ITEMS),
     // LEVEL 2 ONLY: the summary header — the tax figure — with NO line items.
     // A real posture, not just a probe rung. Level 2 qualification wants the
     // tax amount and a purchase identifier; Level 3 wants the itemization on
     // top. This carries the first without risking the second, which matters on
     // a rail that has rejected four different field shapes. Ignored when
     // `lineItems` is on, because a full L3 block already contains the header.
-    headerOnly: tenantConfig.spinL3HeaderOnly === true
-      || truthy(process.env.SPIN_L3_HEADER_ONLY),
+    headerOnly: flag(tenantConfig.spinL3HeaderOnly, process.env.SPIN_L3_HEADER_ONLY),
     // The nested AutoRental block (renter, vehicle, pickup/return, distance).
     // Separate from lineItems on purpose: the 2026-05 incidents were caused by
     // AutoRental fields, and a tenant may want the itemization without them.
-    autoRental: tenantConfig.spinL3AutoRental === true
-      || truthy(process.env.SPIN_L3_AUTO_RENTAL),
+    autoRental: flag(tenantConfig.spinL3AutoRental, process.env.SPIN_L3_AUTO_RENTAL),
     // See the header. L3DATA unless a tenant is explicitly switched to CART.
     envelope: (() => {
       const raw = String(

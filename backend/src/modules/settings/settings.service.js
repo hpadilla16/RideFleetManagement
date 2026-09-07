@@ -579,7 +579,22 @@ function defaultPaymentGatewayConfig() {
       tpn: '',
       merchantNumber: '1',
       callbackUrl: '',
-      proxyTimeout: '120'
+      proxyTimeout: '120',
+      // Level 2/3 + Auto Rental enhanced data, PER TENANT (2026-09-07).
+      // Interchange qualification is a MERCHANT program, so it belongs to the
+      // tenant rather than to a deployment-wide env var: turning it on for one
+      // merchant used to turn it on for every merchant sharing the deployment.
+      // An ABSENT flag still means "whatever the environment says", so a tenant
+      // that never touches this keeps exactly the behaviour it has today.
+      //
+      // Dejavoo, 2026-09-07: CEDP and Auto Rental must NOT ride the same
+      // payload — "the combination will not work. Using any one of them will
+      // work independently" — which is why lineItems and autoRental are
+      // separate switches and not one "enhanced data" toggle.
+      //
+      //   { enabled, lineItems, headerOnly, autoRental, envelope,
+      //     summaryCommodityCode }
+      l3: {}
     },
     // PER-LOCATION TERMINAL REGISTERS (2026-09-04).
     //
@@ -717,6 +732,39 @@ function assertSpinAuthKeyShape(supplied, where) {
   const err = new Error(`${where}: ${spinAuthKeyShapeMessage(shape)}`);
   err.code = 'INVALID_SPIN_AUTH_KEY';
   throw err;
+}
+
+/**
+ * Normalize the per-tenant L2/L3 + Auto Rental posture for a WRITE.
+ *
+ * Absence is meaningful here and must survive: an unset flag means "ask the
+ * environment", so this only ever stores keys the payload actually carried.
+ * A client that does not know about this block at all (an older settings page,
+ * a partial PUT) carries the stored posture through untouched, the same rule
+ * the registers array follows.
+ */
+function normalizeL3PostureForWrite(payloadL3, storedL3) {
+  if (payloadL3 == null || typeof payloadL3 !== 'object') {
+    return storedL3 && typeof storedL3 === 'object' ? storedL3 : {};
+  }
+  const out = {};
+  for (const key of ['enabled', 'lineItems', 'headerOnly', 'autoRental']) {
+    if (payloadL3[key] !== undefined && payloadL3[key] !== null && payloadL3[key] !== '') {
+      out[key] = payloadL3[key] === true || payloadL3[key] === 'true';
+    }
+  }
+  // CEDP and Auto Rental in one payload is refused by the gateway, so the
+  // config cannot express it either: the rental block wins, because for a car
+  // rental it is the addendum that qualifies.
+  if (out.autoRental === true && (out.lineItems === true || out.headerOnly === true)) {
+    out.lineItems = false;
+    out.headerOnly = false;
+  }
+  const envelope = String(payloadL3.envelope || '').trim().toUpperCase();
+  if (envelope) out.envelope = envelope;
+  const scc = String(payloadL3.summaryCommodityCode || '').trim();
+  if (scc) out.summaryCommodityCode = scc;
+  return out;
 }
 
 function registersForRead(registers) {
@@ -1822,6 +1870,11 @@ export const settingsService = {
             ? encryptSettingSecret(newSpinAuthKey)
             : carrySettingSecret(storedRaw?.spin?.authKey)),
         tpn: String(payload?.spin?.tpn || '').trim(),
+        // Only the flags the operator actually SET are stored. An absent key
+        // stays absent so the resolver keeps deferring to the environment —
+        // writing `false` for every unset flag would silently opt every tenant
+        // OUT of a deployment-wide posture the moment they saved anything.
+        l3: normalizeL3PostureForWrite(payload?.spin?.l3, storedRaw?.spin?.l3),
         merchantNumber: String(payload?.spin?.merchantNumber || '1').trim(),
         callbackUrl: String(payload?.spin?.callbackUrl || '').trim(),
         proxyTimeout: String(payload?.spin?.proxyTimeout || '120').trim(),

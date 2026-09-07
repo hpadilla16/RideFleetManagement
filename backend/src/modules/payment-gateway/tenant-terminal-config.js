@@ -283,6 +283,13 @@ async function readTenantTerminalRow(tenantId) {
             merchantNumber: String(block.merchantNumber || '1').trim(),
             callbackUrl: String(block.callbackUrl || '').trim(),
             proxyTimeout: String(block.proxyTimeout || '120').trim(),
+            // Level 2/3 + Auto Rental posture, per TENANT (2026-09-07). It used
+            // to live only in droplet env vars, which meant turning the program
+            // on for one merchant turned it on for every merchant sharing the
+            // deployment — a change to somebody else's money path made on
+            // somebody else's behalf. Absent here ⇒ the env still decides, so
+            // nothing changes for a tenant that has never set it.
+            l3: block.l3 && typeof block.l3 === 'object' ? block.l3 : null,
           };
         }
         if (Array.isArray(parsed?.registers)) {
@@ -366,6 +373,10 @@ export async function resolveTenantTerminalConfig(tenantId, options = {}) {
       registerId: reg.id,
       registerName: reg.name,
       locationId: reg.locationId || null,
+      // The L2/L3 + Auto Rental posture is a MERCHANT program, not a property
+      // of one counter's device, so every register of a tenant inherits the
+      // tenant's own setting.
+      l3: spin?.l3 || null,
     });
 
     // Half-configured register — same refusal as the tenant-level block. Never
@@ -475,6 +486,7 @@ export async function resolveTenantTerminalConfig(tenantId, options = {}) {
       registerId: null,
       registerName: '',
       locationId: null,
+      l3: spin.l3 || null,
     };
   }
 
@@ -568,12 +580,24 @@ export async function listTerminalRegisters(tenantId, { locationId = null } = {}
  */
 export function toSpinClientConfig(resolved) {
   if (!resolved || resolved.source !== 'TENANT') return {};
+  const l3 = resolved.l3 && typeof resolved.l3 === 'object' ? resolved.l3 : null;
   return {
     spinAuthKey: resolved.authKey,
     spinTpn: resolved.tpn,
     spinMerchantNumber: resolved.merchantNumber,
     spinCallbackUrl: resolved.callbackUrl,
     spinProxyTimeout: resolved.proxyTimeout,
+    // Level 2/3 + Auto Rental, per tenant (2026-09-07). Only the keys the
+    // tenant actually SET are emitted: getTerminalL3Config treats a key that is
+    // present as the answer and an ABSENT key as "ask the environment", so a
+    // tenant that has never touched this keeps the deployment-wide behaviour
+    // exactly as it was.
+    ...(l3 && l3.enabled !== undefined ? { spinL3Enabled: l3.enabled === true } : {}),
+    ...(l3 && l3.lineItems !== undefined ? { spinL3LineItems: l3.lineItems === true } : {}),
+    ...(l3 && l3.headerOnly !== undefined ? { spinL3HeaderOnly: l3.headerOnly === true } : {}),
+    ...(l3 && l3.autoRental !== undefined ? { spinL3AutoRental: l3.autoRental === true } : {}),
+    ...(l3 && l3.envelope ? { spinL3Envelope: String(l3.envelope) } : {}),
+    ...(l3 && l3.summaryCommodityCode ? { spinL3SummaryCommodityCode: String(l3.summaryCommodityCode) } : {}),
   };
 }
 

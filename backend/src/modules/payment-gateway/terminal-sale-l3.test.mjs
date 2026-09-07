@@ -520,7 +520,7 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   // worth asserting, because that is what gets charged.
   const { buildStages, stagePayload } = await import('../../../scripts/probe-terminal-sale-l3.mjs');
   const stages = buildStages({ amount: 1.00, agreementNumber: 'PROBE-T', taxRate: 11.5 });
-  assert.equal(stages.length, 9);
+  assert.equal(stages.length, 12);
   const p = stages.map((s) => stagePayload(s, 'REF').body);
 
   // 1 — the control is today's payload and nothing else.
@@ -547,6 +547,29 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   assert.ok(p[6].AutoRental, 'and it still carries the rental block');
   assert.deepEqual(Object.keys(p[6]).sort(), Object.keys(p[4]).sort(),
     'the BODY must match rung 5 exactly — the endpoint is the only variable');
+
+  // 10-12 — the ladder stops being additive here, on purpose. Dejavoo,
+  // 2026-09-07: "The combination will not work. Using any one of them will
+  // work independently." Rungs 1-9 all built UP toward the combination; these
+  // three take it apart, which is why they SUBTRACT fields rather than add
+  // them.
+  //
+  // 10 — Auto Rental and not one CEDP field.
+  assert.ok(p[9].AutoRental, 'rung 10 carries the rental block');
+  for (const cedp of ['L3Data', 'Cart', 'TaxAmount', 'LineItemCount', 'PurchaseIdFormatCode', 'Level3LineItems', 'LocalTaxFlag']) {
+    assert.equal(cedp in p[9], false, `rung 10 must not carry ${cedp}`);
+  }
+  assert.equal(stages[9].endpoint, undefined, 'and it goes to the generic Sale');
+
+  // 11 — the same isolated body, at the rental endpoint: the endpoint is the
+  // only variable, exactly as rung 7 was to rung 5.
+  assert.equal(stages[10].endpoint, 'AutoRental');
+  assert.deepEqual(Object.keys(p[10]).sort(), Object.keys(p[9]).sort(),
+    'rung 11 must differ from rung 10 by endpoint alone');
+
+  // 12 — the other half alone: line items, no rental block.
+  assert.ok(p[11].L3Data, 'rung 12 carries the CEDP envelope');
+  assert.equal('AutoRental' in p[11], false, 'and none of the rental block');
 
   // 4 — the full itemization; deposit and tax rows are NOT lines.
   assert.equal(p[3].L3Data.items.length, 4);

@@ -1203,3 +1203,108 @@ test('promote reports the shape of the key it carried, and carries it either way
   assert.equal(resolved.authKey, 'abcd1234efgh');
   assert.ok(!JSON.stringify(out).includes('abcd1234efgh'), 'the key itself never travels back');
 });
+
+
+// ===========================================================================
+// 10. PER-TENANT L2/L3 + AUTO RENTAL POSTURE (2026-09-07)
+//
+// Dejavoo: "The combination will not work. Using any one of them will work
+// independently." So the two halves are separate switches — and the switches
+// belong to the TENANT, because turning the program on for one merchant used
+// to turn it on for every merchant sharing the deployment.
+// ===========================================================================
+
+test('a tenant posture reaches the SPIn client, and an unset flag still defers to the environment', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    spin: {
+      enabled: true, environment: 'production', authKey: 'AbC123dEf4', tpn: LEGACY.tpn,
+      l3: { enabled: true, autoRental: true },
+    },
+  }, scope);
+
+  const cfg = toSpinClientConfig(await resolveTenantTerminalConfig(TENANT.id));
+  assert.equal(cfg.spinL3Enabled, true);
+  assert.equal(cfg.spinL3AutoRental, true);
+  assert.equal('spinL3LineItems' in cfg, false, 'an unset flag is ABSENT, not false');
+  assert.equal('spinL3HeaderOnly' in cfg, false);
+});
+
+test('a tenant that never set a posture emits nothing — the deployment keeps deciding', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    spin: { enabled: true, environment: 'production', authKey: 'AbC123dEf4', tpn: LEGACY.tpn },
+  }, scope);
+
+  const cfg = toSpinClientConfig(await resolveTenantTerminalConfig(TENANT.id));
+  for (const k of ['spinL3Enabled', 'spinL3LineItems', 'spinL3HeaderOnly', 'spinL3AutoRental']) {
+    assert.equal(k in cfg, false, `${k} must stay absent`);
+  }
+});
+
+test('the config cannot express the combination the gateway refuses', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    spin: {
+      enabled: true, environment: 'production', authKey: 'AbC123dEf4', tpn: LEGACY.tpn,
+      // Somebody ticks both. The rental addendum wins — for a car rental it is
+      // the half that qualifies — and the CEDP half is dropped rather than
+      // stored into a payload the gateway would ignore.
+      l3: { enabled: true, autoRental: true, lineItems: true, headerOnly: true },
+    },
+  }, scope);
+
+  const cfg = toSpinClientConfig(await resolveTenantTerminalConfig(TENANT.id));
+  assert.equal(cfg.spinL3AutoRental, true);
+  assert.equal(cfg.spinL3LineItems, false);
+  assert.equal(cfg.spinL3HeaderOnly, false);
+});
+
+test('every register of a tenant inherits that tenant posture — it is a merchant program, not a device setting', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    spin: {
+      enabled: true, environment: 'production', authKey: 'AbC123dEf4', tpn: LEGACY.tpn,
+      l3: { enabled: true, autoRental: true },
+    },
+    registers: [
+      { name: REG_LAX.name, locationId: LOC_LAX, tpn: REG_LAX.tpn, authKey: 'LaxKey0001' },
+      { name: REG_MCO.name, locationId: LOC_MCO, tpn: REG_MCO.tpn, authKey: 'McoKey0002' },
+    ],
+  }, scope);
+
+  for (const loc of [LOC_LAX, LOC_MCO]) {
+    const cfg = toSpinClientConfig(await resolveTenantTerminalConfig(TENANT.id, { locationId: loc }));
+    assert.equal(cfg.spinL3Enabled, true, loc);
+    assert.equal(cfg.spinL3AutoRental, true, loc);
+  }
+});
+
+test('a payload with NO l3 key leaves the stored posture alone', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    spin: { enabled: true, environment: 'production', authKey: 'AbC123dEf4', tpn: LEGACY.tpn, l3: { enabled: true, autoRental: true } },
+  }, scope);
+
+  // An older settings client saves the spin block without knowing about l3.
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    spin: { enabled: true, environment: 'production', authKey: '', tpn: LEGACY.tpn },
+  }, scope);
+
+  const cfg = toSpinClientConfig(await resolveTenantTerminalConfig(TENANT.id));
+  assert.equal(cfg.spinL3Enabled, true, 'the posture survived a partial save');
+  assert.equal(cfg.spinL3AutoRental, true);
+});
