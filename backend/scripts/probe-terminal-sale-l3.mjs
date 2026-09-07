@@ -726,8 +726,17 @@ async function main() {
       // probe tells you the shape is wrong when the truth is the terminal was
       // asleep — which is exactly what rung 10 did on 2026-09-07, one minute
       // after the same payload had been declared clean in a dry run.
+      // A gateway REFUSAL arrives as a SPIn envelope: GeneralResponse with a
+      // StatusCode and a DetailedMessage naming what it disliked. An HTTP 500
+      // carrying `{"Message":"An error has occurred."}` is not that — it is an
+      // unhandled exception on their server, with no envelope and no opinion
+      // about our fields. Rung 11 hit exactly that on 2026-09-07 and the
+      // ladder called it a payload finding for the second day running.
+      const httpFault = Number(lastError?.spinStatusCode) >= 500
+        && !lastError?.spinResponse?.GeneralResponse;
       const notEvaluated = busyNotRefused
-        || String(lastError?.spinStatusCode || '') === SPIN_STATUS.TERMINAL_NOT_CONNECTED;
+        || String(lastError?.spinStatusCode || '') === SPIN_STATUS.TERMINAL_NOT_CONNECTED
+        || httpFault;
       if (busyNotRefused) {
         console.log(`
   ⏳ Stage ${stage.n} never reached the terminal — it answered BUSY, even`);
@@ -735,6 +744,15 @@ async function main() {
         console.log('    device was still finishing the previous one. Give it a minute, then');
         console.log(`    re-run with --stage ${stage.n} to test this rung on its own.`);
         stopped = `stage ${stage.n} could not be tested — terminal busy`;
+      } else if (httpFault) {
+        console.log(`
+  ✖ Stage ${stage.n} got an HTTP ${lastError?.spinStatusCode} from the gateway itself.`);
+        console.log('    There is no SPIn envelope in that answer — no StatusCode, no');
+        console.log('    DetailedMessage, no opinion about our fields. It is an unhandled error');
+        console.log('    on THEIR server, so it says NOTHING about the payload this stage adds.');
+        console.log('    Endpoint, host or TPN provisioning — take it to Dejavoo, not to the');
+        console.log('    payload builder.');
+        stopped = `stage ${stage.n} could not be tested — HTTP ${lastError?.spinStatusCode} from the gateway`;
       } else if (notEvaluated) {
         console.log(`
   ⏳ Stage ${stage.n} never reached the terminal — it is not connected to the`);
