@@ -520,7 +520,7 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   // worth asserting, because that is what gets charged.
   const { buildStages, stagePayload } = await import('../../../scripts/probe-terminal-sale-l3.mjs');
   const stages = buildStages({ amount: 1.00, agreementNumber: 'PROBE-T', taxRate: 11.5 });
-  assert.equal(stages.length, 12);
+  assert.equal(stages.length, 14);
   const p = stages.map((s) => stagePayload(s, 'REF').body);
 
   // 1 — the control is today's payload and nothing else.
@@ -571,6 +571,24 @@ test('the probe ladder adds ONE GROUP OF FIELDS PER RUNG, control first', async 
   assert.ok(p[11].L3Data, 'rung 12 carries the CEDP envelope');
   assert.equal('AutoRental' in p[11], false, 'and none of the rental block');
 
+  // 13-14 — the spec's own shape at the spec's own host. The AutoRental spec
+  // REQUIRES TaxAmount, LocalTaxFlag, LineItemCount, PurchaseIdFormatCode and
+  // Level3LineItems.Group alongside the rental block, so "AutoRental alone"
+  // (rung 11) was missing required fields there; and it documents the host as
+  // spinpos.net while every attempt so far went to api.spinpos.net.
+  assert.ok(p[12].AutoRental, 'rung 13 carries the rental block');
+  for (const cedp of ['TaxAmount', 'LocalTaxFlag', 'LineItemCount', 'PurchaseIdFormatCode', 'Level3LineItems']) {
+    assert.ok(cedp in p[12], `rung 13 must carry ${cedp} — the spec requires it on this endpoint`);
+  }
+  assert.equal(stages[12].endpoint, 'AutoRental');
+  assert.equal(stages[12].cfg.spinBaseUrl, 'https://spinpos.net', 'and it must go to the documented host');
+
+  // 14 — the control for that host: the one payload api.spinpos.net is known
+  // to accept, so a failure names the HOST rather than the rental data.
+  assert.deepEqual(p[13], p[0], 'rung 14 is rung 1, at the other host');
+  assert.equal(stages[13].cfg.spinBaseUrl, 'https://spinpos.net');
+  assert.equal(stages[13].endpoint, undefined, 'the control is a plain sale');
+
   // 4 — the full itemization; deposit and tax rows are NOT lines.
   assert.equal(p[3].L3Data.items.length, 4);
   const names = p[3].L3Data.items.map((i) => i.Description);
@@ -611,8 +629,16 @@ test('the ladder refuses to build rungs it cannot make reconcile', async () => {
   // records a meaningless pass after tapping a card.
   for (const amount of [1.00, 1.01, 1.37, 2.50, 5.00, 118.00, 407.35]) {
     const stages = buildStages({ amount, agreementNumber: 'PROBE-T', taxRate: 11.5 });
+    // Rungs 1 and 14 are CONTROLS — today's payload, byte for byte, at each of
+    // the two hosts — so they carry no L3 block and no decision to check. Every
+    // other rung must actually apply what it claims to be testing.
+    const CONTROLS = new Set([1, 14]);
     for (const s of stages.slice(2)) {
       const { l3Decision } = (await import('../../../scripts/probe-terminal-sale-l3.mjs')).stagePayload(s, 'R');
+      if (CONTROLS.has(s.n)) {
+        assert.equal(l3Decision, null, `stage ${s.n} is a control and must send no L3`);
+        continue;
+      }
       assert.equal(l3Decision.applied, true, `amount ${amount}, stage ${s.n}: ${l3Decision.skipped} ${l3Decision.reason}`);
     }
   }

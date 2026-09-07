@@ -127,6 +127,7 @@ import {
 } from '../src/modules/payment-gateway/tenant-terminal-config.js';
 import { extractValidationErrors, isAutoRentalAccepted } from '../src/modules/payment-gateway/autorental-validation.js';
 import { isBusyFailure, busyDelaySeconds, SPIN_STATUS } from '../src/modules/payment-gateway/terminal-state.js';
+import { SPIN_HOSTS } from '../src/modules/payment-gateway/spin-client.js';
 import { L3_ENVELOPE } from '../src/modules/payment-gateway/terminal-sale-l3.js';
 import { buildLevel3LineItems } from '../src/modules/payment-gateway/autorental-l3.builder.js';
 import { prisma } from '../src/lib/prisma.js';
@@ -522,6 +523,30 @@ export function buildStages({
       why: 'the other half of the same sentence: this is rung 4 restated as a deliberate posture, so the two independent shapes can be compared side by side on ARLFlag',
       args: () => withLines(many.rows, many.taxAmount, 2),
       cfg: on({ spinL3LineItems: true, spinL3AutoRental: false }),
+    },
+    {
+      n: 13,
+      name: 'the SPEC SHAPE at the SPEC HOST — CEDP + AutoRental, at spinpos.net',
+      why: 'the AutoRental spec REQUIRES TaxAmount, LocalTaxFlag, LineItemCount, PurchaseIdFormatCode and Level3LineItems.Group alongside the rental block — so rung 11 was missing required fields — AND it documents the host as spinpos.net, while every attempt so far went to api.spinpos.net. This rung moves both back to what the spec says',
+      args: () => {
+        const a = withLines(many.rows, many.taxAmount, 2);
+        a.level3.autoRental = autoRentalInputs(agreementNumber, 2);
+        return a;
+      },
+      cfg: on({
+        spinL3LineItems: true,
+        spinL3AutoRental: true,
+        spinL3Envelope: L3_ENVELOPE.AUTORENTAL,
+        spinBaseUrl: SPIN_HOSTS.BARE,
+      }),
+      endpoint: 'AutoRental',
+    },
+    {
+      n: 14,
+      name: 'the CONTROL for rung 13 — a plain sale at spinpos.net',
+      why: 'if 13 fails too, this says whether that host answers us AT ALL. A plain sale is the one payload we know api.spinpos.net accepts, so a failure here is the host and not the rental data',
+      args: () => ({ ...common }),
+      cfg: { ...baseCfg, spinBaseUrl: SPIN_HOSTS.BARE },
     },
   ];
 }

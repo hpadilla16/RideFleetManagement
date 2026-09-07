@@ -21,10 +21,48 @@ import { buildTerminalSaleL3, TERMINAL_L3_SKIP } from './terminal-sale-l3.js';
 
 const SPIN_PRODUCTION_URL = 'https://api.spinpos.net';
 
+/**
+ * The production hosts this client is allowed to talk to — and ONLY these.
+ *
+ * `api.spinpos.net` is where every proven call runs: Sale, Auth, Void,
+ * GetCard, UserChoice, GetSignature, TerminalStatus. It stays the default and
+ * nothing changes for any caller that does not ask for something else.
+ *
+ * `spinpos.net` is here because the AutoRental spec documents THAT host for
+ * `/v2/AutoRental/Sale` (docs.ipospays.com/spin-specification/RestApi/
+ * autorental/v2/autorental/sale/post), while every AutoRental attempt we have
+ * made went to api.spinpos.net and came back with an instant ASP.NET HTTP 500
+ * — four different payload shapes, including the one the spec itself requires.
+ * A route that does not exist on a host is a very ordinary way to get that
+ * 500, and it is the one variable we have never moved.
+ *
+ * THE SAFETY PROPERTY IS UNCHANGED: this is an allowlist of PRODUCTION hosts.
+ * `test.spinpos.net` is not on it and cannot be reached however the value
+ * arrives — the 2026-05-29 rule that there is no code path to the sandbox
+ * still holds, because an unrecognised host falls back to the default rather
+ * than being used.
+ */
+export const SPIN_HOSTS = Object.freeze({
+  API: 'https://api.spinpos.net',
+  BARE: 'https://spinpos.net',
+});
+
+function resolveBaseUrl(tenantConfig = {}) {
+  const want = String(tenantConfig.spinBaseUrl || '').trim().replace(/\/$/, '');
+  if (!want) return SPIN_PRODUCTION_URL;
+  const allowed = Object.values(SPIN_HOSTS);
+  if (allowed.includes(want)) return want;
+  logger.warn('[spin-client] ignoring an unrecognised SPIn host — falling back to the production default', {
+    requested: want, using: SPIN_PRODUCTION_URL,
+  });
+  return SPIN_PRODUCTION_URL;
+}
+
 function getConfig(tenantConfig = {}) {
   return {
-    // Hard-coded production endpoint. No sandbox flag. No env override.
-    baseUrl: SPIN_PRODUCTION_URL,
+    // Production only. No sandbox flag, no env override: the sole choice is
+    // between the two documented PRODUCTION hosts (see resolveBaseUrl).
+    baseUrl: resolveBaseUrl(tenantConfig),
     authKey: tenantConfig.spinAuthKey || process.env.SPIN_AUTH_KEY || '',
     tpn: tenantConfig.spinTpn || process.env.SPIN_TPN || '',
     merchantNumber: tenantConfig.spinMerchantNumber ? Number(tenantConfig.spinMerchantNumber) : 1,
