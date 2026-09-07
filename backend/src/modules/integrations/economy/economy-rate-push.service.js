@@ -21,7 +21,7 @@ import logger from '../../../lib/logger.js';
 import { buildPushPlan, verifyPush, SKIP } from './economy-rate-map.js';
 import { readRateGrid, applyRateCell } from './economy-rate-client.js';
 import { loadStopSaleClosures } from '../booking-source/stop-sale-closures.js';
-import { loadDailyOverrides, resolvePriceSource } from '../booking-source/price-source.js';
+import { loadDailyOverrides, resolvePricePolicy } from '../booking-source/price-source.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'ECONOMY';
@@ -144,8 +144,18 @@ export async function pushArea(config, deps = {}) {
   const actorUserId = deps.actorUserId || null;
 
   if (mode === MODES.OFF) return { skipped: 'mode_off' };
-  if (!config?.ratePushEnabled) return { skipped: 'area_disabled', externalArea: config?.externalArea };
   if (!config?.externalLocationCode) return { skipped: 'no_external_location', externalArea: config?.externalArea };
+
+  // Does this sede push rates at all, and whose? One read from the shared
+  // policy table — NOT EconomyLocationConfig.ratePushEnabled, which nothing in
+  // the app ever wrote and which is backfilled into the policy row.
+  const policy = deps.policy || await resolvePricePolicy(deps.prisma || prisma, {
+    tenantId: config.tenantId, locationId: config.locationId, provider: PROVIDER,
+  });
+  const priceSource = deps.priceSource || policy.priceSource;
+  if (!policy.ratePushEnabled) {
+    return { skipped: 'area_disabled', externalArea: config?.externalArea, priceSource };
+  }
   // No sentinel => we cannot tell a blocked day from a real price. Refuse.
   if (config?.rateCloseoutMin == null) {
     logger.warn('[economy-rate-push] area has no close-out sentinel — refusing to push', {
@@ -157,11 +167,6 @@ export async function pushArea(config, deps = {}) {
   const { tenantId, locationId, externalLocationCode } = config;
   const closeoutMin = Number(config.rateCloseoutMin);
   const dates = dateWindow(deps.now ? deps.now() : new Date(), deps.horizonDays || pushHorizonDays());
-
-  // WHOSE prices this sede publishes — its own manual ones, or Market
-  // Intelligence's. Per sede, not per tenant: LAX and MIA may disagree.
-  const priceSource = deps.priceSource
-    || await resolvePriceSource(db, { tenantId, locationId, provider: PROVIDER });
 
   const rfmRates = await (deps.loadRfmRates || loadRfmRates)(tenantId, locationId, {
     ...deps,
@@ -204,7 +209,7 @@ export async function pushArea(config, deps = {}) {
 
   const base = {
     tenantId, provider: PROVIDER, locationId, externalLocationCode,
-    trigger, mode, createdByUserId: actorUserId,
+    trigger, mode, priceSource, createdByUserId: actorUserId,
   };
 
   // Log hygiene: the sweep runs every 30 minutes and most cells never change,
@@ -434,12 +439,19 @@ export async function pushArea(config, deps = {}) {
   return { externalArea: config.externalArea, mode, priceSource, ...results };
 }
 
-/** Sweep every area that is switched on for push. */
+/**
+ * Sweep every area that is switched on for push.
+ *
+ * The switch is no longer read here: it lives on IntegrationPricePolicy and
+ * pushArea consults it per sede. Filtering it in this query too would mean two
+ * places deciding the same thing, and the one that is easy to forget is the
+ * query. A sede that is off returns `area_disabled` before any portal call.
+ */
 export async function pushAllAreas(deps = {}) {
   const db = deps.prisma || prisma;
   const mode = deps.mode || pushMode();
   if (mode === MODES.OFF) return { skipped: 'mode_off' };
-  const configs = await db.economyLocationConfig.findMany({ where: { enabled: true, ratePushEnabled: true } });
+  const configs = await db.economyLocationConfig.findMany({ where: { enabled: true } });
   const results = [];
   for (const config of configs) {
     try { results.push(await pushArea(config, deps)); }

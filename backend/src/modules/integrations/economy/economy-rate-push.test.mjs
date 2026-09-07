@@ -58,7 +58,7 @@ test('dateWindow: contiguous iso days from the start', () => {
 // ---------------------------------------------------------------------------
 // Orchestration harness
 // ---------------------------------------------------------------------------
-function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals, rateCodes }) {
+function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals, rateCodes, policy }) {
   const logs = [];
   const prismaStub = {
     ratePushLog: {
@@ -111,6 +111,10 @@ function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals, rateCodes 
     logs, calls,
     deps: {
       prisma: prismaStub, client, mode,
+      // The sede's rate-push policy. Injected so these tests keep exercising
+      // what they were written for; the resolver's own fail-closed default has
+      // its own tests in booking-source/price-source.test.mjs.
+      policy: policy || { ratePushEnabled: true, priceSource: 'MANUAL', explicit: true },
       now: () => new Date('2027-03-15T12:00:00Z'),
       horizonDays: 3,
       loadRfmRates: async () => rfmRates,
@@ -136,12 +140,35 @@ test('REFUSES: an area with no close-out sentinel never pushes', async () => {
   assert.equal(calls.applied.length, 0);
 });
 
-test('REFUSES: area flag off, and global mode OFF, both stop the push', async () => {
-  const a = makeDeps({ portalRows: [], rfmRates: [{ classCode: 'CCAR', daily: 20 }], mode: MODES.LIVE });
-  assert.equal((await pushArea({ ...CONFIG, ratePushEnabled: false }, a.deps)).skipped, 'area_disabled');
+test('REFUSES: the sede switch off, and global mode OFF, both stop the push', async () => {
+  // The switch lives on IntegrationPricePolicy (2026-09-07), not on
+  // EconomyLocationConfig.ratePushEnabled — that column had no write path and
+  // is backfilled into the policy row.
+  const a = makeDeps({
+    portalRows: [], rfmRates: [{ classCode: 'CCAR', daily: 20 }], mode: MODES.LIVE,
+    policy: { ratePushEnabled: false, priceSource: 'MANUAL', explicit: true },
+  });
+  assert.equal((await pushArea(CONFIG, a.deps)).skipped, 'area_disabled');
+
   const b = makeDeps({ portalRows: [], rfmRates: [{ classCode: 'CCAR', daily: 20 }], mode: MODES.OFF });
   assert.equal((await pushArea(CONFIG, b.deps)).skipped, 'mode_off');
   assert.equal(a.calls.applied.length + b.calls.applied.length, 0);
+});
+
+test('the sede switch stops the push WITHOUT touching the import config', async () => {
+  // Hector 2026-09-07: pausing a writeback must never mean pausing the
+  // reservation sync. The config row stays enabled; only the policy says no.
+  const { deps, calls } = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['', '', ''] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.LIVE,
+    policy: { ratePushEnabled: false, priceSource: 'MARKET', explicit: true },
+  });
+  const out = await pushArea(CONFIG, deps);
+  assert.equal(out.skipped, 'area_disabled');
+  assert.equal(calls.reads, 0, 'a paused sede must not even open a portal session');
+  assert.equal(calls.applied.length, 0);
+  assert.equal(out.priceSource, 'MARKET', 'the answer is still reported, so the screen can show it');
 });
 
 // ---------------------------------------------------------------------------
@@ -269,10 +296,13 @@ test('pushAllAreas: OFF short-circuits before touching the DB', async () => {
   assert.equal(queried, false);
 });
 
-test('pushAllAreas: only areas with ratePushEnabled are queried, failures isolated', async () => {
+test('pushAllAreas: the sweep loads every enabled area and lets pushArea decide, failures isolated', async () => {
   let capturedWhere = null;
   const out = await svc.pushAllAreas({
     mode: MODES.DRY_RUN,
+    // The switch is NOT re-filtered in this query: two places deciding the same
+    // thing is how one of them silently goes stale. pushArea refuses per sede.
+    policy: { ratePushEnabled: true, priceSource: 'MANUAL', explicit: true },
     prisma: {
       economyLocationConfig: {
         findMany: async ({ where }) => {
@@ -301,7 +331,7 @@ test('pushAllAreas: only areas with ratePushEnabled are queried, failures isolat
       applyRateCell: async () => ({ claimedSuccess: true }),
     },
   });
-  assert.deepEqual(capturedWhere, { enabled: true, ratePushEnabled: true });
+  assert.deepEqual(capturedWhere, { enabled: true });
   assert.equal(out.processedAreas, 2);
   assert.ok(out.results.find((r) => r.externalArea === 'LAX')?.planned >= 1, 'the healthy area still ran');
   assert.match(out.results.find((r) => r.error)?.error || '', /rates blew up/, 'the broken area was isolated');
@@ -539,4 +569,25 @@ test('pushArea defaults to MANUAL when the sede never chose', async () => {
   // The stub prisma has no integrationPricePolicy at all — the unreadable case.
   const out = await pushArea(CONFIG, deps);
   assert.equal(out.priceSource, PRICE_SOURCES.MANUAL);
+});
+
+test('every log row records WHOSE price it was', async () => {
+  // Reviewing an approval queue without this means judging a number with no
+  // idea whether a person or the pricing engine proposed it.
+  const { deps, logs } = makeDeps({
+    // One cell publishes, one sits out of band, one is a no-op: three different
+    // log lanes, all of which must carry the provenance.
+    portalRows: [{ cls: 'CCAR', values: ['', '11.00', '20.00'] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20, rateItemId: 'ri-1' }],
+    mode: MODES.DRY_RUN,
+    policy: { ratePushEnabled: true, priceSource: 'MARKET', explicit: true },
+  });
+  await pushArea(CONFIG, deps);
+
+  assert.ok(logs.length >= 3, 'the three lanes each wrote a row');
+  const statuses = new Set(logs.map((l) => l.status));
+  assert.ok(statuses.size > 1, 'more than one lane exercised');
+  for (const row of logs) {
+    assert.equal(row.priceSource, 'MARKET', `${row.status} row must carry the source`);
+  }
 });

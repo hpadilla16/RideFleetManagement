@@ -40,14 +40,25 @@ export function normalizePriceSource(value) {
 }
 
 /**
- * The sede's choice for one integration. Best-effort — a query failure falls
- * back to MANUAL, the posture that cannot surprise anybody: it publishes the
- * rate a person set.
+ * The sede's whole posture for one integration, in one read:
+ *
+ *   ratePushEnabled — does this sede push rates AT ALL for this provider?
+ *                     (Hector 2026-09-07: turning off a writeback must not mean
+ *                     turning off the reservation sync too.)
+ *   priceSource     — if it does, whose prices go out.
+ *   explicit        — whether a human has actually chosen, or this is default.
+ *
+ * Best-effort and FAIL-CLOSED on both axes: an unreadable policy is
+ * { ratePushEnabled: false, priceSource: MANUAL }. A missing row is the same,
+ * which is what makes a newly mapped sede import reservations immediately while
+ * touching nobody's prices until somebody says so.
+ *
+ * Note the asymmetry with the env gate: the env mode can only ever REMOVE
+ * permission (OFF beats an enabled sede), never grant it.
  */
-export async function resolvePriceSource(db, { tenantId, locationId, provider } = {}) {
-  if (!db?.integrationPricePolicy?.findUnique || !tenantId || !locationId || !provider) {
-    return PRICE_SOURCES.MANUAL;
-  }
+export async function resolvePricePolicy(db, { tenantId, locationId, provider } = {}) {
+  const closed = { ratePushEnabled: false, priceSource: PRICE_SOURCES.MANUAL, explicit: false };
+  if (!db?.integrationPricePolicy?.findUnique || !tenantId || !locationId || !provider) return closed;
   const row = await db.integrationPricePolicy.findUnique({
     where: {
       tenantId_locationId_provider: {
@@ -56,9 +67,23 @@ export async function resolvePriceSource(db, { tenantId, locationId, provider } 
         provider: String(provider).toUpperCase(),
       },
     },
-    select: { priceSource: true },
+    select: { priceSource: true, ratePushEnabled: true },
   }).catch(() => null);
-  return normalizePriceSource(row?.priceSource);
+  if (!row) return closed;
+  return {
+    ratePushEnabled: row.ratePushEnabled === true,
+    priceSource: normalizePriceSource(row.priceSource),
+    explicit: true,
+  };
+}
+
+/**
+ * Just the source half. Kept as its own export because the loaders only ever
+ * need this much, and passing them a whole policy object invites reading the
+ * switch in a place that has already decided to run.
+ */
+export async function resolvePriceSource(db, args = {}) {
+  return (await resolvePricePolicy(db, args)).priceSource;
 }
 
 /**

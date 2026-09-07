@@ -913,11 +913,25 @@ export async function enqueueRatePush(tenantId, triggeredBy = 'post-pricing-engi
 export async function enqueueRatePushForEnabledTenants({ tenantId = null } = {}) {
   const { pushMode } = await import('./mex-rate-push.service.js');
   if (pushMode() !== 'LIVE') return { skipped: 'mode_' + pushMode().toLowerCase(), queued: 0 };
-  const configs = await prisma.mexLocationConfig.findMany({
+  // A sede must be switched ON for rate push, not merely mapped for imports
+  // (2026-09-07). Before this, an enabled MexLocationConfig was the whole test,
+  // so a tenant whose MEX integration was switched OFF at tenant level could
+  // still have prices written into MEX's live system — the config row was the
+  // only thing anyone looked at. The switch now lives on IntegrationPricePolicy
+  // and the push itself refuses per sede; filtering here as well only avoids
+  // waking a portal session that would find nothing to do.
+  const enabled = await prisma.integrationPricePolicy.findMany({
+    where: { provider: 'MEX', ratePushEnabled: true, ...(tenantId ? { tenantId } : {}) },
+    select: { locationId: true },
+  }).catch(() => []);
+  const pushable = new Set(enabled.map((r) => r.locationId));
+  const all = await prisma.mexLocationConfig.findMany({
     where: { enabled: true, ...(tenantId ? { tenantId } : {}) },
-    select: { tenantId: true },
-    distinct: ['tenantId'],
+    select: { tenantId: true, locationId: true },
   });
+  const configs = [...new Map(
+    all.filter((c) => pushable.has(c.locationId)).map((c) => [c.tenantId, c]),
+  ).values()];
   let queued = 0;
   for (const cfg of configs) {
     const jobId = await enqueueRatePush(cfg.tenantId).catch((e) => {

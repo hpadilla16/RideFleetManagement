@@ -5255,8 +5255,11 @@ model EconomyLocationConfig {
   // The franchise portal's own location code for this area (RezAlliance
   // lstLocations: 'LAXO01' | 'MIAO01'). Required before this area can push.
   externalLocationCode String?
-  // Per-area push switch. OFF by default: an area never pushes until it is
-  // explicitly turned on, even when the global transport flag is live.
+  // SUPERSEDED 2026-09-07 by IntegrationPricePolicy.ratePushEnabled, which
+  // carries the same switch for EVERY provider and has an actual UI. Nothing in
+  // the app ever wrote this column (it was set by hand) and nothing reads it any
+  // more; the migration copied its value into the policy row. Kept so the
+  // deploy does not need a destructive drop — do not start reading it again.
   ratePushEnabled      Boolean  @default(false)
   // Optional ACRISS alias overrides, {"RFM_CODE":"PORTAL_CODE"}. Codes match
   // 1:1 for most classes (CCAR/ECAR/FFAR/ICAR/IFAR at LAX), so this only
@@ -5360,6 +5363,21 @@ model IntegrationPricePolicy {
   // 'MANUAL' | 'MARKET'. A string, not an enum, so adding a third posture
   // later is a code change and not a migration on a money-adjacent table.
   priceSource String @default("MANUAL")
+  // Does this sede push rates AT ALL for this integration (2026-09-07, Hector:
+  // "que todas las integraciones tengan un switch para prender o apagar rate
+  // pushing para asi no tener que apagar una integracion completa por lo del
+  // rate"). Before this, stopping MEX's writeback meant disabling the sede's
+  // MexLocationConfig — which also killed the INBOUND reservation sync. Two
+  // unrelated things behind one switch.
+  //
+  // This is the per-sede half of a two-part gate: the env transport mode
+  // (ECONOMY_RATE_PUSH_MODE / MEX_RATE_PUSH_MODE) still decides globally
+  // whether anything writes at all, and a provider's own prerequisites still
+  // apply on top (Economy refuses without a close-out sentinel).
+  //
+  // Default OFF: a newly mapped sede imports reservations immediately but does
+  // not touch anyone's prices until somebody says so.
+  ratePushEnabled Boolean @default(false)
 
   updatedByUserId String?
   createdAt       DateTime @default(now())
@@ -5389,6 +5407,12 @@ model RatePushLog {
   priorValue       Decimal? @db.Decimal(10, 2) // what the portal showed before
   pushedValue      Decimal  @db.Decimal(10, 2) // what RFM wrote
   sourceRateItemId String? // RateItem the value came from (traceability)
+  // WHOSE number this was: 'MANUAL' (base + a person's per-date overrides) or
+  // 'MARKET' (Market Intelligence's auto-applied prices allowed through).
+  // 2026-09-07: reviewing an approval queue without this means deciding on a
+  // price with no idea whether a human or the pricing engine proposed it.
+  // Nullable — rows written before the switch existed cannot be attributed.
+  priceSource      String?
 
   trigger    String // 'MI_AUTOAPPLY' | 'MANUAL' | 'DRIFT_SWEEP'
   mode       String // 'DRY_RUN' | 'LIVE'

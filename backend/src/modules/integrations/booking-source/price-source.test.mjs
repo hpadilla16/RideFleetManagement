@@ -162,3 +162,59 @@ test('effectiveDaily: the override wins, the base backs it, nothing invents a pr
   assert.equal(effectiveDaily(overrides, 'r1:v1', '2026-09-11', null), null);
   assert.equal(effectiveDaily(null, 'r1:v1', '2026-09-11', 90), 90);
 });
+
+// ---------------------------------------------------------------------------
+// The per-sede rate-push switch (2026-09-07). Hector: "que todas las
+// integraciones tengan un switch para prender o apagar rate pushing para asi no
+// tener que apagar una integracion completa por lo del rate".
+//
+// It must FAIL CLOSED on every path. A sede that cannot be read, or has never
+// been configured, publishes nothing — the opposite would mean a query hiccup
+// writes prices into a partner's live system.
+// ---------------------------------------------------------------------------
+const { resolvePricePolicy } = await import('./price-source.js');
+
+const ARGS = { tenantId: 't', locationId: 'l', provider: 'MEX' };
+
+test('resolvePricePolicy: a stored row is read verbatim', async () => {
+  const db = { integrationPricePolicy: { findUnique: async () => ({ priceSource: 'MARKET', ratePushEnabled: true }) } };
+  assert.deepEqual(await resolvePricePolicy(db, ARGS), {
+    ratePushEnabled: true, priceSource: PRICE_SOURCES.MARKET, explicit: true,
+  });
+});
+
+test('resolvePricePolicy: no row is the closed default — imports fine, publishes nothing', async () => {
+  const db = { integrationPricePolicy: { findUnique: async () => null } };
+  assert.deepEqual(await resolvePricePolicy(db, ARGS), {
+    ratePushEnabled: false, priceSource: PRICE_SOURCES.MANUAL, explicit: false,
+  });
+});
+
+test('resolvePricePolicy: an unreadable policy never fails open', async () => {
+  const exploding = { integrationPricePolicy: { findUnique: async () => { throw new Error('pool timeout'); } } };
+  const out = await resolvePricePolicy(exploding, ARGS);
+  assert.equal(out.ratePushEnabled, false, 'a database hiccup must not authorise a write');
+  assert.equal(out.priceSource, PRICE_SOURCES.MANUAL);
+
+  for (const missing of [{}, { tenantId: 't' }, { tenantId: 't', locationId: 'l' }]) {
+    assert.equal((await resolvePricePolicy(exploding, missing)).ratePushEnabled, false);
+  }
+  assert.equal((await resolvePricePolicy(null, ARGS)).ratePushEnabled, false);
+});
+
+test('resolvePricePolicy: only a real true enables the push', async () => {
+  // A string, a 1 or a null out of the driver must not read as permission.
+  for (const raw of ['true', 1, 'yes', null, undefined, {}]) {
+    const db = { integrationPricePolicy: { findUnique: async () => ({ priceSource: 'MARKET', ratePushEnabled: raw }) } };
+    assert.equal(
+      (await resolvePricePolicy(db, ARGS)).ratePushEnabled, false,
+      `${JSON.stringify(raw)} is not a boolean true`,
+    );
+  }
+});
+
+test('resolvePriceSource still answers the source half alone', async () => {
+  const db = { integrationPricePolicy: { findUnique: async () => ({ priceSource: 'MARKET', ratePushEnabled: false }) } };
+  assert.equal(await resolvePriceSource(db, ARGS), PRICE_SOURCES.MARKET,
+    'a paused sede still has a source — the screen shows what it WOULD publish');
+});

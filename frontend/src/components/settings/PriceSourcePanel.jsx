@@ -19,10 +19,11 @@
  *
  * Backend contract (mounted at /api/admin/integrations/price-policy):
  *   GET  /   -> { providers[], sources[], rows: [{ locationId, locationName,
- *                 locationCode, provider, externalCode, writebackEnabled,
- *                 priceSource, explicit, updatedAt,
+ *                 locationCode, provider, externalCode, integrationEnabled,
+ *                 ratePushEnabled, priceSource, explicit, updatedAt,
  *                 marketIntelligenceAutoApplies }] }
- *   PUT  /   { locationId, provider, priceSource } -> { ok, priceSource, previous }
+ *   PUT  /   { locationId, provider, priceSource?, ratePushEnabled? }
+ *            -> { ok, priceSource, ratePushEnabled, previous }
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -90,7 +91,7 @@ export default function PriceSourcePanel({
 
   useEffect(() => { if (canAccess) reload(); }, [canAccess, reload]);
 
-  const change = async (row, priceSource) => {
+  const patch = async (row, body, describe) => {
     const key = `${row.locationId}:${row.provider}`;
     setSavingKey(key);
     try {
@@ -98,17 +99,17 @@ export default function PriceSourcePanel({
         scoped('/api/admin/integrations/price-policy'),
         {
           method: 'PUT',
-          body: JSON.stringify({ locationId: row.locationId, provider: row.provider, priceSource }),
+          body: JSON.stringify({ locationId: row.locationId, provider: row.provider, ...body }),
         },
         token,
       );
       if (res?.ok) {
         setRows((all) => all.map((r) => (
           r.locationId === row.locationId && r.provider === row.provider
-            ? { ...r, priceSource, explicit: true, updatedAt: res.updatedAt || new Date().toISOString() }
+            ? { ...r, ...body, explicit: true, updatedAt: res.updatedAt || new Date().toISOString() }
             : r
         )));
-        flash(`${row.provider} · ${row.locationName || row.locationCode}: now publishing ${SOURCE_LABEL[priceSource]}`);
+        flash(`${row.provider} · ${row.locationName || row.locationCode}: ${describe}`);
       } else {
         flash('Could not save');
       }
@@ -118,6 +119,16 @@ export default function PriceSourcePanel({
       setSavingKey(null);
     }
   };
+
+  const setSource = (row, priceSource) => patch(
+    row, { priceSource }, `now publishing ${SOURCE_LABEL[priceSource]}`,
+  );
+
+  const setPush = (row, ratePushEnabled) => patch(
+    row,
+    { ratePushEnabled },
+    ratePushEnabled ? 'rate push ON' : 'rate push OFF — reservations keep importing',
+  );
 
   if (!canAccess) return null;
 
@@ -136,10 +147,12 @@ export default function PriceSourcePanel({
         <div style={{ display: 'grid', gap: 4 }}>
           <h3 style={{ margin: 0 }}>Which price we publish</h3>
           <p className="ui-muted">
-            For every sede that writes rates into a partner&apos;s system, choose whose numbers go out:
-            the ones your team sets in Ride, or the ones Market Intelligence applies automatically.
-            A <strong>stop sale</strong> always wins over both — a class closed in Ride is closed on the
-            portal whatever the source.
+            Two decisions per sede, per integration: whether we push rates there at all, and whose
+            numbers go out — the ones your team sets in Ride, or the ones Market Intelligence applies
+            automatically. Turning the push off <strong>does not</strong> stop the integration:
+            reservations keep importing exactly as before.
+            A <strong>stop sale</strong> always wins over both sources — a class closed in Ride is
+            closed on the portal whatever the price came from.
           </p>
         </div>
       </div>
@@ -161,8 +174,8 @@ export default function PriceSourcePanel({
                 <th style={{ padding: '8px 10px' }}>Sede</th>
                 <th style={{ padding: '8px 10px' }}>Integration</th>
                 <th style={{ padding: '8px 10px' }}>Portal code</th>
+                <th style={{ padding: '8px 10px' }}>Push rates</th>
                 <th style={{ padding: '8px 10px' }}>Publishes</th>
-                <th style={{ padding: '8px 10px' }}>Writeback</th>
               </tr>
             </thead>
             <tbody>
@@ -189,10 +202,30 @@ export default function PriceSourcePanel({
                     </td>
                     <td style={{ padding: '8px 10px' }}>
                       <div style={{ display: 'grid', gap: 4 }}>
+                        <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: busy ? 'wait' : 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={row.ratePushEnabled}
+                            disabled={busy}
+                            onChange={(e) => setPush(row, e.target.checked)}
+                          />
+                          {row.ratePushEnabled
+                            ? <Pill tone="green">Pushing</Pill>
+                            : <Pill tone="gray">Paused</Pill>}
+                        </label>
+                        {!row.integrationEnabled ? (
+                          <span className="ui-muted" style={{ fontSize: 12 }}>
+                            This sede is not mapped for {row.provider} imports right now.
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td style={{ padding: '8px 10px' }}>
+                      <div style={{ display: 'grid', gap: 4, opacity: row.ratePushEnabled ? 1 : 0.55 }}>
                         <select
                           value={row.priceSource}
                           disabled={busy}
-                          onChange={(e) => change(row, e.target.value)}
+                          onChange={(e) => setSource(row, e.target.value)}
                           style={{ maxWidth: 220 }}
                         >
                           {Object.keys(SOURCE_LABEL).map((s) => (
@@ -202,21 +235,22 @@ export default function PriceSourcePanel({
                         <span className="ui-muted" style={{ fontSize: 12 }}>
                           {SOURCE_HELP[row.priceSource]}
                         </span>
-                        {marketIsInert ? (
+                        {row.ratePushEnabled && marketIsInert ? (
                           <span style={{ fontSize: 12, color: '#92400e' }}>
                             No Market Intelligence profile auto-applies to this sede, so today this
                             publishes the same numbers as Manual.
+                          </span>
+                        ) : null}
+                        {!row.ratePushEnabled ? (
+                          <span className="ui-muted" style={{ fontSize: 12 }}>
+                            Nothing is published while the push is paused — this is what it will send
+                            when you switch it on.
                           </span>
                         ) : null}
                         {!row.explicit ? (
                           <span className="ui-muted" style={{ fontSize: 12 }}>Default — nobody has chosen yet.</span>
                         ) : null}
                       </div>
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>
-                      {row.writebackEnabled
-                        ? <Pill tone="green">On</Pill>
-                        : <Pill tone="gray">Off</Pill>}
                     </td>
                   </tr>
                 );
@@ -227,8 +261,9 @@ export default function PriceSourcePanel({
       )}
 
       <p className="ui-muted" style={{ marginTop: 12, fontSize: 12 }}>
-        Changing this takes effect on the next rate push. Every change is recorded in the audit log with
-        the old and the new value.
+        Changes take effect on the next rate push. Every change is recorded in the audit log with the old
+        and the new value. A global transport setting can still hold everything back: if rate pushing is
+        switched off for the whole platform, a sede set to Pushing here still writes nothing.
       </p>
     </section>
   );

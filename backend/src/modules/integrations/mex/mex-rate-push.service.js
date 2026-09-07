@@ -32,7 +32,7 @@ import {
 } from './mex.service.js';
 import { mexRatePushEligibleCodes } from './mex.constants.js';
 import { loadStopSaleClosures, STOP_SALE_DAILY as SHARED_STOP_SALE_DAILY } from '../booking-source/stop-sale-closures.js';
-import { loadDailyOverrides, resolvePriceSource } from '../booking-source/price-source.js';
+import { loadDailyOverrides, resolvePricePolicy } from '../booking-source/price-source.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'MEX';
@@ -407,10 +407,20 @@ export async function runMexRatePush(tenantId, opts = {}) {
   for (const config of configs) {
     const { tsdNumber, branch, locationId } = config;
     const externalLocationCode = `${tsdNumber}/${branch}`;
-    // WHOSE prices this sede publishes — its own manual ones, or Market
-    // Intelligence's. Resolved per config, not per tenant: two sedes of the
-    // same tenant may legitimately disagree.
-    const priceSource = await resolvePriceSource(db, { tenantId, locationId, provider: PROVIDER });
+    // Does this sede push rates at all, and whose? Resolved per config, not
+    // per tenant: two sedes of the same tenant may legitimately disagree.
+    //
+    // Until 2026-09-07 MEX had no rate-push switch of its own — the only way to
+    // stop a sede writing prices was to disable its MexLocationConfig, which
+    // also stopped the INBOUND reservation sync. Two unrelated things behind
+    // one switch, and the reason a sede could not be paused for testing without
+    // losing its bookings.
+    const policy = await resolvePricePolicy(db, { tenantId, locationId, provider: PROVIDER });
+    const { priceSource } = policy;
+    if (!policy.ratePushEnabled) {
+      summary.configs.push({ tsdNumber, branch, priceSource, skipped: 'sede_disabled', codes: [] });
+      continue;
+    }
     // The whole window's pricing, the chosen overrides included — the series
     // MEX has to mirror, not just today's number.
     const desired = await loadDesiredMexRates(tenantId, locationId, {
@@ -469,6 +479,10 @@ export async function runMexRatePush(tenantId, opts = {}) {
             priorValue: row.current?.[tier] != null ? round2(row.current[tier]) : null,
             pushedValue: row.desired ? row.desired[tier] : 0,
             sourceRateItemId: row.source?.sourceRateItemId || null,
+            // Whose number this was. Reviewing a push without it means judging
+            // a price with no idea whether a person or the pricing engine
+            // proposed it.
+            priceSource,
             trigger, mode, status, skipReason,
             ...(actorUserId ? { createdByUserId: actorUserId } : {}),
           });
@@ -530,7 +544,7 @@ export async function runMexRatePush(tenantId, opts = {}) {
           data: {
             tenantId, provider: PROVIDER, locationId, externalLocationCode,
             classCode: '*', rateDate: dateOnly(fromDate), plan: 'DY', rateCode,
-            pushedValue: 0, trigger, mode, status: 'FAILED', skipReason: err.message.slice(0, 500),
+            pushedValue: 0, priceSource, trigger, mode, status: 'FAILED', skipReason: err.message.slice(0, 500),
           },
         }).catch(() => {});
       }
