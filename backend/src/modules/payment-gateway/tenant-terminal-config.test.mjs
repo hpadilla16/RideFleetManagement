@@ -50,8 +50,8 @@ import { settingsService } from '../settings/settings.service.js';
 // env terminal that International Rental Corp is live on today.
 // ---------------------------------------------------------------------------
 
-const T_A = { id: 'tenant-alpha', name: 'Alpha Rentals', tpn: '111122223333', authKey: 'alpha-auth-key-AAAA' };
-const T_B = { id: 'tenant-bravo', name: 'Bravo Mobility', tpn: '999988887777', authKey: 'bravo-auth-key-BBBB' };
+const T_A = { id: 'tenant-alpha', name: 'Alpha Rentals', tpn: '111122223333', authKey: 'AlphaKey01' };
+const T_B = { id: 'tenant-bravo', name: 'Bravo Mobility', tpn: '999988887777', authKey: 'BravoKey02' };
 const T_NONE = { id: 'tenant-nada', name: 'Nada Cars' };
 const T_HALF = { id: 'tenant-half', name: 'Half Baked' };
 
@@ -553,7 +553,7 @@ test('a NEW key with no INTEGRATION_ENC_KEY is refused, not stored plaintext', a
   try {
     await assert.rejects(
       () => settingsService.updatePaymentGatewayConfig({
-        gateway: 'spin', spin: { enabled: true, authKey: 'brand-new-key', tpn: T_A.tpn },
+        gateway: 'spin', spin: { enabled: true, authKey: 'BrandNew03', tpn: T_A.tpn },
       }, scope),
       (e) => e.code === 'ENCRYPTION_NOT_CONFIGURED',
     );

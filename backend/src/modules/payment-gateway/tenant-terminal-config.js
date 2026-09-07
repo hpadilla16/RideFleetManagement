@@ -649,6 +649,56 @@ export function terminalNotConfiguredMessage(reason) {
   }
 }
 
+/**
+ * The SPIn Auth Key is EXACTLY ten characters — the gateway's own rule, not
+ * ours, quoted verbatim from the refusal it sends:
+ *
+ *   "The field Authkey must be a string with a minimum length of 10 and a
+ *    maximum length of 10."
+ *
+ * That refusal arrives as StatusCode 2201 on every POST — sale, clause prompt,
+ * signature — while the TerminalStatus GET keeps answering "connected",
+ * because its validator does not check the field. So a wrong-length key looks
+ * like a healthy terminal that simply refuses to charge, which is the most
+ * expensive shape a misconfiguration can take.
+ *
+ * It has now cost twice. IRC ran ten days on manual card entries with
+ * "Terminal offline" notes against a 12-character key from another rail
+ * (2026-08); Corpusa lost an evening at LAX to a key pasted while setting up
+ * payment links (2026-09-07, replaced 00:52, first refusal 01:24). Both were
+ * knowable the instant the key was pasted, from the length alone.
+ *
+ * LENGTH ONLY. The gateway asserts the length and nothing else, so that is all
+ * this refuses on; a key with punctuation in it is reported as suspicious but
+ * never blocked, because guessing a stricter rule than the gateway's would
+ * refuse a credential that works.
+ */
+export const SPIN_AUTH_KEY_LENGTH = 10;
+
+export function spinAuthKeyShape(key) {
+  const raw = String(key ?? '');
+  const length = raw.length;
+  return {
+    length,
+    lengthOk: length === SPIN_AUTH_KEY_LENGTH,
+    alphanumeric: /^[A-Za-z0-9]*$/.test(raw),
+  };
+}
+
+/**
+ * The operator-facing sentence for a key of the wrong length. Says what was
+ * pasted (its LENGTH — never the value) and where the real one lives, because
+ * "invalid auth key" sends people to re-copy the same wrong thing.
+ */
+export function spinAuthKeyShapeMessage(shape) {
+  const s = shape || {};
+  const many = s.length > SPIN_AUTH_KEY_LENGTH;
+  return `That SPIn Auth Key is ${s.length} characters; the gateway requires exactly ${SPIN_AUTH_KEY_LENGTH}`
+    + `${s.alphanumeric === false ? ' and this one contains characters that are not letters or digits' : ''}. `
+    + `${many ? 'A longer value is usually a credential from another rail — the HPP ecom token, or an API/Secret key — which the terminal will not take. ' : ''}`
+    + 'The terminal Auth Key is in the iPOSpays portal under S.T.E.A.M → Edit Parameters → your TPN, beside the Register ID, and only appears once the terminal has connected.';
+}
+
 export const tenantTerminalConfig = {
   resolveTenantTerminalConfig,
   invalidateTenantTerminalConfig,
@@ -660,4 +710,7 @@ export const tenantTerminalConfig = {
   buildTerminalAuditMetadata,
   listTerminalRegisters,
   terminalNotConfiguredMessage,
+  spinAuthKeyShape,
+  spinAuthKeyShapeMessage,
+  SPIN_AUTH_KEY_LENGTH,
 };

@@ -2568,6 +2568,7 @@
       "promoted": "La terminal quedó en la caja “{{name}}”. Sigue cobrando igual que antes — ahora atada a esa sede.",
       "promotePickLocation": "Escoge la sede donde está esta terminal.",
       "promoteFailed": "No se pudo convertir la terminal en caja.",
+      "keyShapeBad": "El Auth Key de esta caja tiene {{length}} caracteres, así que el gateway va a rechazar todos los cobros — que conecte no significa que pueda cobrar.",
       "legacySuperseded": "Hay cajas configuradas, así que ellas deciden qué terminal cobra. Esta terminal única del inquilino solo se usa si todas las cajas están desactivadas.",
       "note1": "Una sede de recogida sin caja activa es RECHAZADA en el mostrador — nunca se cobra por la terminal de otra sede. Añade una caja para cada sucursal que cobre.",
       "note2": "Cada Auth Key se cifra en reposo y no se vuelve a mostrar; déjala en blanco para conservar la guardada. Auth Key y TPN deben estar AMBOS puestos o la caja es rechazada."
