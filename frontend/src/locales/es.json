@@ -2611,6 +2611,8 @@
     }
   },
   "terminalPicker": {
+    "noneTitle": "No hay terminal para este mostrador",
+    "noneFallback": "Esta sede no tiene terminal de pago configurada, así que el contrato no se puede firmar en un equipo ni se puede cobrar aquí.",
     "label": "Terminal",
     "confirm": "Usar esta terminal",
     "autoNote": "Este mostrador tiene varias terminales — confirme cuál es el equipo frente al cliente.",

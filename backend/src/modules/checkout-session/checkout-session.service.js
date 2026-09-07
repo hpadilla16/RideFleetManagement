@@ -17,7 +17,11 @@ import {
 import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
 import { isCheckoutPaymentRequired } from '../settings/checkout-payment-policy.js';
 import { CheckoutSessionError } from './checkout-session.errors.js';
-import { listTerminalRegisters } from '../payment-gateway/tenant-terminal-config.js';
+import {
+  listTerminalRegisters,
+  resolveTenantTerminalConfig,
+  terminalNotConfiguredMessage,
+} from '../payment-gateway/tenant-terminal-config.js';
 
 // Re-exported so the 13 modules that import CheckoutSessionError from here keep
 // working. The class itself moved to a leaf module so helpers this service
@@ -1532,13 +1536,22 @@ async function markAbandoned({ id, reason, actorUserId }) {
 export { maybeSendFinalizeEmail };
 
 /**
- * The terminal choices at this session's counter (2026-09-04).
+ * Which terminal this checkout will charge on, and what else it could pick
+ * (2026-09-04, widened 2026-09-07).
  *
- * A pickup location can run more than one Dejavoo device (LAX Counter 1 /
- * Counter 2). This read powers the wizard's terminal selector: enabled
- * registers at the session's pickup location — names and MASKED TPNs only,
- * never a credential. `selectable` is true only when there is a real choice;
- * a legacy single-terminal tenant (no registers) renders no selector at all.
+ * Names and MASKED TPNs only, never a credential.
+ *
+ * It answers TWO different questions, and the 2026-09-04 version conflated
+ * them: `selectable` says whether there is a CHOICE to make (more than one
+ * register at this counter), while `resolved` says which device the charge
+ * will ACTUALLY reach. Gating the whole panel on `selectable` meant a counter
+ * with exactly one register — every counter, on the day it migrates — showed
+ * the agent nothing at all, and the one fact worth showing is precisely the
+ * one that is always true: THIS is the terminal your sale is about to go to.
+ *
+ * `resolved` runs the same resolver the money path runs, so a location with
+ * no terminal is visible in the contract step rather than at the moment of
+ * the tap, with the counter-facing reason already attached.
  */
 async function getTerminalOptions({ id }) {
   if (!id) throw new CheckoutSessionError('session id required', 400);
@@ -1553,14 +1566,34 @@ async function getTerminalOptions({ id }) {
   if (!session) throw new CheckoutSessionError('Session not found', 404);
   const tenantId = session.reservation?.tenantId || null;
   const locationId = session.reservation?.pickupLocationId || null;
-  const { hasRegisters, registers } = await listTerminalRegisters(tenantId, { locationId });
+  const registerId = session.terminalRegisterId || null;
+  const [{ hasRegisters, registers }, resolved] = await Promise.all([
+    listTerminalRegisters(tenantId, { locationId }),
+    resolveTenantTerminalConfig(tenantId, { locationId, registerId }).catch(() => null),
+  ]);
+
+  // What the sale will actually reach. `ok:false` carries the counter-facing
+  // sentence the charge path would have thrown at tap time — same words, three
+  // steps earlier.
+  const ok = !!resolved && resolved.source !== 'NONE';
   return {
     sessionId: session.id,
     locationId,
     hasRegisters,
     options: registers,
-    selectedRegisterId: session.terminalRegisterId || null,
+    selectedRegisterId: registerId,
     selectable: registers.length > 1,
+    resolved: {
+      ok,
+      // A legacy single-terminal tenant has no register NAME; the masked TPN
+      // is then the only identity there is, and it is enough to recognise a
+      // device by.
+      registerName: resolved?.registerName || '',
+      maskedTpn: resolved?.maskedTpn || '',
+      reason: resolved?.reason || (resolved ? '' : 'RESOLVE_FAILED'),
+      source: resolved?.source || 'NONE',
+      message: ok ? '' : terminalNotConfiguredMessage(resolved?.reason),
+    },
   };
 }
 
