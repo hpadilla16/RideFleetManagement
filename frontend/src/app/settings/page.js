@@ -34,6 +34,7 @@ import { NuIntegrationPanel } from '../../components/settings/NuIntegrationPanel
 import { FlexwaysIntegrationPanel } from '../../components/settings/FlexwaysIntegrationPanel';
 import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIntegrationPanel';
 import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPanel';
+import PriceSourcePanel from '../../components/settings/PriceSourcePanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
 import { SelfReturnQrSettings } from '../../components/settings/SelfReturnQrSettings';
@@ -4711,9 +4712,27 @@ function SettingsInner({ token, me, logout }) {
               >
                 MEX (TSD)
               </button>
+              {/* Shared across every writeback: whose prices each sede
+                  publishes. Seeing them side by side is the point. */}
+              <button
+                type="button"
+                className={activeIntegration === 'price-source' ? '' : 'subtle'}
+                onClick={() => setActiveIntegration('price-source')}
+              >
+                Which price we publish
+              </button>
             </div>
 
-            {activeIntegration === 'tl' ? (
+            {activeIntegration === 'price-source' ? (
+              <PriceSourcePanel
+                token={token}
+                me={me}
+                isSuper={isSuper}
+                isAdmin={isAdmin}
+                scopedSettingsPath={scopedSettingsPath}
+                onPageMsg={setMsg}
+              />
+            ) : activeIntegration === 'tl' ? (
               <TLIntegrationPanel
                 token={token}
                 me={me}

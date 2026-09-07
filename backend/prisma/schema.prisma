@@ -705,6 +705,7 @@ model Tenant {
   longTermPlans            LongTermPlan[]
   customReports            CustomReport[]
   subscriptions            TenantSubscription[]
+  integrationPricePolicies IntegrationPricePolicy[]
 }
 
 model Location {
@@ -795,6 +796,7 @@ model Location {
   locationCodeMaps               LocationCodeMap[]
   kioskDevices                   KioskDevice[]
   documents                      LocationDocument[]
+  integrationPricePolicies       IntegrationPricePolicy[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -5322,6 +5324,49 @@ model LocationDocument {
 
   @@index([tenantId, locationId, status])
   @@index([tenantId, expiresAt])
+}
+
+// ============================================================================
+// Which price a writeback publishes, per SEDE and per INTEGRATION (2026-09-07).
+//
+// Hector: "para cada integracion que nosotros apuntamos que precio queremos
+// empujar, para que la sede tenga control". Before this, the source was
+// hardcoded and — worse — INCONSISTENT: MEX published the base rate plus every
+// per-date override (Market Intelligence's included), while Economy published
+// only the flat base and silently dropped MI *and* the operator's own surge
+// pricing.
+//
+//   MANUAL — base + only operator-authored per-date overrides. MI never
+//            reaches the partner's portal.
+//   MARKET — base + every per-date override, MI's auto-applied prices included.
+//
+// One shared table instead of a column on each provider's LocationConfig: NU,
+// Flexways and Advantage already have their own config tables and TL is still
+// to come, so the alternative was the same column five times and five screens.
+//
+// Absent row = MANUAL (see price-source.js). Stop sales are unaffected — they
+// sit above both sources.
+// ============================================================================
+model IntegrationPricePolicy {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  // The Ride location. Cascade: a deleted sede has no pricing posture to keep.
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  // Uppercase provider key, same vocabulary as RatePushLog.provider and
+  // ExternalSyncRun.sourceSystem: 'ECONOMY' | 'MEX' | 'NU' | 'FLEXWAYS' | ...
+  provider String
+  // 'MANUAL' | 'MARKET'. A string, not an enum, so adding a third posture
+  // later is a code change and not a migration on a money-adjacent table.
+  priceSource String @default("MANUAL")
+
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, locationId, provider])
+  @@index([tenantId, provider])
 }
 
 model RatePushLog {

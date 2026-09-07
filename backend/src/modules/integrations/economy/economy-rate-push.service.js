@@ -21,6 +21,7 @@ import logger from '../../../lib/logger.js';
 import { buildPushPlan, verifyPush, SKIP } from './economy-rate-map.js';
 import { readRateGrid, applyRateCell } from './economy-rate-client.js';
 import { loadStopSaleClosures } from '../booking-source/stop-sale-closures.js';
+import { loadDailyOverrides, resolvePriceSource } from '../booking-source/price-source.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'ECONOMY';
@@ -76,19 +77,58 @@ function parseClassMap(json) {
   } catch { return {}; }
 }
 
-/** RFM's per-class daily rates for a Ride location (the source of truth). */
+/**
+ * RFM's per-class pricing for a Ride location ACROSS THE WINDOW.
+ *
+ * Until 2026-09-07 this read RateItem.daily only and published that one number
+ * on every date of the window — which meant a per-date override never reached
+ * the portal: not Market Intelligence's, and not the surge an operator typed
+ * by hand for a holiday weekend. MEX had carried per-date pricing since August;
+ * Economy silently flattened it.
+ *
+ * Now each class carries `byDate`, filled from the overrides the sede chose to
+ * publish (`deps.priceSource`, see booking-source/price-source.js). `daily`
+ * stays the base and still backs every date with no override, so a caller that
+ * passes no window behaves exactly as before.
+ */
 export async function loadRfmRates(tenantId, locationId, deps = {}) {
   const db = deps.prisma || prisma;
   const rates = await db.rate.findMany({
     where: { tenantId, locationId, displayOnline: true },
-    select: { id: true, rateItems: { select: { id: true, daily: true, vehicleType: { select: { code: true } } } } },
+    select: {
+      id: true,
+      rateItems: {
+        select: {
+          id: true, daily: true, vehicleTypeId: true,
+          vehicleType: { select: { code: true } },
+        },
+      },
+    },
   });
   const out = [];
   for (const rate of rates) {
     for (const item of rate.rateItems || []) {
       const code = item?.vehicleType?.code;
       if (!code || item.daily == null) continue;
-      out.push({ classCode: String(code).toUpperCase(), daily: Number(item.daily), rateItemId: item.id });
+      out.push({
+        classCode: String(code).toUpperCase(),
+        daily: Number(item.daily),
+        rateItemId: item.id,
+        rateId: rate.id,
+        vehicleTypeId: item.vehicleTypeId,
+        byDate: new Map(),
+      });
+    }
+  }
+
+  if (deps.from && deps.to && out.length) {
+    const pairs = out.map((r) => ({ rateId: r.rateId, vehicleTypeId: r.vehicleTypeId }));
+    const overrides = await loadDailyOverrides(db, {
+      pairs, from: deps.from, to: deps.to, priceSource: deps.priceSource,
+    });
+    for (const row of out) {
+      const byDate = overrides.get(`${row.rateId}:${row.vehicleTypeId}`);
+      if (byDate) row.byDate = new Map(byDate);
     }
   }
   return out;
@@ -118,7 +158,17 @@ export async function pushArea(config, deps = {}) {
   const closeoutMin = Number(config.rateCloseoutMin);
   const dates = dateWindow(deps.now ? deps.now() : new Date(), deps.horizonDays || pushHorizonDays());
 
-  const rfmRates = await (deps.loadRfmRates || loadRfmRates)(tenantId, locationId, deps);
+  // WHOSE prices this sede publishes — its own manual ones, or Market
+  // Intelligence's. Per sede, not per tenant: LAX and MIA may disagree.
+  const priceSource = deps.priceSource
+    || await resolvePriceSource(db, { tenantId, locationId, provider: PROVIDER });
+
+  const rfmRates = await (deps.loadRfmRates || loadRfmRates)(tenantId, locationId, {
+    ...deps,
+    priceSource,
+    from: `${dates[0]}T00:00:00.000Z`,
+    to: new Date(new Date(`${dates[dates.length - 1]}T00:00:00.000Z`).getTime() + DAY_MS),
+  });
   if (!rfmRates.length) return { skipped: 'no_rfm_rates', externalArea: config.externalArea };
 
   // Ride stop sales for the window — the same closures every writeback
@@ -377,8 +427,11 @@ export async function pushArea(config, deps = {}) {
 
   results.queued = queued;
   results.deduped = deduped;
-  logger.info('[economy-rate-push] area complete', { externalArea: config.externalArea, mode, ...results });
-  return { externalArea: config.externalArea, mode, ...results };
+  // priceSource is reported, not incidental: reading a plan without knowing
+  // which prices it came from is how MI's numbers get approved as if they were
+  // the sede's own.
+  logger.info('[economy-rate-push] area complete', { externalArea: config.externalArea, mode, priceSource, ...results });
+  return { externalArea: config.externalArea, mode, priceSource, ...results };
 }
 
 /** Sweep every area that is switched on for push. */

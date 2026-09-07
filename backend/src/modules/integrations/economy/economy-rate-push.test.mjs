@@ -437,3 +437,106 @@ test('multi-tier dedup: identical decisions for DIFFERENT tiers are both recorde
   assert.deepEqual([...byRate].sort(), ['3DYS', 'STND'], 'both tiers planned despite identical values');
   assert.equal(planned.length, 6, '3 dates x 2 tiers planned');
 });
+
+// ---------------------------------------------------------------------------
+// Price source (2026-09-07) — WHOSE prices this sede publishes.
+//
+// Economy used to read RateItem.daily and nothing else, so it flattened the
+// window: Market Intelligence never reached the portal, and neither did the
+// operator's own per-date surge. Both now arrive, filtered by the sede's
+// choice.
+// ---------------------------------------------------------------------------
+const { loadRfmRates } = await import('./economy-rate-push.service.js');
+const { PRICE_SOURCES, MARKET_AUTHOR } = await import('../booking-source/price-source.js');
+
+/** prisma stub for the loader: one rate, one class, three dated overrides. */
+function ratesDb({ overrides = [], capture = {} } = {}) {
+  return {
+    rate: {
+      findMany: async (args) => {
+        capture.rateWhere = args?.where;
+        return [{
+          id: 'rate-1',
+          rateItems: [{
+            id: 'ri-ccar', daily: 20, vehicleTypeId: 'vt-ccar',
+            vehicleType: { code: 'CCAR' },
+          }],
+        }];
+      },
+    },
+    rateDailyPrice: {
+      findMany: async (args) => {
+        capture.overrideWhere = args?.where;
+        const clauses = args?.where?.AND || [];
+        const filtered = clauses.some((c) => c.OR && c.OR.some((o) => 'source' in o));
+        return filtered ? overrides.filter((o) => o.source !== MARKET_AUTHOR) : overrides;
+      },
+    },
+  };
+}
+
+const OVERRIDES = [
+  { rateId: 'rate-1', vehicleTypeId: 'vt-ccar', date: new Date('2027-03-16T00:00:00Z'), daily: 95, source: null },
+  { rateId: 'rate-1', vehicleTypeId: 'vt-ccar', date: new Date('2027-03-17T00:00:00Z'), daily: 41, source: MARKET_AUTHOR },
+];
+
+test('loadRfmRates: MANUAL carries the operator surge and leaves MI out', async () => {
+  const capture = {};
+  const [ccar] = await loadRfmRates('t1', 'loc-lax', {
+    prisma: ratesDb({ overrides: OVERRIDES, capture }),
+    from: '2027-03-15T00:00:00.000Z',
+    to: '2027-03-18T00:00:00.000Z',
+    priceSource: PRICE_SOURCES.MANUAL,
+  });
+  assert.equal(ccar.daily, 20, 'the base is untouched');
+  assert.equal(ccar.byDate.get('2027-03-16'), 95, 'the hand-typed surge finally reaches the portal');
+  assert.equal(ccar.byDate.has('2027-03-17'), false, 'MI stays out under MANUAL');
+});
+
+test('loadRfmRates: MARKET carries MI too', async () => {
+  const [ccar] = await loadRfmRates('t1', 'loc-lax', {
+    prisma: ratesDb({ overrides: OVERRIDES }),
+    from: '2027-03-15T00:00:00.000Z',
+    to: '2027-03-18T00:00:00.000Z',
+    priceSource: PRICE_SOURCES.MARKET,
+  });
+  assert.equal(ccar.byDate.get('2027-03-16'), 95);
+  assert.equal(ccar.byDate.get('2027-03-17'), 41);
+});
+
+test('loadRfmRates: with no window it is the old flat behaviour, and never queries overrides', async () => {
+  const capture = {};
+  const [ccar] = await loadRfmRates('t1', 'loc-lax', { prisma: ratesDb({ overrides: OVERRIDES, capture }) });
+  assert.equal(ccar.daily, 20);
+  assert.equal(ccar.byDate.size, 0);
+  assert.equal(capture.overrideWhere, undefined, 'no window means no override query at all');
+});
+
+test('loadRfmRates: still reads only rates the sede publishes online', async () => {
+  const capture = {};
+  await loadRfmRates('t1', 'loc-lax', { prisma: ratesDb({ capture }) });
+  assert.equal(capture.rateWhere.displayOnline, true);
+  assert.equal(capture.rateWhere.tenantId, 't1');
+  assert.equal(capture.rateWhere.locationId, 'loc-lax');
+});
+
+test('pushArea reports the price source it planned from', async () => {
+  const { deps } = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['', '', ''] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.DRY_RUN,
+  });
+  const out = await pushArea(CONFIG, { ...deps, priceSource: PRICE_SOURCES.MARKET });
+  assert.equal(out.priceSource, PRICE_SOURCES.MARKET, 'a plan must say whose numbers it is proposing');
+});
+
+test('pushArea defaults to MANUAL when the sede never chose', async () => {
+  const { deps } = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['', '', ''] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.DRY_RUN,
+  });
+  // The stub prisma has no integrationPricePolicy at all — the unreadable case.
+  const out = await pushArea(CONFIG, deps);
+  assert.equal(out.priceSource, PRICE_SOURCES.MANUAL);
+});

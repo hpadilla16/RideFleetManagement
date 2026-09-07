@@ -323,3 +323,98 @@ test('a STALE approval cannot carry a NEW price through the band', () => {
   assert.equal(pushes.length, 0, 'the new price is not authorised');
   assert.equal(skips.find((s) => s.reason === SKIP.OUT_OF_BAND)?.intendedValue, 24);
 });
+
+// ---------------------------------------------------------------------------
+// Per-date pricing (2026-09-07). Until this, the planner published RateItem.daily
+// on every date of the window, so an override never reached the portal — not
+// Market Intelligence's, and not the surge an operator typed by hand. MEX had
+// carried per-date pricing since August; Economy flattened it.
+//
+// WHICH overrides are present is decided upstream (MANUAL vs MARKET, see
+// booking-source/price-source.js). By the time the planner runs they are simply
+// the price for that date.
+// ---------------------------------------------------------------------------
+test('buildPushPlan: a per-date override wins over the base for that date only', () => {
+  const rfmRates = [{
+    classCode: 'CCAR', daily: 20, rateItemId: 'ri-ccar',
+    byDate: new Map([['2026-12-24', 95], ['2026-12-25', 110]]),
+  }];
+  const dates = ['2026-12-23', '2026-12-24', '2026-12-25', '2026-12-26'];
+
+  const { pushes } = buildPushPlan({
+    rfmRates, dates, portalGrid: {}, portalClasses: ['CCAR'], closeoutMin: CLOSEOUT,
+  });
+
+  const byDate = Object.fromEntries(pushes.map((p) => [p.rateDate, p.pushedValue]));
+  assert.deepEqual(byDate, {
+    '2026-12-23': 20, '2026-12-24': 95, '2026-12-25': 110, '2026-12-26': 20,
+  }, 'the holiday nights carry their own price, the ordinary ones the base');
+});
+
+test('buildPushPlan: no byDate map at all behaves exactly as before', () => {
+  const rfmRates = [{ classCode: 'CCAR', daily: 20, rateItemId: 'ri-ccar' }];
+  const dates = ['2026-08-01', '2026-08-02'];
+  const { pushes } = buildPushPlan({
+    rfmRates, dates, portalGrid: {}, portalClasses: ['CCAR'], closeoutMin: CLOSEOUT,
+  });
+  assert.deepEqual(pushes.map((p) => p.pushedValue), [20, 20]);
+});
+
+test('buildPushPlan: the delta guard measures THIS date’s price, not the base', () => {
+  // Portal sits at 20. The base is 20 (a no-op), but the 24th is overridden to
+  // 95 — a 375% move. The guard must see 95, or a surge sails through as if it
+  // were the unchanged base.
+  const rfmRates = [{
+    classCode: 'CCAR', daily: 20, rateItemId: 'ri-ccar',
+    byDate: new Map([['2026-12-24', 95]]),
+  }];
+  const { pushes, skips } = buildPushPlan({
+    rfmRates,
+    dates: ['2026-12-23', '2026-12-24'],
+    portalGrid: { CCAR: { '2026-12-23': '20.00', '2026-12-24': '20.00' } },
+    portalClasses: ['CCAR'], closeoutMin: CLOSEOUT, maxDeltaPct: 60,
+  });
+
+  assert.equal(pushes.length, 0, 'the 23rd is a no-op and the 24th is out of band');
+  const held = skips.find((s) => s.rateDate === '2026-12-24');
+  assert.equal(held.reason, SKIP.OUT_OF_BAND);
+  assert.equal(held.intendedValue, 95, 'the approval queue must show the price we actually meant');
+});
+
+test('buildPushPlan: an approval authorises the date’s OWN value, not the base', () => {
+  const rfmRates = [{
+    classCode: 'CCAR', daily: 20, rateItemId: 'ri-ccar',
+    byDate: new Map([['2026-12-24', 95]]),
+  }];
+  const common = {
+    rfmRates,
+    dates: ['2026-12-24'],
+    portalGrid: { CCAR: { '2026-12-24': '20.00' } },
+    portalClasses: ['CCAR'], closeoutMin: CLOSEOUT, maxDeltaPct: 60,
+  };
+
+  // An approval for the BASE value must not carry the override through.
+  const stale = buildPushPlan({ ...common, approvals: [{ classCode: 'CCAR', rateDate: '2026-12-24', pushedValue: 20 }] });
+  assert.equal(stale.pushes.length, 0, 'approving $20 cannot authorise publishing $95');
+
+  const right = buildPushPlan({ ...common, approvals: [{ classCode: 'CCAR', rateDate: '2026-12-24', pushedValue: 95 }] });
+  assert.equal(right.pushes.length, 1);
+  assert.equal(right.pushes[0].pushedValue, 95);
+});
+
+test('buildPushPlan: a stop sale still beats a per-date override', () => {
+  const rfmRates = [{
+    classCode: 'CCAR', daily: 20, rateItemId: 'ri-ccar',
+    byDate: new Map([['2026-12-24', 95]]),
+  }];
+  const { pushes } = buildPushPlan({
+    rfmRates,
+    dates: ['2026-12-24'],
+    portalGrid: { CCAR: { '2026-12-24': '20.00' } },
+    portalClasses: ['CCAR'], closeoutMin: CLOSEOUT,
+    closedDates: new Map([['CCAR', new Set(['2026-12-24'])]]),
+  });
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0].pushedValue, 999.99, 'a closed class is closed at any price');
+  assert.equal(pushes[0].stopSale, true);
+});

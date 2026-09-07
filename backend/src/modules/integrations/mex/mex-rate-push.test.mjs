@@ -384,3 +384,80 @@ describe('eligible codes', () => {
     assert.equal(resolveDesiredForClass(desired, ''), null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Price source (2026-09-07) — WHOSE prices this sede publishes.
+//
+// MEX has carried per-date overrides since August but took every one of them,
+// MI's included, with no say from the sede. The layering is unchanged; what is
+// new is that which overrides even load is now a choice.
+// ---------------------------------------------------------------------------
+const { loadDesiredMexRates } = await import('./mex-rate-push.service.js');
+const { PRICE_SOURCES, MARKET_AUTHOR } = await import('../booking-source/price-source.js');
+
+describe('price source', () => {
+  const OVERRIDES = [
+    { rateId: 'rate-1', vehicleTypeId: 'vt-ccar', date: new Date('2026-12-24T00:00:00Z'), daily: 95, source: null },
+    { rateId: 'rate-1', vehicleTypeId: 'vt-ccar', date: new Date('2026-12-25T00:00:00Z'), daily: 41, source: MARKET_AUTHOR },
+  ];
+
+  function db({ capture = {} } = {}) {
+    return {
+      rate: {
+        findMany: async () => [{
+          id: 'rate-1', name: 'Base',
+          rateItems: [{ id: 'ri-ccar', daily: 30, vehicleTypeId: 'vt-ccar', vehicleType: { code: 'CCAR' } }],
+        }],
+      },
+      rateDailyPrice: {
+        findMany: async (args) => {
+          capture.where = args?.where;
+          const filtered = (args?.where?.AND || []).some((c) => c.OR && c.OR.some((o) => 'source' in o));
+          return filtered ? OVERRIDES.filter((o) => o.source !== MARKET_AUTHOR) : OVERRIDES;
+        },
+      },
+      vehicleClassStopSale: { findMany: async () => [] },
+      acrissCategoryMap: { findMany: async () => [] },
+    };
+  }
+
+  const WINDOW = { from: '2026-12-23T00:00:00.000Z', to: '2026-12-26T00:00:00.000Z' };
+
+  it('MANUAL publishes the operator surge and refuses MI', async () => {
+    const capture = {};
+    const desired = await loadDesiredMexRates('t1', 'loc-sju', {
+      prisma: db({ capture }), ...WINDOW, priceSource: PRICE_SOURCES.MANUAL,
+    });
+    const ccar = desired.byClass.get('CCAR');
+    assert.equal(effectiveDailyOn(ccar, '2026-12-23'), 30, 'an ordinary day is the base');
+    assert.equal(effectiveDailyOn(ccar, '2026-12-24'), 95, 'the hand-typed surge');
+    assert.equal(effectiveDailyOn(ccar, '2026-12-25'), 30, 'MI is filtered out, so the base backs the date');
+  });
+
+  it('MARKET lets Market Intelligence through', async () => {
+    const desired = await loadDesiredMexRates('t1', 'loc-sju', {
+      prisma: db(), ...WINDOW, priceSource: PRICE_SOURCES.MARKET,
+    });
+    const ccar = desired.byClass.get('CCAR');
+    assert.equal(effectiveDailyOn(ccar, '2026-12-24'), 95);
+    assert.equal(effectiveDailyOn(ccar, '2026-12-25'), 41, 'this is exactly what MARKET means');
+  });
+
+  it('an unspecified source is MANUAL, not the old take-everything behaviour', async () => {
+    const desired = await loadDesiredMexRates('t1', 'loc-sju', { prisma: db(), ...WINDOW });
+    assert.equal(effectiveDailyOn(desired.byClass.get('CCAR'), '2026-12-25'), 30);
+  });
+
+  it('a stop sale still overrides whichever source is chosen', async () => {
+    const withClosure = db();
+    withClosure.vehicleClassStopSale.findMany = async () => [{
+      startDate: new Date('2026-12-24T00:00:00Z'),
+      endDate: new Date('2026-12-24T00:00:00Z'),
+      vehicleType: { code: 'CCAR' },
+    }];
+    const desired = await loadDesiredMexRates('t1', 'loc-sju', {
+      prisma: withClosure, ...WINDOW, priceSource: PRICE_SOURCES.MARKET,
+    });
+    assert.equal(effectiveDailyOn(desired.byClass.get('CCAR'), '2026-12-24'), STOP_SALE_DAILY);
+  });
+});

@@ -120,6 +120,7 @@ import { nuRouter } from './modules/integrations/nu/nu.routes.js';
 import { flexwaysRouter } from './modules/integrations/flexways/flexways.routes.js';
 import { advantageRouter } from './modules/integrations/advantage/advantage.routes.js';
 import { mexRouter } from './modules/integrations/mex/mex.routes.js';
+import { pricePolicyRouter } from './modules/integrations/booking-source/price-policy.routes.js';
 import { onestepgpsRouter } from './modules/integrations/onestepgps/onestepgps.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
@@ -390,6 +391,11 @@ app.use('/api/admin/integrations/advantage', tenantRateLimit, advantageRouter);
 // module/flag/queue. Routes always available; MEX_INTEGRATION_ENABLED gates
 // only the autonomous scheduler.
 app.use('/api/admin/integrations/mex', tenantRateLimit, mexRouter);
+// Which price each writeback publishes, per sede (2026-09-07). Shared across
+// providers on purpose: the alternative was the same control cloned into every
+// integration's settings page, and a sede's answer for Economy and for MEX is
+// the same kind of decision.
+app.use('/api/admin/integrations/price-policy', tenantRateLimit, pricePolicyRouter);
 // OneStepGPS telematics connector (2026-08-24) — API key + device→vehicle
 // mappings for the shuttle tracker's fast poll. No scheduler flag: the stored
 // key IS the readiness gate (no key → the fast poll never calls the provider).

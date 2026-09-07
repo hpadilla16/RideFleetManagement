@@ -234,10 +234,15 @@ export function buildPushPlan({
   for (const [portalClass, rate] of owners) {
     for (const rateDate of dates) {
       const portalValue = portalGrid?.[portalClass]?.[rateDate];
+      // The price for THIS date: a per-date override wins over the base, the
+      // same override-wins rule the booking engine quotes by. Which overrides
+      // are even present is the sede's choice (MANUAL vs MARKET) and was
+      // decided upstream in loadRfmRates — by here they are simply the truth.
+      const rfmValue = rate.byDate?.has?.(rateDate) ? rate.byDate.get(rateDate) : rate.daily;
       // F4: a human may have pre-authorised this exact (class, date, value).
-      const approved = isApproved(approvals, portalClass, rateDate, rate.daily);
+      const approved = isApproved(approvals, portalClass, rateDate, rfmValue);
       const stopSale = isClosed(rate.classCode, portalClass, rateDate);
-      const decision = decideCell({ rfmValue: rate.daily, portalValue, closeoutMin, maxDeltaPct, approved, stopSale });
+      const decision = decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct, approved, stopSale });
       const row = {
         classCode: portalClass,
         rfmClassCode: rate.classCode,
@@ -251,7 +256,7 @@ export function buildPushPlan({
       // `intendedValue` is what we WOULD have published — it makes an
       // out-of-band row readable as "portal $11 -> RFM $20" in the approval
       // queue instead of a bare zero placeholder.
-      else skips.push({ ...row, reason: decision.reason, intendedValue: toAmount(rate.daily) });
+      else skips.push({ ...row, reason: decision.reason, intendedValue: toAmount(rfmValue) });
     }
   }
 

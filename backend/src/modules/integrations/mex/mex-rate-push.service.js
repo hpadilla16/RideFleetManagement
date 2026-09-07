@@ -32,6 +32,7 @@ import {
 } from './mex.service.js';
 import { mexRatePushEligibleCodes } from './mex.constants.js';
 import { loadStopSaleClosures, STOP_SALE_DAILY as SHARED_STOP_SALE_DAILY } from '../booking-source/stop-sale-closures.js';
+import { loadDailyOverrides, resolvePriceSource } from '../booking-source/price-source.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'MEX';
@@ -102,10 +103,12 @@ export const STOP_SALE_DAILY = SHARED_STOP_SALE_DAILY;
  * mirar los 28 dias de precio ya que sube y baja los precios").
  *
  * Per class: the base daily from the active rate's RateItem, PLUS the per-date
- * RateDailyPrice overrides (MI auto-apply or operator surge pricing). The
- * effective price for a date is override-wins — the exact semantics of
- * rates.service resolveForRental, so what MEX charges on a date is what our
- * own booking engine would have charged.
+ * RateDailyPrice overrides the SEDE has chosen to publish (deps.priceSource —
+ * MANUAL keeps Market Intelligence off the portal, MARKET lets it through; see
+ * booking-source/price-source.js). The effective price for a date is
+ * override-wins — the exact semantics of rates.service resolveForRental, so
+ * what MEX charges on a date is what our own booking engine would have charged
+ * from the same source.
  *
  * Two ACTIVE items disagreeing on one class is ambiguity, not a choice we
  * make silently — the class is excluded and reported.
@@ -150,20 +153,11 @@ export async function loadDesiredMexRates(tenantId, locationId, deps = {}) {
   // stays excluded — an override cannot resurrect an ambiguous class.
   if (from && to && byClass.size) {
     const pairs = [...byClass.values()].map((v) => ({ rateId: v.rateId, vehicleTypeId: v.vehicleTypeId }));
-    const overrides = await db.rateDailyPrice.findMany({
-      where: {
-        date: { gte: from, lt: to },
-        OR: pairs,
-      },
-      select: { rateId: true, vehicleTypeId: true, date: true, daily: true },
-    }).catch(() => []);
-    const byPair = new Map([...byClass.entries()].map(([code, v]) => [`${v.rateId}:${v.vehicleTypeId}`, code]));
-    for (const row of overrides) {
-      const code = byPair.get(`${row.rateId}:${row.vehicleTypeId}`);
-      if (!code) continue;
-      const daily = Number(row.daily);
-      if (!Number.isFinite(daily) || daily <= 0) continue;
-      byClass.get(code).byDate.set(new Date(row.date).toISOString().slice(0, 10), round2(daily));
+    const overrides = await loadDailyOverrides(db, { pairs, from, to, priceSource: deps.priceSource });
+    for (const [code, v] of byClass.entries()) {
+      const byDate = overrides.get(`${v.rateId}:${v.vehicleTypeId}`);
+      if (!byDate) continue;
+      for (const [iso, daily] of byDate) byClass.get(code).byDate.set(iso, round2(daily));
     }
   }
 
@@ -413,12 +407,19 @@ export async function runMexRatePush(tenantId, opts = {}) {
   for (const config of configs) {
     const { tsdNumber, branch, locationId } = config;
     const externalLocationCode = `${tsdNumber}/${branch}`;
-    // The whole window's pricing, overrides included — the series MEX has to
-    // mirror, not just today's number.
+    // WHOSE prices this sede publishes — its own manual ones, or Market
+    // Intelligence's. Resolved per config, not per tenant: two sedes of the
+    // same tenant may legitimately disagree.
+    const priceSource = await resolvePriceSource(db, { tenantId, locationId, provider: PROVIDER });
+    // The whole window's pricing, the chosen overrides included — the series
+    // MEX has to mirror, not just today's number.
     const desired = await loadDesiredMexRates(tenantId, locationId, {
-      prisma: db, from: dates[0], to: toExclusive,
+      prisma: db, from: dates[0], to: toExclusive, priceSource,
     });
-    const cfgOut = { tsdNumber, branch, conflicts: desired.conflicts, codes: [] };
+    // Reported so a dry run says which prices it planned from. Reading a plan
+    // without knowing the source is how you approve MI's numbers thinking they
+    // are yours.
+    const cfgOut = { tsdNumber, branch, priceSource, conflicts: desired.conflicts, codes: [] };
     summary.configs.push(cfgOut);
 
     for (const rateCode of codes) {
