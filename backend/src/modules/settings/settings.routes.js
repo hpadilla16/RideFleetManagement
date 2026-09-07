@@ -565,6 +565,48 @@ settingsRouter.put('/payment-gateway', requireRole('ADMIN'), async (req, res, ne
   }
 });
 
+/**
+ * POST /api/settings/payment-gateway/promote-terminal - { locationId, name? }
+ *
+ * Moves the tenant-level SPIn terminal into a per-location register WITHOUT
+ * the operator re-typing the Auth Key (the read path never returns it, so
+ * doing this by hand risks a typo that half-configures a register and refuses
+ * at the counter). See settingsService.promoteSpinTerminalToRegister for why
+ * the credential is carried as stored bytes and the legacy block is kept.
+ *
+ * MONEY PATH, so ADMIN-gated and audited on the same trail as the save, with
+ * the same credential-free metadata: a masked TPN and ids, never a key.
+ */
+settingsRouter.post('/payment-gateway/promote-terminal', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const { locationId, name } = req.body || {};
+    const out = await settingsService.promoteSpinTerminalToRegister({ locationId, name }, scope);
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.PAYMENT_TERMINAL_CONFIG_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: {
+        promotedLegacyTerminalToRegister: true,
+        registerName: out?.promoted?.name || '',
+        locationId: out?.promoted?.locationId || null,
+        tpnMasked: out?.promoted?.maskedTpn || '',
+      },
+    });
+    res.json(out);
+  } catch (e) {
+    // Every refusal here is an operator-fixable state, not a server fault:
+    // say which one in words rather than a 500 at a counter.
+    if (['NO_LEGACY_TERMINAL', 'LOCATION_REQUIRED', 'LOCATION_NOT_FOUND', 'ALREADY_PROMOTED'].includes(e?.code)) {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    next(e);
+  }
+});
+
 settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(req));

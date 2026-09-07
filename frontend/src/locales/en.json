@@ -2561,6 +2561,13 @@
       "checkOk": "Terminal reachable · TPN {{tpn}}",
       "checkFailed": "Terminal did not answer. {{reason}}",
       "saveBeforeCheck": "Save this register first — the Auth Key is write-only, so there is nothing on the server to check with yet.",
+      "promoteTitle": "Move this terminal into a register",
+      "promoteIntro": "Registers decide which terminal charges the moment the first one is enabled — a location without its own register is refused at the counter, it does not fall back to the terminal above. So the terminal you already use has to become a register BEFORE you add a second counter. This moves it for you, credential and all: you never re-type the Auth Key.",
+      "promoteAction": "Move to a register",
+      "promoting": "Moving…",
+      "promoted": "Terminal moved into the register “{{name}}”. It keeps charging exactly as before — now bound to that location.",
+      "promotePickLocation": "Pick the location this terminal sits at.",
+      "promoteFailed": "Could not move the terminal into a register.",
       "legacySuperseded": "Registers are configured, so they decide which terminal charges. This single tenant-wide terminal is only used if every register is disabled.",
       "note1": "A pickup location with no enabled register is REFUSED at the counter — it is never charged on another location's terminal. Add a register for every branch that takes payments.",
       "note2": "Each Auth Key is encrypted at rest and never shown again; leave it blank to keep the saved one. Auth Key and TPN must BOTH be set or the register is refused."

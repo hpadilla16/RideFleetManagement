@@ -1,0 +1,44 @@
+feat(payments): move the single terminal into a register without re-typing its key
+
+Corpusa is about to open its second counter, and the order of that
+migration is a trap. The moment ANY register is enabled the tenant-level
+SPIn block stops serving locations that have no register of their own —
+it is not a fallback, it is superseded. So adding the new counter first
+silently takes the ORIGINAL counter offline with
+NO_REGISTER_FOR_LOCATION, at the point of sale.
+
+The safe order is "register the terminal already in use FIRST", and by
+hand that means re-typing an Auth Key the read path deliberately never
+returns: one typo and the register is half-configured, which the
+resolver also refuses. So the move happens server-side.
+
+- settingsService.promoteSpinTerminalToRegister({ locationId, name }):
+  appends a register carrying the legacy block's TPN, merchant number,
+  callback and timeout, with the authKey CARRIED AS STORED BYTES
+  (carrySettingSecret) — never decrypt→re-encrypt, the same rule
+  blank-means-keep follows and for the same reason: one bad
+  INTEGRATION_ENC_KEY read would erase a live credential instead of
+  moving it. Refuses with words, never a 500, on: no complete terminal
+  to move, no location, a location belonging to ANOTHER tenant (the
+  cross-tenant form of the wrong-counter charge), and a TPN already
+  registered (one device twice is gateway error 2005).
+- The legacy block is LEFT INTACT on purpose: inert while any register
+  is enabled, so disabling the new register rolls the tenant back to
+  exactly its previous behaviour with no credential and no portal visit.
+- POST /api/settings/payment-gateway/promote-terminal, ADMIN-gated and
+  audited on the same trail as the save, metadata credential-free (a
+  masked TPN and ids).
+- Settings → Payment Gateway: the control appears inside the SPIn card
+  only while the tenant HAS a complete terminal no register carries yet
+  — mirroring the server's own ALREADY_PROMOTED guard so the button is
+  never offered for a move the API would refuse. EN/ES.
+
+Tests: terminal-registers 51/51, including the credential surviving the
+move, the ORDERING case (after promoting, adding the second counter
+leaves the first still charging on its own TPN), the documented rollback
+(disable the register → TENANT_CONFIG governs again), and each refusal.
+tenant-terminal 27/27, spin-tenant-config 7/7, terminal-select 4/4,
+frontend 839/839 + next build clean. payment-capabilities and ipos-hpp
+are red on this machine BEFORE this change too — not from here.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

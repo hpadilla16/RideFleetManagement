@@ -85,6 +85,7 @@ const ENV_AUTH_KEY = 'platform-env-auth-key-PPPP';
 
 let settingRows;
 let tenantRows;
+let locationRows;
 let dbReads;
 let savedPrisma;
 
@@ -133,6 +134,15 @@ function installPrismaFakes() {
     appSettingFindUnique: prisma.appSetting.findUnique,
     appSettingUpsert: prisma.appSetting.upsert,
     tenantFindUnique: prisma.tenant.findUnique,
+    locationFindFirst: prisma.location.findFirst,
+  };
+  // Locations, so the promote path can check a location belongs to the tenant
+  // asking for it — the cross-tenant half of the wrong-counter rule.
+  prisma.location.findFirst = async ({ where }) => {
+    const row = locationRows.get(where?.id);
+    if (!row) return null;
+    if (where?.tenantId && row.tenantId !== where.tenantId) return null;
+    return { id: where.id, name: row.name, code: row.code };
   };
   prisma.appSetting.findUnique = async ({ where }) => {
     dbReads.appSetting += 1;
@@ -153,6 +163,7 @@ function installPrismaFakes() {
 }
 
 function restorePrismaFakes() {
+  prisma.location.findFirst = savedPrisma.locationFindFirst;
   prisma.appSetting.findUnique = savedPrisma.appSettingFindUnique;
   prisma.appSetting.upsert = savedPrisma.appSettingUpsert;
   prisma.tenant.findUnique = savedPrisma.tenantFindUnique;
@@ -192,6 +203,12 @@ function loggedText() { return JSON.stringify(logLines); }
 beforeEach(() => {
   settingRows = new Map();
   tenantRows = new Map();
+  locationRows = new Map([
+    [LOC_LAX, { tenantId: TENANT.id, name: 'Los Angeles', code: 'LAX' }],
+    [LOC_MCO, { tenantId: TENANT.id, name: 'Orlando', code: 'MCO' }],
+    [LOC_MIA, { tenantId: TENANT.id, name: 'Miami', code: 'MIA' }],
+    ['loc-other-tenant', { tenantId: OTHER.id, name: 'IRC San Juan', code: 'SJU' }],
+  ]);
   dbReads = { appSetting: 0, tenant: 0 };
   cache.clear();
   installPrismaFakes();
@@ -982,4 +999,119 @@ test('a register\'s OWN callback + timeout win when it sets them', async () => {
   const resolved = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_LAX });
   assert.equal(resolved.callbackUrl, 'https://lax.example/cb');
   assert.equal(resolved.proxyTimeout, '45');
+});
+
+
+// ===========================================================================
+// 8. PROMOTE — moving the legacy single terminal INTO a register (2026-09-06)
+//
+// The migration a tenant makes right before opening its second counter. Doing
+// it by hand means re-typing a write-only Auth Key; the risk is not typing it
+// wrong, it is the ORDER: the moment any register is enabled, a location with
+// no register is refused rather than served by the legacy block, so the
+// terminal already in use has to become a register FIRST.
+// ===========================================================================
+
+test('promote carries the stored credential into the register — no re-typing, same charges', async () => {
+  const scope = { tenantId: TENANT.id };
+  seed(TENANT, { spin: legacySpin() });
+
+  const out = await settingsService.promoteSpinTerminalToRegister({ locationId: LOC_LAX }, scope);
+
+  assert.equal(out.promoted.locationId, LOC_LAX);
+  assert.match(out.promoted.maskedTpn, /\*/, 'the caller is told which TPN moved, masked');
+  assert.ok(!JSON.stringify(out).includes(LEGACY.authKey), 'the credential never travels back');
+
+  // The point of the whole exercise: the counter charges through the SAME
+  // merchant it did a moment ago, now resolved BY LOCATION.
+  const resolved = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_LAX });
+  assert.equal(resolved.reason, 'REGISTER_MATCH');
+  assert.equal(resolved.tpn, LEGACY.tpn);
+  assert.equal(resolved.authKey, LEGACY.authKey, 'the moved key still decrypts');
+  assert.equal(resolved.callbackUrl, 'https://legacy.example/callback', 'deployment plumbing came along');
+  assert.equal(resolved.proxyTimeout, '90');
+
+  // At rest it is ciphertext, and the read path still never returns it.
+  const stored = JSON.parse(settingRows.get(terminalConfigSettingKey(TENANT.id)));
+  assert.ok(isSettingSecretEncrypted(stored.registers[0].authKey));
+  assert.equal(out.config.registers[0].authKey, '');
+  assert.equal(out.config.registers[0].hasAuthKey, true);
+});
+
+test('THE ORDERING CASE: after promoting, adding the second counter leaves the first one charging', async () => {
+  const scope = { tenantId: TENANT.id };
+  seed(TENANT, { spin: legacySpin() });
+  await settingsService.promoteSpinTerminalToRegister({ locationId: LOC_LAX }, scope);
+
+  // Now Orlando opens. Its register is added the ordinary way, with its own key.
+  const promoted = (await settingsService.getPaymentGatewayConfig(scope)).registers[0];
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    // The settings form posts the whole config back, blanks and all.
+    spin: { enabled: true, environment: 'production', authKey: '', tpn: LEGACY.tpn },
+    registers: [
+      { id: promoted.id, name: promoted.name, locationId: LOC_LAX, tpn: LEGACY.tpn, authKey: '' },
+      { name: REG_MCO.name, locationId: LOC_MCO, tpn: REG_MCO.tpn, authKey: REG_MCO.authKey },
+    ],
+  }, scope);
+
+  const lax = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_LAX });
+  const mco = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_MCO });
+  assert.equal(lax.tpn, LEGACY.tpn, 'the original counter never stopped charging');
+  assert.equal(lax.authKey, LEGACY.authKey, 'and its key survived the blank round-trip');
+  assert.equal(mco.tpn, REG_MCO.tpn);
+  assert.notEqual(lax.tpn, mco.tpn);
+});
+
+test('the legacy block is LEFT INTACT, so disabling the register rolls back with no credential', async () => {
+  const scope = { tenantId: TENANT.id };
+  seed(TENANT, { spin: legacySpin() });
+  await settingsService.promoteSpinTerminalToRegister({ locationId: LOC_LAX }, scope);
+
+  const promoted = (await settingsService.getPaymentGatewayConfig(scope)).registers[0];
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    spin: { enabled: true, environment: 'production', authKey: '', tpn: LEGACY.tpn },
+    registers: [{ id: promoted.id, name: promoted.name, locationId: LOC_LAX, tpn: LEGACY.tpn, authKey: '', enabled: false }],
+  }, scope);
+
+  const resolved = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_LAX });
+  assert.equal(resolved.reason, 'TENANT_CONFIG', 'every register disabled → the single terminal governs again');
+  assert.equal(resolved.authKey, LEGACY.authKey);
+});
+
+test('promote refuses a location that belongs to ANOTHER tenant', async () => {
+  seed(TENANT, { spin: legacySpin() });
+  await assert.rejects(
+    () => settingsService.promoteSpinTerminalToRegister({ locationId: 'loc-other-tenant' }, { tenantId: TENANT.id }),
+    (err) => err.code === 'LOCATION_NOT_FOUND',
+  );
+  const stored = JSON.parse(settingRows.get(terminalConfigSettingKey(TENANT.id)));
+  assert.equal((stored.registers || []).length, 0, 'nothing was written');
+});
+
+test('promote refuses without a location, with no terminal to move, and when already promoted', async () => {
+  const scope = { tenantId: TENANT.id };
+
+  seed(TENANT, { spin: legacySpin() });
+  await assert.rejects(
+    () => settingsService.promoteSpinTerminalToRegister({}, scope),
+    (err) => err.code === 'LOCATION_REQUIRED',
+  );
+
+  // Half-configured legacy block: an Auth Key with no TPN is not a terminal.
+  seed(TENANT, { spin: { ...legacySpin(), tpn: '' } });
+  invalidateTenantTerminalConfig(TENANT.id);
+  await assert.rejects(
+    () => settingsService.promoteSpinTerminalToRegister({ locationId: LOC_LAX }, scope),
+    (err) => err.code === 'NO_LEGACY_TERMINAL',
+  );
+
+  // Same TPN already in a register — one device, registered twice, is 2005.
+  seed(TENANT, { spin: legacySpin(), registers: [storedRegister({ ...REG_LAX, tpn: LEGACY.tpn })] });
+  invalidateTenantTerminalConfig(TENANT.id);
+  await assert.rejects(
+    () => settingsService.promoteSpinTerminalToRegister({ locationId: LOC_LAX }, scope),
+    (err) => err.code === 'ALREADY_PROMOTED',
+  );
 });

@@ -11,7 +11,7 @@ import {
 import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-plan-limits.js';
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
 import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
-import { invalidateTenantTerminalConfig } from '../payment-gateway/tenant-terminal-config.js';
+import { invalidateTenantTerminalConfig, maskTpn } from '../payment-gateway/tenant-terminal-config.js';
 import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
@@ -1864,6 +1864,128 @@ export const settingsService = {
     // Re-read rather than returning `next`: `next.spin.authKey` is CIPHERTEXT
     // at this point and must not go back over the wire.
     return this.getPaymentGatewayConfig(scope);
+  },
+
+  /**
+   * Promote the tenant's legacy single terminal into a per-location REGISTER
+   * (2026-09-06).
+   *
+   * The migration this exists for: a tenant whose terminal lives in the
+   * tenant-level `spin` block is about to open a SECOND counter. The moment
+   * any enabled register exists, that legacy block stops serving locations
+   * with no register of their own - so adding the new counter first silently
+   * takes the ORIGINAL counter offline (NO_REGISTER_FOR_LOCATION at the point
+   * of sale). The safe order is "register the existing terminal FIRST", and
+   * doing that by hand means re-typing an Auth Key the read path deliberately
+   * never returns - a keystroke away from a half-configured register, which
+   * the resolver also refuses.
+   *
+   * So the move happens server-side. The authKey is CARRIED AS STORED BYTES
+   * (carrySettingSecret), never decrypted and re-encrypted: the same rule
+   * blank-means-keep follows, for the same reason - one bad
+   * INTEGRATION_ENC_KEY read would otherwise erase a live terminal credential
+   * instead of moving it.
+   *
+   * The legacy block is left INTACT on purpose. It is inert while any register
+   * is enabled (the resolver never consults it), so leaving it means disabling
+   * the new register restores exactly the previous behaviour - a rollback that
+   * needs no credential and no portal visit.
+   */
+  async promoteSpinTerminalToRegister({ locationId, name } = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const key = scopedKey('paymentGatewayConfig', scope);
+
+    // RAW read: the stored ciphertext is the thing being moved.
+    let storedRaw = {};
+    try {
+      const rawRow = await prisma.appSetting.findUnique({ where: { key } });
+      storedRaw = rawRow?.value ? (JSON.parse(rawRow.value) || {}) : {};
+    } catch {
+      storedRaw = {};
+    }
+
+    const spin = storedRaw?.spin && typeof storedRaw.spin === 'object' ? storedRaw.spin : {};
+    const tpn = String(spin.tpn || '').trim();
+    const storedAuthKey = typeof spin.authKey === 'string' ? spin.authKey.trim() : '';
+    if (!tpn || !storedAuthKey) {
+      const err = new Error('There is no complete terminal to promote - the tenant-level SPIn block needs BOTH an Auth Key and a TPN on file.');
+      err.code = 'NO_LEGACY_TERMINAL';
+      throw err;
+    }
+
+    // The register must sit at a location of THIS tenant. Binding one to
+    // another tenant's location is the cross-tenant version of the very
+    // wrong-counter charge registers exist to stop.
+    const wantLocationId = String(locationId || '').trim();
+    if (!wantLocationId) {
+      const err = new Error('Pick the location this terminal sits at.');
+      err.code = 'LOCATION_REQUIRED';
+      throw err;
+    }
+    const location = await prisma.location.findFirst({
+      where: { id: wantLocationId, tenantId: scope.tenantId },
+      select: { id: true, name: true, code: true },
+    });
+    if (!location) {
+      const err = new Error('That location does not belong to this tenant.');
+      err.code = 'LOCATION_NOT_FOUND';
+      throw err;
+    }
+
+    const registers = Array.isArray(storedRaw.registers) ? storedRaw.registers : [];
+    // The same TPN twice is one physical device registered twice - the gateway
+    // answers 2005 to that, so refuse it here where the message is legible.
+    if (registers.some((r) => String(r?.tpn || '').trim() === tpn)) {
+      const err = new Error('This terminal is already set up as a register - there is nothing to promote.');
+      err.code = 'ALREADY_PROMOTED';
+      throw err;
+    }
+
+    const registerName = String(name || '').trim()
+      || `${location.code || location.name} Counter 1`;
+
+    // Write the stored blob back with ONE register appended. Deliberately not
+    // rebuilt through the defaults + normalize path: every other block in here
+    // is ciphertext at rest, and a rebuild is a chance to damage one.
+    const next = {
+      ...storedRaw,
+      registers: [
+        ...registers,
+        {
+          id: randomUUID(),
+          name: registerName,
+          locationId: location.id,
+          tpn,
+          authKey: carrySettingSecret(storedAuthKey),
+          merchantNumber: String(spin.merchantNumber || '1').trim(),
+          // Blank inherits the tenant block at resolve time, which is exactly
+          // what this terminal used a moment ago.
+          callbackUrl: String(spin.callbackUrl || '').trim(),
+          proxyTimeout: String(spin.proxyTimeout || '').trim(),
+          enabled: true,
+        },
+      ],
+    };
+
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) },
+    });
+    // Same reason the save path invalidates: the live charge path caches this
+    // row, and the very next tap must resolve through the new register.
+    invalidateTenantTerminalConfig(scope.tenantId);
+
+    return {
+      // Re-read: `next` carries ciphertext and must not go back over the wire.
+      config: await this.getPaymentGatewayConfig(scope),
+      promoted: {
+        name: registerName,
+        locationId: location.id,
+        locationName: location.name || '',
+        maskedTpn: maskTpn(tpn),
+      },
+    };
   },
 
   async getPlannerCopilotConfig(scope = {}, options = {}) {

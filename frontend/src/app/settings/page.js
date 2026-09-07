@@ -256,6 +256,10 @@ function SettingsInner({ token, me, logout }) {
   // a green tick from before an edit can never vouch for the edited row.
   const [paymentGatewayRegisterHealth, setPaymentGatewayRegisterHealth] = useState({});
   const [paymentGatewayRegisterChecking, setPaymentGatewayRegisterChecking] = useState(null);
+  // "Promote the single terminal into a register" (2026-09-06) — the location
+  // the operator picks for the terminal they already have configured.
+  const [promoteRegisterLocationId, setPromoteRegisterLocationId] = useState('');
+  const [promoteRegisterBusy, setPromoteRegisterBusy] = useState(false);
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(DEFAULT_PLANNER_COPILOT_CONFIG);
   const [plannerCopilotUsage, setPlannerCopilotUsage] = useState(DEFAULT_PLANNER_COPILOT_USAGE);
   const [telematicsConfig, setTelematicsConfig] = useState(DEFAULT_TELEMATICS_CONFIG);
@@ -864,6 +868,47 @@ function SettingsInner({ token, me, logout }) {
     const out = await api(scopedSettingsPath('/api/settings/payment-gateway/health-check'), { method: 'POST' }, token);
     setPaymentGatewayHealth(out);
     setMsg(out?.summary || 'Payment gateway check complete');
+  };
+
+  // Move the tenant's single terminal INTO a per-location register without the
+  // operator re-typing the Auth Key (the read path never returns it, so doing
+  // this by hand is one typo away from a half-configured register that refuses
+  // at the counter).
+  //
+  // Order is the whole point: the moment ANY register is enabled, a location
+  // with no register of its own is REFUSED rather than served by the single
+  // terminal below — so the terminal already in use has to become a register
+  // BEFORE the second counter is added, or the first counter stops charging.
+  const promoteTerminalToRegister = async () => {
+    if (!promoteRegisterLocationId) {
+      return setMsg(t('settingsPayments.registers.promotePickLocation'));
+    }
+    setPromoteRegisterBusy(true);
+    try {
+      const out = await api(scopedSettingsPath('/api/settings/payment-gateway/promote-terminal'), {
+        method: 'POST',
+        body: JSON.stringify({ locationId: promoteRegisterLocationId })
+      }, token);
+      const cfg = out?.config;
+      if (cfg) {
+        setPaymentGatewayConfig({
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG,
+          ...cfg,
+          authorizenet: { ...DEFAULT_PAYMENT_GATEWAY_CONFIG.authorizenet, ...(cfg?.authorizenet || {}) },
+          stripe: { ...DEFAULT_PAYMENT_GATEWAY_CONFIG.stripe, ...(cfg?.stripe || {}) },
+          square: { ...DEFAULT_PAYMENT_GATEWAY_CONFIG.square, ...(cfg?.square || {}) },
+          spin: { ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin, ...(cfg?.spin || {}) },
+          registers: Array.isArray(cfg?.registers) ? cfg.registers : [],
+          ipos: { ...DEFAULT_PAYMENT_GATEWAY_CONFIG.ipos, ...(cfg?.ipos || {}) }
+        });
+      }
+      setPromoteRegisterLocationId('');
+      setMsg(t('settingsPayments.registers.promoted', { name: out?.promoted?.name || '' }));
+    } catch (err) {
+      setMsg(err?.message || t('settingsPayments.registers.promoteFailed'));
+    } finally {
+      setPromoteRegisterBusy(false);
+    }
   };
 
   // Per-row "Run health check" for the Registers table. Hits the ONE terminal
@@ -2660,6 +2705,14 @@ function SettingsInner({ token, me, logout }) {
   // what decides whether the single SPIn card above still governs.
   const registerRows = Array.isArray(paymentGatewayConfig.registers) ? paymentGatewayConfig.registers : [];
   const hasEnabledRegisters = registerRows.some((r) => r?.enabled !== false);
+  // A complete tenant-level terminal that no register carries yet — the only
+  // state where "promote it into a register" means anything. Mirrors the
+  // server's own ALREADY_PROMOTED guard so the button is never offered for a
+  // move the API would refuse.
+  const legacySpinTpn = String(paymentGatewayConfig.spin?.tpn || '').trim();
+  const legacyTerminalPromotable = !!legacySpinTpn
+    && !!paymentGatewayConfig.spin?.hasAuthKey
+    && !registerRows.some((r) => String(r?.tpn || '').trim() === legacySpinTpn);
   const activeVehicleTypeCount = loadedSettingsSections.vehicleTypes ? vehicleTypes.length : null;
   const onlineRateCount = loadedSettingsSections.rates
     ? rates.filter((rate) => rate.isActive !== false && rate.displayOnline).length
@@ -3740,6 +3793,44 @@ function SettingsInner({ token, me, logout }) {
                   equally authoritative about which terminal charges. */}
               {hasEnabledRegisters ? (
                 <div className="surface-note">{t('settingsPayments.registers.legacySuperseded')}</div>
+              ) : null}
+
+              {/* Promote this terminal into a register (2026-09-06).
+                  Shown only while this tenant HAS a complete single terminal
+                  that no register carries yet — the state a tenant is in right
+                  before it opens a second counter, and the one where doing the
+                  move by hand means re-typing a write-only Auth Key. */}
+              {legacyTerminalPromotable ? (
+                <div className="glass card section-card" style={{ marginTop: 12 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('settingsPayments.registers.promoteTitle')}</div>
+                  <div className="surface-note">{t('settingsPayments.registers.promoteIntro')}</div>
+                  <div className="form-grid-2" style={{ alignItems: 'end' }}>
+                    <div className="stack">
+                      <label className="label">{t('settingsPayments.registers.location')}</label>
+                      <select
+                        value={promoteRegisterLocationId}
+                        onChange={(e) => setPromoteRegisterLocationId(e.target.value)}
+                      >
+                        <option value="">{t('settingsPayments.registers.locationPlaceholder')}</option>
+                        {locations.map((l) => (
+                          <option key={l.id} value={l.id}>{l.code ? `${l.code} — ${l.name}` : l.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="stack">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={promoteRegisterBusy || !promoteRegisterLocationId}
+                        onClick={promoteTerminalToRegister}
+                      >
+                        {promoteRegisterBusy
+                          ? t('settingsPayments.registers.promoting')
+                          : t('settingsPayments.registers.promoteAction')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ) : null}
             </section>
 
