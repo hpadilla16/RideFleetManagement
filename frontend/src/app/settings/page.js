@@ -903,7 +903,9 @@ function SettingsInner({ token, me, logout }) {
         });
       }
       setPromoteRegisterLocationId('');
-      setMsg(t('settingsPayments.registers.promoted', { name: out?.promoted?.name || '' }));
+      setMsg(out?.promoted?.authKeyShapeOk === false
+        ? `${t('settingsPayments.registers.promoted', { name: out?.promoted?.name || '' })} ${out.promoted.authKeyWarning || ''}`
+        : t('settingsPayments.registers.promoted', { name: out?.promoted?.name || '' }));
     } catch (err) {
       setMsg(err?.message || t('settingsPayments.registers.promoteFailed'));
     } finally {
@@ -3962,6 +3964,16 @@ function SettingsInner({ token, me, logout }) {
                             : t('settingsPayments.registers.checkFailed', { reason: health.error || health.reason || '' })}
                         </strong>
                         {health.registerName ? ` · ${health.registerName}` : ''}
+                      </div>
+                    ) : null}
+                    {/* Reachable is not the same as chargeable: TerminalStatus
+                        answers on a GET whose validator ignores the Auth Key's
+                        length, so a green check can sit above a key every sale
+                        will refuse. Say it right under the check. */}
+                    {health && health.authKeyShapeOk === false ? (
+                      <div className="surface-note" style={{ color: '#B91C1C' }}>
+                        <strong>{t('settingsPayments.registers.keyShapeBad', { length: health.authKeyLength })}</strong>
+                        {health.authKeyWarning ? ` ${health.authKeyWarning}` : ''}
                       </div>
                     ) : null}
                   </div>

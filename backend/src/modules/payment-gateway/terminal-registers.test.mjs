@@ -44,6 +44,7 @@ import {
   buildTerminalAuditMetadata,
   maskTpn,
   listTerminalRegisters,
+  spinAuthKeyShape,
 } from './tenant-terminal-config.js';
 import { settingsService } from '../settings/settings.service.js';
 import { resolveTenantHppConfig } from './ipos-hpp-client.js';
@@ -1114,4 +1115,91 @@ test('promote refuses without a location, with no terminal to move, and when alr
     () => settingsService.promoteSpinTerminalToRegister({ locationId: LOC_LAX }, scope),
     (err) => err.code === 'ALREADY_PROMOTED',
   );
+});
+
+
+// ===========================================================================
+// 9. THE AUTH KEY'S SHAPE (2026-09-07)
+//
+// The gateway's own rule: "The field Authkey must be a string with a minimum
+// length of 10 and a maximum length of 10." It enforces it on every POST and
+// NOT on the TerminalStatus GET, so a wrong-length key reads as a healthy
+// terminal that refuses to charge. It has cost twice — IRC ten days of manual
+// entries, LAX an evening — so the save refuses it while the operator still
+// has the portal open.
+// ===========================================================================
+
+test('a supplied Auth Key of the wrong length is refused — on the tenant block and per register', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+
+  // 12 characters: the exact shape that broke IRC and LAX.
+  await assert.rejects(
+    () => settingsService.updatePaymentGatewayConfig({
+      gateway: 'spin',
+      spin: { enabled: true, environment: 'production', authKey: 'abcd1234efgh', tpn: LEGACY.tpn },
+    }, scope),
+    (err) => err.code === 'INVALID_SPIN_AUTH_KEY' && /12 characters/.test(err.message),
+  );
+
+  await assert.rejects(
+    () => settingsService.updatePaymentGatewayConfig({
+      gateway: 'spin',
+      registers: [{ name: 'LAX Counter 1', locationId: LOC_LAX, tpn: REG_LAX.tpn, authKey: 'way-too-long-to-be-a-key' }],
+    }, scope),
+    (err) => err.code === 'INVALID_SPIN_AUTH_KEY' && /LAX Counter 1/.test(err.message),
+  );
+
+  assert.equal(settingRows.get(terminalConfigSettingKey(TENANT.id)), undefined, 'nothing was written');
+});
+
+test('a ten-character key saves, and blank-means-keep is never re-validated', async () => {
+  const scope = { tenantId: TENANT.id };
+  tenantRows.set(TENANT.id, { name: TENANT.name });
+
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    registers: [{ name: REG_LAX.name, locationId: LOC_LAX, tpn: REG_LAX.tpn, authKey: 'AbC123dEf4' }],
+  }, scope);
+  const resolved = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_LAX });
+  assert.equal(resolved.authKey, 'AbC123dEf4');
+
+  // A form round-trip sends a BLANK key; carrying stored bytes must not be
+  // re-checked, or a tenant whose stored key is legacy-shaped could never save
+  // anything again — including the fix.
+  const saved = (await settingsService.getPaymentGatewayConfig(scope)).registers[0];
+  await settingsService.updatePaymentGatewayConfig({
+    gateway: 'spin',
+    registers: [{ id: saved.id, name: 'Renamed', locationId: LOC_LAX, tpn: REG_LAX.tpn, authKey: '' }],
+  }, scope);
+  const after = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_LAX });
+  assert.equal(after.authKey, 'AbC123dEf4', 'the stored key survived');
+  assert.equal(after.registerName, 'Renamed');
+});
+
+test('spinAuthKeyShape reports length and class without judging anything else', () => {
+  assert.deepEqual(spinAuthKeyShape('AbC123dEf4'), { length: 10, lengthOk: true, alphanumeric: true });
+  assert.equal(spinAuthKeyShape('abcd1234efgh').lengthOk, false);
+  assert.equal(spinAuthKeyShape('ab-123-cd4').alphanumeric, false);
+  // Ten characters with punctuation still passes: the gateway asserts LENGTH,
+  // and guessing a stricter rule would refuse a credential that works.
+  assert.equal(spinAuthKeyShape('ab-123-cd4').lengthOk, true);
+  assert.equal(spinAuthKeyShape('').length, 0);
+});
+
+test('promote reports the shape of the key it carried, and carries it either way', async () => {
+  const scope = { tenantId: TENANT.id };
+  // A legacy block holding the wrong-length key — LAX at 01:19 on 2026-09-07.
+  seed(TENANT, { spin: { ...legacySpin(), authKey: encryptSettingSecret('abcd1234efgh') } });
+
+  const out = await settingsService.promoteSpinTerminalToRegister({ locationId: LOC_LAX }, scope);
+  assert.equal(out.promoted.authKeyShapeOk, false);
+  assert.equal(out.promoted.authKeyLength, 12);
+  assert.match(out.promoted.authKeyWarning, /exactly 10/);
+  // It still moved: refusing would block a migration whose bytes are usually
+  // fine, and the operator is told rather than stopped.
+  const resolved = await resolveTenantTerminalConfig(TENANT.id, { locationId: LOC_LAX });
+  assert.equal(resolved.reason, 'REGISTER_MATCH');
+  assert.equal(resolved.authKey, 'abcd1234efgh');
+  assert.ok(!JSON.stringify(out).includes('abcd1234efgh'), 'the key itself never travels back');
 });

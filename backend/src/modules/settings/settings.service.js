@@ -11,7 +11,13 @@ import {
 import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-plan-limits.js';
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
 import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
-import { invalidateTenantTerminalConfig, maskTpn } from '../payment-gateway/tenant-terminal-config.js';
+import logger from '../../lib/logger.js';
+import {
+  invalidateTenantTerminalConfig,
+  maskTpn,
+  spinAuthKeyShape,
+  spinAuthKeyShapeMessage,
+} from '../payment-gateway/tenant-terminal-config.js';
 import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
@@ -695,6 +701,24 @@ function spinBlockForRead(spin = {}) {
  * be addressed is not a register, and inventing an id on READ would mint a new
  * one on every GET.
  */
+/**
+ * Refuse a NEW SPIn Auth Key whose length the gateway will reject anyway
+ * (2026-09-07). Only ever called on a value the operator actually SUPPLIED —
+ * blank-means-keep carries stored bytes untouched and is never re-validated,
+ * so an already-stored key (right or wrong) can still be carried, cleared, or
+ * replaced. See spinAuthKeyShape for why length is the only rule.
+ *
+ * `where` names the row in the message, because a tenant with several
+ * registers needs to know WHICH paste was refused.
+ */
+function assertSpinAuthKeyShape(supplied, where) {
+  const shape = spinAuthKeyShape(supplied);
+  if (shape.lengthOk) return;
+  const err = new Error(`${where}: ${spinAuthKeyShapeMessage(shape)}`);
+  err.code = 'INVALID_SPIN_AUTH_KEY';
+  throw err;
+}
+
 function registersForRead(registers) {
   if (!Array.isArray(registers)) return [];
   return registers.map((raw) => {
@@ -760,6 +784,9 @@ function normalizeRegistersForWrite(payloadRegisters, storedRegisters) {
     seen.add(id);
     const stored = storedById.get(id);
     const supplied = String(raw.authKey || '').trim();
+    if (supplied && !raw.clearAuthKey) {
+      assertSpinAuthKeyShape(supplied, `Register "${String(raw.name || '').trim() || id}"`);
+    }
     out.push({
       id,
       name: String(raw.name || '').trim(),
@@ -1727,6 +1754,12 @@ export const settingsService = {
       storedRaw = {};
     }
     const newSpinAuthKey = String(payload?.spin?.authKey || '').trim();
+    // The wrong-length key that cost IRC ten days and LAX an evening was
+    // accepted by this very save. Refuse it here, where the operator still has
+    // the portal open, instead of at a counter with a renter waiting.
+    if (newSpinAuthKey && !payload?.spin?.clearAuthKey) {
+      assertSpinAuthKeyShape(newSpinAuthKey, 'SPIn Terminal');
+    }
     const newIposHppToken = String(payload?.ipos?.hppToken || '').trim();
     const newIposApiKey = String(payload?.ipos?.apiKey || '').trim();
     const newIposSecretKey = String(payload?.ipos?.secretKey || '').trim();
@@ -1976,6 +2009,21 @@ export const settingsService = {
     // row, and the very next tap must resolve through the new register.
     invalidateTenantTerminalConfig(scope.tenantId);
 
+    // What was carried, shape-wise. The promote moves stored BYTES by design,
+    // so it can carry a key that was already wrong — which is exactly what
+    // happened at LAX on 2026-09-07: a 12-character key pasted at 00:52 was
+    // faithfully promoted at 01:19 and refused by the gateway at 01:24. It
+    // must not refuse (the bytes are usually fine, and refusing would block a
+    // legitimate migration), but it must not stay quiet either.
+    const carriedShape = spinAuthKeyShape(
+      String(decryptSettingSecret(storedAuthKey) || ''),
+    );
+    if (!carriedShape.lengthOk) {
+      logger.warn?.('[settings] promoted a terminal whose Auth Key is the wrong length', {
+        tenantId: scope.tenantId, locationId: location.id, authKeyLength: carriedShape.length,
+      });
+    }
+
     return {
       // Re-read: `next` carries ciphertext and must not go back over the wire.
       config: await this.getPaymentGatewayConfig(scope),
@@ -1984,6 +2032,10 @@ export const settingsService = {
         locationId: location.id,
         locationName: location.name || '',
         maskedTpn: maskTpn(tpn),
+        // Length and a boolean — never the credential.
+        authKeyLength: carriedShape.length,
+        authKeyShapeOk: carriedShape.lengthOk,
+        authKeyWarning: carriedShape.lengthOk ? null : spinAuthKeyShapeMessage(carriedShape),
       },
     };
   },

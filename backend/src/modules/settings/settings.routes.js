@@ -11,7 +11,12 @@ import {
   getTenantModuleConfig
 } from '../../lib/module-access.js';
 import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
-import { buildTerminalAuditMetadata, resolveTenantTerminalConfig } from '../payment-gateway/tenant-terminal-config.js';
+import {
+  buildTerminalAuditMetadata,
+  resolveTenantTerminalConfig,
+  spinAuthKeyShape,
+  spinAuthKeyShapeMessage,
+} from '../payment-gateway/tenant-terminal-config.js';
 import { paymentGatewayService } from '../payment-gateway/payment-gateway.service.js';
 
 export const settingsRouter = Router();
@@ -561,6 +566,11 @@ settingsRouter.put('/payment-gateway', requireRole('ADMIN'), async (req, res, ne
     if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
       return res.status(400).json({ error: e.message, code: e.code });
     }
+    // A key the gateway would refuse on every POST is refused here instead,
+    // while the operator still has the portal open (2026-09-07).
+    if (e?.code === 'INVALID_SPIN_AUTH_KEY') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     next(e);
   }
 });
@@ -720,6 +730,13 @@ settingsRouter.post('/payment-gateway/terminal-check', requireRole('ADMIN'), asy
     const result = await paymentGatewayService.checkTerminal({
       tenantId: scope?.tenantId, registerId, locationId,
     });
+    // CONNECTED IS NOT CHARGEABLE (2026-09-07). TerminalStatus is a GET whose
+    // validator does not check the Auth Key's length, so it answers "connected"
+    // for a key every POST will refuse with 2201 — which is exactly how LAX
+    // spent an evening reading a green check while no sale would go through.
+    // The shape travels with the result: the LENGTH and two booleans, never the
+    // credential.
+    const shape = spinAuthKeyShape(resolved.authKey || '');
     res.json({
       connected: !!result?.connected,
       error: result?.error || null,
@@ -730,6 +747,9 @@ settingsRouter.post('/payment-gateway/terminal-check', requireRole('ADMIN'), asy
       locationId: resolved.locationId || null,
       tpnMasked: resolved.maskedTpn,
       terminalStatus: result?.result?.TerminalStatus || null,
+      authKeyLength: shape.length,
+      authKeyShapeOk: shape.lengthOk,
+      authKeyWarning: shape.lengthOk ? null : spinAuthKeyShapeMessage(shape),
     });
   } catch (e) {
     next(e);
