@@ -33,6 +33,7 @@
 import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
 import { importCustomerEmailOrNull } from '../../../lib/customer-email.js';
+import { nameOnlyNote } from '../booking-source/customer-autocreate.js';
 import { captureBackendException } from '../../../lib/sentry.js';
 import { registerWorker, enqueueJob } from '../../../lib/queue/index.js';
 import { SCRAPER_PRIORITY } from '../../../lib/queue/priorities.js';
@@ -81,7 +82,8 @@ function autoCreateCustomersEnabled() {
 
 const CUSTOMER_PHONE_PLACEHOLDER = '0000000000';
 
-export async function maybeCreateCustomerFromTl(prisma, extRes) {
+export async function maybeCreateCustomerFromTl(prisma, extRes, opts = {}) {
+  const { allowNameOnly = false } = opts;
   const firstName = (extRes.customerFirstName || '').trim();
   const lastName  = (extRes.customerLastName  || '').trim();
   // Writer #14 of the customer-email inventory (lib/customer-email.js). IMPORT
@@ -96,7 +98,12 @@ export async function maybeCreateCustomerFromTl(prisma, extRes) {
   const phone     = (extRes.customerPhone     || '').trim();
 
   if (!firstName || !lastName) return null;
-  if (!email && !phone) return null;
+  // Name-only: see booking-source/customer-autocreate.js. TL hands over LAX
+  // bookings carrying a name and nothing else (measured 2026-09-07: 3 of 48 on
+  // Corpusa's first import, all with FUTURE pickups), so refusing them left real
+  // reservations invisible to the counter.
+  const nameOnly = !email && !phone;
+  if (nameOnly && !allowNameOnly) return null;
 
   // Defensive double-check inside the create: another concurrent sync (or
   // a manual creation) could have created the customer between
@@ -117,6 +124,7 @@ export async function maybeCreateCustomerFromTl(prisma, extRes) {
       email: email || null,
       phone: phone || CUSTOMER_PHONE_PLACEHOLDER,
       country: extRes.customerCountry || null,
+      ...(nameOnly ? { notes: nameOnlyNote('TL International', extRes.externalRef) } : {}),
     },
     select: { id: true, firstName: true, lastName: true, email: true, phone: true },
   });
@@ -307,7 +315,7 @@ export async function tlSyncHandler(job) {
             && decision.reason === 'customer_not_found'
             && autoCreateCustomersEnabled()) {
           try {
-            const newCust = await maybeCreateCustomerFromTl(prisma, upserted);
+            const newCust = await maybeCreateCustomerFromTl(prisma, upserted, { allowNameOnly: true });
             if (newCust) {
               decision = await evaluatePromotion(upserted, { prisma });
               logger.info('[tl-sync] re-evaluated after auto-create', {

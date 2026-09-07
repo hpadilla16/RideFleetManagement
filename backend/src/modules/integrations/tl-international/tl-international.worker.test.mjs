@@ -195,3 +195,54 @@ test('worker loop: empty dashboard → OK status with all zeroes', async () => {
   assert.equal(out.autoPromoted, 0);
   assert.equal(fakes.store.syncRuns[0].status, 'OK');
 });
+
+// ---------------------------------------------------------------------------
+// Name-only auto-create (2026-09-07). Corpusa's first TL import brought 48 LAX
+// bookings; 3 carried a full name and NO contact at all, with pickups on
+// Sep 9, 16 and 17. TL keeps its own copy of the create helper, so it needed
+// the same opt-in Economy got — otherwise those three stayed invisible to the
+// counter while every other source imported fine.
+// ---------------------------------------------------------------------------
+const { maybeCreateCustomerFromTl } = await import('./tl-international.worker.js');
+const { NAME_ONLY_NOTE_PREFIX } = await import('../booking-source/customer-autocreate.js');
+
+function fakeCustomerDb(capture) {
+  return {
+    customer: {
+      findFirst: async () => null,
+      create: async (args) => { capture.create = args; return { id: 'cust-1', ...args.data }; },
+    },
+  };
+}
+
+const CONTACTLESS = {
+  tenantId: 't1', externalRef: 'ZE40854945BA',
+  customerFirstName: 'Ana', customerLastName: 'Rivera',
+  customerEmail: null, customerPhone: null,
+};
+
+test('TL name-only: still refused when the caller does not opt in', async () => {
+  const cap = {};
+  assert.equal(await maybeCreateCustomerFromTl(fakeCustomerDb(cap), CONTACTLESS), null);
+  assert.equal(cap.create, undefined, 'nothing may be written by default');
+});
+
+test('TL name-only: opted in, the booking gets a customer and a merge stamp', async () => {
+  const cap = {};
+  const out = await maybeCreateCustomerFromTl(fakeCustomerDb(cap), CONTACTLESS, { allowNameOnly: true });
+  assert.ok(out?.id);
+  assert.equal(cap.create.data.firstName, 'Ana');
+  assert.equal(cap.create.data.email, null, 'no address is invented');
+  assert.ok(cap.create.data.phone, 'the placeholder fills the required column');
+  assert.ok(String(cap.create.data.notes).startsWith(NAME_ONLY_NOTE_PREFIX));
+  assert.match(String(cap.create.data.notes), /ZE40854945BA/, 'it names the booking it came from');
+});
+
+test('TL name-only: a booking WITH contact is unaffected by the option', async () => {
+  const cap = {};
+  await maybeCreateCustomerFromTl(fakeCustomerDb(cap), {
+    ...CONTACTLESS, customerPhone: '7875550000',
+  }, { allowNameOnly: true });
+  assert.equal(cap.create.data.phone, '7875550000');
+  assert.equal(cap.create.data.notes, undefined, 'and carries no merge-candidate stamp');
+});
