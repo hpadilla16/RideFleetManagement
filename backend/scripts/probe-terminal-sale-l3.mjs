@@ -4,7 +4,7 @@
  *
  *   node scripts/probe-terminal-sale-l3.mjs --tenant Corpusa --location LAX
  *   node scripts/probe-terminal-sale-l3.mjs --tenant Corpusa --location LAX --apply
- *   node scripts/probe-terminal-sale-l3.mjs --tenant Corpusa --location LAX --apply --stage 3
+ *   node scripts/probe-terminal-sale-l3.mjs --tenant Corpusa --location LAXA01 --apply --stage 3
  *   node scripts/probe-terminal-sale-l3.mjs --tenant Corpusa --location LAX --envelope CART --apply
  *   node scripts/probe-terminal-sale-l3.mjs --tenant Corpusa --agreement RA-10021   (dry run only)
  *
@@ -126,7 +126,7 @@ import {
   resolveTenantTerminalConfig, toSpinClientConfig, maskTpn,
 } from '../src/modules/payment-gateway/tenant-terminal-config.js';
 import { extractValidationErrors, isAutoRentalAccepted } from '../src/modules/payment-gateway/autorental-validation.js';
-import { isBusyFailure, busyDelaySeconds } from '../src/modules/payment-gateway/terminal-state.js';
+import { isBusyFailure, busyDelaySeconds, SPIN_STATUS } from '../src/modules/payment-gateway/terminal-state.js';
 import { L3_ENVELOPE } from '../src/modules/payment-gateway/terminal-sale-l3.js';
 import { buildLevel3LineItems } from '../src/modules/payment-gateway/autorental-l3.builder.js';
 import { prisma } from '../src/lib/prisma.js';
@@ -686,6 +686,7 @@ async function main() {
 
     let out;
     let busyNotRefused = false;
+    let lastError = null;
     try {
       // A sale hits "Service Busy" (1000) for the same reason a void does: the
       // terminal is still closing out the PREVIOUS stage. Learned at LAX
@@ -700,6 +701,7 @@ async function main() {
     } catch (e) {
       out = explainThrow(e);
       busyNotRefused = isBusyFailure(e);
+      lastError = e;
     }
 
     if (out.approved) {
@@ -716,6 +718,16 @@ async function main() {
       }
       console.log(`  ✔ Stage ${stage.n} APPROVED${out.validationOk === false ? ' — but with L2/L3 validation errors inside the 200 (see above)' : ''}${out.hasToken ? '' : ' — and NO TOKEN came back'}`);
     } else {
+      // NOT EVERY FAILURE IS A FINDING. The ladder's whole claim — "the fields
+      // THIS rung adds are what the gateway rejected" — only holds when the
+      // gateway actually evaluated the payload. Two answers mean it never did:
+      // 2008/1000 (the device was busy) and 2001 (the device is not connected
+      // to the proxy at all). Printing the payload verdict for either is how a
+      // probe tells you the shape is wrong when the truth is the terminal was
+      // asleep — which is exactly what rung 10 did on 2026-09-07, one minute
+      // after the same payload had been declared clean in a dry run.
+      const notEvaluated = busyNotRefused
+        || String(lastError?.spinStatusCode || '') === SPIN_STATUS.TERMINAL_NOT_CONNECTED;
       if (busyNotRefused) {
         console.log(`
   ⏳ Stage ${stage.n} never reached the terminal — it answered BUSY, even`);
@@ -723,6 +735,14 @@ async function main() {
         console.log('    device was still finishing the previous one. Give it a minute, then');
         console.log(`    re-run with --stage ${stage.n} to test this rung on its own.`);
         stopped = `stage ${stage.n} could not be tested — terminal busy`;
+      } else if (notEvaluated) {
+        console.log(`
+  ⏳ Stage ${stage.n} never reached the terminal — it is not connected to the`);
+        console.log('    SPIn proxy (2001). The gateway took our credentials and could not find');
+        console.log('    the device, so the payload was never evaluated: this says NOTHING about');
+        console.log('    the fields this stage adds. Wake the terminal, confirm the green arrow');
+        console.log(`    in S.T.E.A.M, then re-run with --stage ${stage.n}.`);
+        stopped = `stage ${stage.n} could not be tested — terminal not connected`;
       } else {
         console.log(`\n  ✖ Stage ${stage.n} was REFUSED. No money moved.`);
         console.log('    Everything in stages below this one already passed, so the fields THIS');
