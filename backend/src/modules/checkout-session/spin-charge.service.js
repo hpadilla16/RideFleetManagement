@@ -39,6 +39,9 @@ import {
   resolveTenantTerminalConfig,
   toSpinClientConfig,
   isSpinDryRun,
+  // One set of counter-facing sentences, owned by the module that mints the
+  // reason codes — see tenant-terminal-config.js.
+  terminalNotConfiguredMessage,
 } from '../payment-gateway/tenant-terminal-config.js';
 import { appendEvent } from './state-machine.js';
 import { CheckoutSessionError } from './checkout-session.service.js';
@@ -279,32 +282,6 @@ async function applyLocalRenterDepositRule({ baseAmount, reservationId, sessionI
  * resolves to THAT counter's terminal. All three call sites below thread it;
  * a tenant with no registers ignores it and resolves exactly as before.
  */
-
-/**
- * The counter-facing sentence for a NONE resolution. Split out because there
- * are now five distinct ways to have no terminal, and an agent who is told
- * "no terminal configured" when the truth is "no register for THIS location"
- * will go and overwrite the other branch's credentials trying to fix it —
- * which is the very collision registers exist to end.
- */
-function terminalNotConfiguredMessage(reason) {
-  switch (reason) {
-    case 'INCOMPLETE_TENANT_CONFIG':
-      return 'This tenant\'s payment terminal is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → SPIn Terminal before taking a payment.';
-    case 'NO_REGISTER_FOR_LOCATION':
-      return 'No payment terminal is registered for this pickup location. Add a register for this location in Settings → Payment Gateway → Registers — charging on another location\'s terminal is not allowed.';
-    case 'INCOMPLETE_REGISTER':
-      return 'This location\'s register is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → Registers before taking a payment.';
-    case 'AMBIGUOUS_REGISTER_NO_LOCATION':
-      return 'This tenant has several terminal registers and this payment carries no pickup location to choose between them. Set the reservation\'s pickup location, or pick a register.';
-    case 'NO_REGISTER_FOR_ID':
-      return 'That terminal register no longer exists or has been disabled. Pick another in Settings → Payment Gateway → Registers.';
-    case 'REGISTER_LOCATION_MISMATCH':
-      return 'The terminal picked for this checkout belongs to a different location now. Pick one of this counter\'s own terminals and retry.';
-    default:
-      return 'This tenant has no payment terminal configured. Add the SPIn Auth Key and TPN in Settings → Payment Gateway → SPIn Terminal before taking a payment.';
-  }
-}
 
 async function loadTenantSpinConfig(tenantId, { sessionId = null, locationId = null, registerId = null } = {}) {
   const resolved = await resolveTenantTerminalConfig(tenantId, { locationId, registerId });

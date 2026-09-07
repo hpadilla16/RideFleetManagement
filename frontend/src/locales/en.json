@@ -2611,6 +2611,8 @@
     }
   },
   "terminalPicker": {
+    "noneTitle": "No terminal for this counter",
+    "noneFallback": "This pickup location has no payment terminal configured, so the contract cannot be signed on a device and the sale cannot be taken here.",
     "label": "Terminal",
     "confirm": "Use this terminal",
     "autoNote": "This counter has several terminals — confirm which device is in front of the renter.",

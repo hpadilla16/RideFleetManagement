@@ -1262,13 +1262,21 @@ function Step2PhoneTerms({ session, reservation, token, onSigned }) {
 }
 
 /**
- * Which terminal at THIS counter (2026-09-04). Renders only when the pickup
- * location has more than one enabled register (LAX Counter 1 / Counter 2) —
- * legacy single-terminal tenants and single-register branches see nothing.
+ * Which terminal this checkout charges on (2026-09-04, widened 2026-09-07).
+ *
+ * It used to render ONLY when the counter had two or more registers, which got
+ * the audience backwards: the agent who most needs to see the device is the one
+ * at a counter that just migrated to a single register, and they saw nothing at
+ * all. So the identity is ALWAYS shown once a terminal resolves — name and
+ * masked TPN, the two things you can check against the device in front of you —
+ * and the dropdown appears on top of it only when there is a real choice.
+ *
+ * When NO terminal resolves it says so here, in the contract step, carrying the
+ * same sentence the charge would have thrown three steps later with the renter
+ * standing there.
+ *
  * The pick is stored on the SESSION, so the contract, the sale and the deposit
- * all run on the same device. When nothing is picked the backend uses the
- * location's first register; the picker shows which one that is and nudges the
- * agent to confirm it is the device in front of the renter.
+ * all run on the same device.
  */
 function TerminalPicker({ session, token }) {
   const { t } = useTranslation();
@@ -1285,9 +1293,13 @@ function TerminalPicker({ session, token }) {
   };
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session.id]);
 
-  if (!info || !info.selectable) return null;
+  if (!info) return null;
+  // Nothing to say only when this tenant runs no terminal at all AND none was
+  // expected — a phone-contract tenant should not grow a terminal banner.
+  if (!info.hasRegisters && info.resolved?.source === 'NONE' && !info.resolved?.reason) return null;
 
   const current = info.selectedRegisterId || info.options[0]?.id || '';
+  const resolved = info.resolved || {};
   const pick = async (registerId) => {
     setSaving(true); setError(null);
     try {
@@ -1298,11 +1310,28 @@ function TerminalPicker({ session, token }) {
     } finally { setSaving(false); }
   };
 
+  // No terminal for this counter: say it here rather than at the tap.
+  if (!resolved.ok) {
+    return (
+      <div style={{ margin: '0 0 14px', padding: '10px 12px', background: ALERT.bg, border: `0.5px solid ${ALERT.bd}`, borderRadius: 6, color: ALERT.tx, fontSize: 12.5, lineHeight: 1.5 }}>
+        <b style={{ display: 'block', marginBottom: 2 }}>{t('terminalPicker.noneTitle')}</b>
+        {resolved.message || t('terminalPicker.noneFallback')}
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 14px', padding: '8px 12px', background: '#F9FAFB', border: '0.5px solid #E5E7EB', borderRadius: 6 }}>
       <span style={{ fontSize: 12, color: '#374151', fontWeight: 600 }}>
         {t('terminalPicker.label', 'Terminal')}
       </span>
+      {!info.selectable ? (
+        // One device: its identity is the whole message. Shown, not editable —
+        // there is nothing to change it to.
+        <span style={{ fontSize: 12.5, color: '#111827' }}>
+          {[resolved.registerName, resolved.maskedTpn].filter(Boolean).join(' · ')}
+        </span>
+      ) : (
       <select
         value={current}
         disabled={saving}
@@ -1315,7 +1344,8 @@ function TerminalPicker({ session, token }) {
           </option>
         ))}
       </select>
-      {!info.selectedRegisterId ? (
+      )}
+      {info.selectable && !info.selectedRegisterId ? (
         <>
           <button style={{ ...ghostBtn, fontSize: 11.5 }} disabled={saving} onClick={() => pick(current)}>
             {t('terminalPicker.confirm', 'Use this terminal')}

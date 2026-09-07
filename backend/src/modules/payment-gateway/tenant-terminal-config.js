@@ -619,6 +619,36 @@ export function buildTerminalAuditMetadata(cfg = {}, body = {}, tenantId = null)
   };
 }
 
+/**
+ * The counter-facing sentence for a NONE resolution.
+ *
+ * Lives HERE, beside the resolver that mints the reasons, because there are
+ * now six distinct ways to have no terminal and an agent told "no terminal
+ * configured" when the truth is "no register for THIS location" will go and
+ * overwrite the other branch's credentials trying to fix it — the very
+ * collision registers exist to end. One set of sentences, so the wizard's
+ * pre-flight and the charge path's refusal cannot drift apart and describe
+ * the same state two different ways.
+ */
+export function terminalNotConfiguredMessage(reason) {
+  switch (reason) {
+    case 'INCOMPLETE_TENANT_CONFIG':
+      return "This tenant's payment terminal is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → SPIn Terminal before taking a payment.";
+    case 'NO_REGISTER_FOR_LOCATION':
+      return "No payment terminal is registered for this pickup location. Add a register for this location in Settings → Payment Gateway → Registers — charging on another location's terminal is not allowed.";
+    case 'INCOMPLETE_REGISTER':
+      return "This location's register is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → Registers before taking a payment.";
+    case 'AMBIGUOUS_REGISTER_NO_LOCATION':
+      return "This tenant has several terminal registers and this payment carries no pickup location to choose between them. Set the reservation's pickup location, or pick a register.";
+    case 'NO_REGISTER_FOR_ID':
+      return "That terminal register no longer exists or has been disabled. Pick another in Settings → Payment Gateway → Registers.";
+    case 'REGISTER_LOCATION_MISMATCH':
+      return "The terminal picked for this checkout belongs to a different location now. Pick one of this counter's own terminals and retry.";
+    default:
+      return "This tenant has no payment terminal configured. Add the SPIn Auth Key and TPN in Settings → Payment Gateway → SPIn Terminal before taking a payment.";
+  }
+}
+
 export const tenantTerminalConfig = {
   resolveTenantTerminalConfig,
   invalidateTenantTerminalConfig,
@@ -629,4 +659,5 @@ export const tenantTerminalConfig = {
   maskTpn,
   buildTerminalAuditMetadata,
   listTerminalRegisters,
+  terminalNotConfiguredMessage,
 };

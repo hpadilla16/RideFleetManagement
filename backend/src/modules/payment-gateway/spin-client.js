@@ -197,13 +197,35 @@ async function spinRequest(method, path, body, tenantConfig = {}) {
 
   if (!isSuccess) {
     const code = gr.StatusCode || res.status;
-    const msg = message || detailedMessage || `SPIn request failed (${code})`;
+    // BOTH halves, not the first truthy one (2026-09-07).
+    //
+    // This used to read `message || detailedMessage`, and on the refusal that
+    // matters most that is exactly backwards: a 2201 answers Message "Error"
+    // — a word with no information in it — and puts the whole explanation in
+    // DetailedMessage ("The Amount field is required...", the field it does
+    // not like, the credential it will not take). The useless half is truthy,
+    // so it won the `||` and the useful half was dropped on the floor.
+    //
+    // Cost of that, measured: a counter agent reading "Sale declined: Error",
+    // a droplet log saying the same, and a live LAX sale (2026-09-07) that
+    // took a round trip through the logs to learn only its status code. Both
+    // halves now travel, de-duplicated, all the way to the wizard.
+    const parts = [message, detailedMessage]
+      .map((v) => String(v || '').trim())
+      .filter(Boolean)
+      .filter((v, i, all) => all.indexOf(v) === i);
+    const msg = parts.join(' — ') || `SPIn request failed (${code})`;
     logger.warn(`SPIn API error: ${msg}`, {
       spinPath: path, statusCode: code,
       resultCode: resultCodeRaw, resultCodeType: typeof resultCodeRaw,
+      // Logged separately too: a grep for the message text should not have to
+      // guess where the em-dash falls.
+      spinMessage: message || '', spinDetailedMessage: detailedMessage || '',
     });
     const err = new Error(msg);
     err.spinStatusCode = code;
+    err.spinMessage = message || '';
+    err.spinDetailedMessage = detailedMessage || '';
     err.spinResponse = data;
     throw err;
   }
