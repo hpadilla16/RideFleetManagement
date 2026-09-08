@@ -1,6 +1,24 @@
 import { prisma } from '../../lib/prisma.js';
 import { ValidationError, NotFoundError } from '../../lib/errors.js';
 
+/**
+ * Which import sources a franchise claims. Upper-cased and de-duplicated so a
+ * value typed as 'economy' still matches ExternalReservation.sourceSystem, and
+ * so two spellings of one source cannot look like two claims.
+ */
+export function normalizeImportSources(value) {
+  if (value == null) return [];
+  const list = Array.isArray(value)
+    ? value
+    : String(value).split(',');
+  const out = [];
+  for (const v of list) {
+    const s = String(v || '').trim().toUpperCase();
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
 export const franchiseService = {
   async list({ tenantId }) {
     if (!tenantId) return [];
@@ -52,6 +70,7 @@ export const franchiseService = {
         termsText: data.termsText || null,
         returnInstructionsText: data.returnInstructionsText || null,
         agreementHtmlTemplate: data.agreementHtmlTemplate || null,
+        importSources: normalizeImportSources(data.importSources),
         isDefault: !!data.isDefault,
         isActive: data.isActive !== false,
       },
@@ -82,6 +101,7 @@ export const franchiseService = {
     if (data.termsText !== undefined) updateData.termsText = data.termsText || null;
     if (data.returnInstructionsText !== undefined) updateData.returnInstructionsText = data.returnInstructionsText || null;
     if (data.agreementHtmlTemplate !== undefined) updateData.agreementHtmlTemplate = data.agreementHtmlTemplate || null;
+    if (data.importSources !== undefined) updateData.importSources = normalizeImportSources(data.importSources);
     if (data.isDefault !== undefined) updateData.isDefault = !!data.isDefault;
     if (data.isActive !== undefined) updateData.isActive = !!data.isActive;
 

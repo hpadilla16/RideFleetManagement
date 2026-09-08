@@ -25,6 +25,7 @@
 import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
 import { findDuplicateReservation } from './duplicate-detector.service.js';
+import { resolveImportFranchiseId } from './import-franchise.js';
 
 /**
  * The VehicleType the reservation should carry.
@@ -215,6 +216,16 @@ export function createPromoter(sourceSpec) {
         return { reservation: linkedReservation, externalReservation: linkedUpdate, alreadyPromoted: false, linked: true };
       }
 
+      // Which of the tenant's brands this booking belongs to. bookingChannel
+      // already carried the source as TEXT ('FRANCHISE_ECONOMY'); this resolves
+      // it to the actual Franchise row, so the agreement shows that brand's
+      // name, logo, address and phone instead of the tenant's generic ones.
+      // Null when the tenant runs no franchises — the behaviour before this.
+      const franchiseId = await resolveImportFranchiseId(tx, {
+        tenantId: fresh.tenantId,
+        sourceSystem: fresh.sourceSystem,
+      });
+
       const reservation = await tx.reservation.create({
         data: {
           tenantId: fresh.tenantId,
@@ -222,6 +233,7 @@ export function createPromoter(sourceSpec) {
           sourceRef: fresh.externalRef,
           status: 'CONFIRMED',
           bookingChannel,
+          ...(franchiseId ? { franchiseId } : {}),
           customerId,
           vehicleTypeId: resolvedVehicleTypeId,
           pickupAt,

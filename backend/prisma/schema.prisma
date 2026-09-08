@@ -4320,6 +4320,20 @@ model Franchise {
   termsText              String?       @db.Text
   returnInstructionsText String?       @db.Text
   agreementHtmlTemplate  String?       @db.Text
+  // Which IMPORT SOURCES belong to this brand (2026-09-08, Hector: "si es
+  // importado con la integracion, que venga ya con la franquicia asignada").
+  // Values are ExternalReservation.sourceSystem strings — 'ECONOMY', 'MEX',
+  // 'TL_INTERNATIONAL', 'NU', 'FLEXWAYS', 'ADVANTAGE'.
+  //
+  // Empty is the normal case: the resolver already matches a franchise whose
+  // CODE equals the source name, which covers Corpusa's ECONOMY and MEX without
+  // anybody configuring anything. This field exists for the brands whose code
+  // cannot equal the source — Corpusa's 'ZEZGO___RIGHT_CARS' takes TL, IRC's
+  // 'MEX_RENT_A_CAR' takes MEX — and it beats the code match when both apply.
+  //
+  // A source must not appear on two active franchises of one tenant; the
+  // resolver refuses to guess and imports land unbranded rather than wrong.
+  importSources          String[]      @default([])
   isDefault              Boolean       @default(false)
   isActive               Boolean       @default(true)
   createdAt              DateTime      @default(now())

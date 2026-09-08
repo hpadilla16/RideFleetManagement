@@ -52,6 +52,7 @@ import {
 } from './tl-international.service.js';
 import { evaluatePromotion } from './promotion-matcher.service.js';
 import { findDuplicateReservation } from './duplicate-detector.service.js';
+import { resolveImportFranchiseId } from '../booking-source/import-franchise.js';
 
 export const QUEUE_NAME = 'tl-international.sync';
 
@@ -599,11 +600,19 @@ export async function promoteWithMappings(extRes, opts) {
       };
     }
 
+    // Which of the tenant's brands this booking belongs to (2026-09-08). Null
+    // when the tenant runs no franchises — the behaviour before this existed.
+    const franchiseId = await resolveImportFranchiseId(tx, {
+      tenantId: fresh.tenantId,
+      sourceSystem: fresh.sourceSystem,
+    });
+
     const reservation = await tx.reservation.create({
       data: {
         tenantId: fresh.tenantId,
         reservationNumber: `TL-${fresh.externalRef}`,
         sourceRef: fresh.externalRef,
+        ...(franchiseId ? { franchiseId } : {}),
         // 2026-05-25 — promoted TL bookings are CONFIRMED reservations.
         // The 'Franchise import' badge in the UI (driven by bookingChannel)
         // is what distinguishes them visually. PENDING_FRANCHISE_IMPORT was

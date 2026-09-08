@@ -48,6 +48,7 @@ import {
 } from './nu.constants.js';
 import { evaluatePromotion, REVIEW_REASONS } from '../tl-international/promotion-matcher.service.js';
 import { findDuplicateReservation } from '../tl-international/duplicate-detector.service.js';
+import { resolveImportFranchiseId } from '../booking-source/import-franchise.js';
 
 export { QUEUE_NAME };
 
@@ -516,6 +517,13 @@ export async function promoteWithMappings(extRes, opts) {
       return { reservation: linkedReservation, externalReservation: linkedUpdate, alreadyPromoted: false, linked: true };
     }
 
+    // Which of the tenant's brands this booking belongs to (2026-09-08). Null
+    // when the tenant runs no franchises — the behaviour before this existed.
+    const franchiseId = await resolveImportFranchiseId(tx, {
+      tenantId: fresh.tenantId,
+      sourceSystem: fresh.sourceSystem,
+    });
+
     const reservation = await tx.reservation.create({
       data: {
         tenantId: fresh.tenantId,
@@ -523,6 +531,7 @@ export async function promoteWithMappings(extRes, opts) {
         sourceRef: fresh.externalRef,
         status: 'CONFIRMED',
         bookingChannel: BOOKING_CHANNEL,
+        ...(franchiseId ? { franchiseId } : {}),
         customerId,
         vehicleTypeId: resolvedVehicleTypeId,
         pickupAt,

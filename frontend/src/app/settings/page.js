@@ -314,7 +314,7 @@ function SettingsInner({ token, me, logout }) {
   const [commissionPlanForm, setCommissionPlanForm] = useState(EMPTY_COMMISSION_PLAN);
   const [commissionRuleForm, setCommissionRuleForm] = useState(EMPTY_COMMISSION_RULE);
   const [franchises, setFranchises] = useState([]);
-  const [franchiseForm, setFranchiseForm] = useState({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', isDefault: false, isActive: true });
+  const [franchiseForm, setFranchiseForm] = useState({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', importSources: '', isDefault: false, isActive: true });
   const [franchiseEditId, setFranchiseEditId] = useState(null);
   const [stopSales, setStopSales] = useState([]);
   const [stopSaleForm, setStopSaleForm] = useState(EMPTY_STOP_SALE);
@@ -670,7 +670,7 @@ function SettingsInner({ token, me, logout }) {
         setMsg('Franchise created');
       }
       setFranchiseEditId(null);
-      setFranchiseForm({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', isDefault: false, isActive: true });
+      setFranchiseForm({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', importSources: '', isDefault: false, isActive: true });
       await loadFranchises();
     } catch (e) { setMsg(e.message); }
   };
@@ -7545,13 +7545,30 @@ function SettingsInner({ token, me, logout }) {
               <div className="stack"><label className="label">Terms &amp; Policies</label><textarea rows={4} value={franchiseForm.termsText} onChange={(e) => setFranchiseForm({ ...franchiseForm, termsText: e.target.value })} placeholder="Franchise-specific terms shown on rental agreements" /></div>
               <div className="stack"><label className="label">Return Instructions</label><textarea rows={3} value={franchiseForm.returnInstructionsText} onChange={(e) => setFranchiseForm({ ...franchiseForm, returnInstructionsText: e.target.value })} placeholder="Return instructions for this franchise" /></div>
               <div className="stack"><label className="label">Agreement HTML Template</label><textarea rows={6} value={franchiseForm.agreementHtmlTemplate} onChange={(e) => setFranchiseForm({ ...franchiseForm, agreementHtmlTemplate: e.target.value })} placeholder="Custom HTML template (uses {{companyName}}, {{termsText}}, etc.)" /></div>
+              {/* Which integrations import under this brand (2026-09-08). Blank is
+                  the normal case: an import already matches the franchise whose
+                  CODE equals the source name. Fill this in only for a brand
+                  whose code cannot equal it. */}
+              <div className="stack">
+                <label className="label">Import sources</label>
+                <input
+                  value={franchiseForm.importSources}
+                  onChange={(e) => setFranchiseForm({ ...franchiseForm, importSources: e.target.value })}
+                  placeholder="ECONOMY, MEX, TL_INTERNATIONAL, NU, FLEXWAYS, ADVANTAGE"
+                />
+                <span className="ui-muted" style={{ fontSize: 12 }}>
+                  Reservations imported from these integrations are branded with this franchise.
+                  Leave blank when the code above already matches the integration&apos;s name.
+                  A source claimed by two franchises is imported unbranded rather than guessed.
+                </span>
+              </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <label className="label"><input type="checkbox" checked={franchiseForm.isDefault} onChange={(e) => setFranchiseForm({ ...franchiseForm, isDefault: e.target.checked })} /> Default franchise</label>
                 <label className="label"><input type="checkbox" checked={franchiseForm.isActive} onChange={(e) => setFranchiseForm({ ...franchiseForm, isActive: e.target.checked })} /> Active</label>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="button" onClick={saveFranchise}>{franchiseEditId ? 'Update' : 'Create'} Franchise</button>
-                {franchiseEditId && <button type="button" onClick={() => { setFranchiseEditId(null); setFranchiseForm({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', isDefault: false, isActive: true }); }}>Cancel</button>}
+                {franchiseEditId && <button type="button" onClick={() => { setFranchiseEditId(null); setFranchiseForm({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', importSources: '', isDefault: false, isActive: true }); }}>Cancel</button>}
               </div>
             </div>
 
@@ -7566,7 +7583,7 @@ function SettingsInner({ token, me, logout }) {
                       <td>{f.isDefault ? 'Yes' : ''}</td>
                       <td>{f.isActive ? 'Yes' : 'No'}</td>
                       <td style={{ display: 'flex', gap: 4 }}>
-                        <button type="button" onClick={() => { setFranchiseEditId(f.id); setFranchiseForm({ name: f.name || '', code: f.code || '', logoUrl: f.logoUrl || '', address: f.address || '', phone: f.phone || '', email: f.email || '', termsText: f.termsText || '', returnInstructionsText: f.returnInstructionsText || '', agreementHtmlTemplate: f.agreementHtmlTemplate || '', isDefault: !!f.isDefault, isActive: f.isActive !== false }); }}>Edit</button>
+                        <button type="button" onClick={() => { setFranchiseEditId(f.id); setFranchiseForm({ name: f.name || '', code: f.code || '', logoUrl: f.logoUrl || '', address: f.address || '', phone: f.phone || '', email: f.email || '', termsText: f.termsText || '', returnInstructionsText: f.returnInstructionsText || '', agreementHtmlTemplate: f.agreementHtmlTemplate || '', importSources: (f.importSources || []).join(', '), isDefault: !!f.isDefault, isActive: f.isActive !== false }); }}>Edit</button>
                         <button type="button" onClick={() => deleteFranchise(f.id)}>Delete</button>
                       </td>
                     </tr>
