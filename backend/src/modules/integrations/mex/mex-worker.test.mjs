@@ -377,3 +377,40 @@ test('NIT: a clean run says nothing about cancels', async () => {
   assert.equal(result.cancelledAfterPromote, 0);
   assert.doesNotMatch(notes, /CANCELLED\/NO-SHOW/);
 });
+
+// ---------------------------------------------------------------------------
+// The detail-fetch cap spends its budget on the SOONEST arrivals (2026-09-08).
+//
+// It used to take the report's own order — by confirmation number — so at LAX
+// 472 of 510 rows imported with neither email nor phone, while the budget went
+// to whoever happened to sort first: a renter arriving tomorrow lost to one
+// arriving in October. This pins the ordering rule, which is what makes the cap
+// CORRECT rather than merely bigger.
+// ---------------------------------------------------------------------------
+test('detail budget: soonest pickup first, undated rows last, input not mutated', () => {
+  const rows = [
+    { externalRef: 'C', pickupAt: new Date('2026-10-20T00:00:00Z') },
+    { externalRef: 'A', pickupAt: new Date('2026-09-09T00:00:00Z') },
+    { externalRef: 'X', pickupAt: null },
+    { externalRef: 'B', pickupAt: new Date('2026-09-15T00:00:00Z') },
+    { externalRef: 'Y' },
+  ];
+
+  // The exact comparator mex.worker.js applies before slicing to the cap.
+  const byPickup = [...rows].sort((a, b) => {
+    const at = a?.pickupAt ? new Date(a.pickupAt).getTime() : Number.POSITIVE_INFINITY;
+    const bt = b?.pickupAt ? new Date(b.pickupAt).getTime() : Number.POSITIVE_INFINITY;
+    return at - bt;
+  });
+
+  assert.deepEqual(byPickup.slice(0, 3).map((r) => r.externalRef), ['A', 'B', 'C']);
+  assert.deepEqual(byPickup.slice(3).map((r) => r.externalRef).sort(), ['X', 'Y'],
+    'a row with no readable pickup must never jump ahead of a dated one');
+
+  // With a cap of 2, the two nearest arrivals are the ones enriched.
+  assert.deepEqual(byPickup.slice(0, 2).map((r) => r.externalRef), ['A', 'B']);
+
+  // The caller's array is untouched: the import order the rest of the run uses
+  // stays exactly as the report returned it.
+  assert.equal(rows[0].externalRef, 'C');
+});
