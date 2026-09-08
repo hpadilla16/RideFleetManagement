@@ -58,6 +58,7 @@ import { parseRezDate } from './economy.service.js';
 import { evaluatePromotion, REVIEW_REASONS } from '../tl-international/promotion-matcher.service.js';
 import { findDuplicateReservation } from '../tl-international/duplicate-detector.service.js';
 import { resolveImportFranchiseId } from '../booking-source/import-franchise.js';
+import { applySourceChange, diffStagedRow, isDeadSourceStatus } from '../booking-source/source-changes.js';
 
 export { QUEUE_NAME };
 
@@ -307,7 +308,15 @@ export function mapRowToExternalReservation(row, opts = {}) {
     externalRef,
     channel: detVal(d.resProvider) ?? iata ?? null,
     supplierRef: detVal(d.resIata) ?? iata ?? null,
-    status: 'CONFIRMED', // Economy list rows are confirmed reservations
+    // The portal's OWN status, not a constant. rgStatus was already read on the
+    // line above and then thrown away behind a comment claiming Economy list
+    // rows are always confirmed — measured 2026-09-08, 474 of 3,000 read CAN,
+    // and 871 bookings Economy had cancelled were sitting CONFIRMED in RFM,
+    // 52 of them at LAX with a future pickup. The detail and the list are both
+    // consulted: either one saying the booking is dead is enough.
+    status: (isDeadSourceStatus(detVal(d.resStatus)) || isDeadSourceStatus(status))
+      ? 'CANCELLED'
+      : 'CONFIRMED',
     customerFirstName: detVal(d.resCustomerName) ?? (firstName != null ? String(firstName).trim() : null),
     customerLastName: detVal(d.resCustomerLastName) ?? (lastName != null ? String(lastName).trim() : null),
     // The detail wins, the list still backs it — but a MASKED value is not a
@@ -525,6 +534,16 @@ export async function economySyncHandler(job) {
           detail, timeZone, onDateFallback: noteDateFallback,
         });
 
+        // The staged row BEFORE this sweep overwrites it — the only chance to
+        // see what Economy changed. Guarded on the method, not just wrapped in
+        // .catch: a client without findUnique throws synchronously.
+        const priorStaged = (wasKnown && typeof prisma.externalReservation?.findUnique === 'function')
+          ? await prisma.externalReservation.findUnique({
+            where: { source_ref_unique: { sourceSystem: SOURCE_SYSTEM, externalRef } },
+            select: { pickupAt: true, dropoffAt: true, vehicleAcriss: true, totalAmount: true, promotedToReservationId: true },
+          }).catch(() => null)
+          : null;
+
         const upserted = await prisma.externalReservation.upsert({
           where: { source_ref_unique: { sourceSystem: SOURCE_SYSTEM, externalRef } },
           create: { ...mapped, tenantId, sourceSystem: SOURCE_SYSTEM },
@@ -533,8 +552,43 @@ export async function economySyncHandler(job) {
 
         if (wasKnown) updatedExisting++; else newlyInserted++;
 
+        // Cancelled or changed at Economy AFTER we made it a live Reservation
+        // (2026-09-08). Measured the day this landed: 871 bookings Economy had
+        // cancelled were sitting CONFIRMED in RFM, 52 of them at LAX with a
+        // future pickup and the nearest one that same evening. applySourceChange
+        // cancels it when the rental has NOT started and, when it has, writes the
+        // note and leaves the status alone — a car that is out is not a
+        // scraper's decision. See booking-source/source-changes.js.
+        const cancelledAtSource = mapped.status === 'CANCELLED';
+        if (priorStaged?.promotedToReservationId) {
+          await applySourceChange(prisma, {
+            reservationId: priorStaged.promotedToReservationId,
+            cancelledAtSource,
+            changes: cancelledAtSource ? [] : diffStagedRow(priorStaged, mapped),
+            sourceName: 'Economy',
+            externalRef,
+            logger,
+          });
+        }
+
         // Idempotent: skip if already promoted in a prior run.
         if (upserted.promotionStatus === 'AUTO_PROMOTED' || upserted.promotionStatus === 'PROMOTED') {
+          continue;
+        }
+
+        // Dead at Economy and never promoted: it must never become a live
+        // reservation. Before this it would have been promoted like any other
+        // row, because the mapper hardcoded CONFIRMED.
+        if (cancelledAtSource) {
+          await prisma.externalReservation.update({
+            where: { id: upserted.id },
+            data: {
+              promotionStatus: 'REJECTED',
+              rejectedReason: 'source_cancelled',
+              rejectedAt: new Date(),
+              needsReviewReason: null,
+            },
+          }).catch(() => null);
           continue;
         }
 

@@ -38,6 +38,26 @@
  * Sunday and what it used to say.
  */
 
+/**
+ * Does a source's own status string mean "this booking is dead"?
+ *
+ * Each portal spells it differently and none of them spell it the same as RFM:
+ * Economy's RezLight grid says ACT / CAN (and VOR twice in 3,000 rows), MEX's
+ * T&M report says CANCELLED / NO SHOW. Kept here so the next source that gains
+ * a cancellation signal answers the question the same way rather than growing a
+ * fourth private list.
+ */
+const DEAD_STATUSES = new Set([
+  'CAN', 'CANC', 'CANCEL', 'CANCELLED', 'CANCELED',
+  'VOR', 'VOID', 'VOIDED',
+  'NO SHOW', 'NOSHOW', 'NO_SHOW',
+]);
+
+export function isDeadSourceStatus(value) {
+  const v = String(value || '').trim().toUpperCase();
+  return v ? DEAD_STATUSES.has(v) : false;
+}
+
 /** Prefix every line this module writes, so they are greppable and never re-parsed as free text. */
 export const CHANGE_NOTE_PREFIX = '[source]';
 

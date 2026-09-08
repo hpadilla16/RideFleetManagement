@@ -170,3 +170,34 @@ test('the note line is greppable and dated', () => {
   });
   assert.equal(line, '[source] 2026-09-08 15:30 Economy E1: cancelled at the source.');
 });
+
+// ---------------------------------------------------------------------------
+// isDeadSourceStatus — each portal spells it differently (2026-09-08).
+// Economy's RezLight grid says ACT / CAN (and VOR twice in 3,000 rows); MEX's
+// T&M report says CANCELLED / NO SHOW. One answer, so the next source that
+// gains a signal does not grow a fourth private list.
+// ---------------------------------------------------------------------------
+const { isDeadSourceStatus } = await import('./source-changes.js');
+
+test('dead status: every spelling the portals actually use', () => {
+  for (const v of ['CAN', 'can', ' Can ', 'CANCELLED', 'CANCELED', 'VOR', 'VOID', 'NO SHOW', 'NO_SHOW', 'NOSHOW']) {
+    assert.equal(isDeadSourceStatus(v), true, `${JSON.stringify(v)} means the booking is dead`);
+  }
+});
+
+test('dead status: a live booking, and absence, are never dead', () => {
+  for (const v of ['ACT', 'CONFIRMED', 'OK', '1', 'active']) {
+    assert.equal(isDeadSourceStatus(v), false, `${JSON.stringify(v)} must not read as cancelled`);
+  }
+  // Absence is NOT a cancellation. Treating a missing status as dead would
+  // cancel every booking from a source that simply does not send one.
+  for (const v of [null, undefined, '', '   ', 0]) {
+    assert.equal(isDeadSourceStatus(v), false);
+  }
+});
+
+test('dead status: a word that merely CONTAINS "can" is not a cancellation', () => {
+  for (const v of ['CANDIDATE', 'CANCUN', 'SCAN']) {
+    assert.equal(isDeadSourceStatus(v), false, `${v} is not a status meaning cancelled`);
+  }
+});
