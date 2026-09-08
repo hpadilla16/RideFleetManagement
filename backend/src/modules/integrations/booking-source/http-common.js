@@ -77,9 +77,20 @@ export function createCredentialStore({
   AuthError = AuthExpiredError,
   onRotated = null,
   prismaClient = prisma,
+  extraFields = [],
 }) {
   if (!sourceSystem) throw new Error('createCredentialStore: sourceSystem required');
   const label = sourceLabel || sourceSystem;
+  // OPTIONAL non-secret connection settings carried INSIDE the encrypted blob
+  // (2026-09-08, advantage-email): a mailbox needs a host, a port and a folder
+  // alongside its password, and they are all set from the same panel form by
+  // the same person. Encrypting a hostname costs nothing; splitting one form's
+  // worth of settings across two stores costs a whole model.
+  //
+  // Default [] — with no extra fields the payload is byte-identical to what
+  // every existing source writes ({username, password}), so nothing about
+  // economy/nu/flexways/advantage/mex/tl changes.
+  const extras = Array.isArray(extraFields) ? extraFields.filter(Boolean) : [];
 
   async function setCredentials(tenantId, creds, userId = null) {
     if (!tenantId) throw new Error('tenantId required');
@@ -88,7 +99,12 @@ export function createCredentialStore({
     if (!username) throw new Error('username required');
     if (!password) throw new Error('password required');
 
-    const encryptedPayload = encrypt(JSON.stringify({ username, password }));
+    const payload = { username, password };
+    for (const key of extras) {
+      const v = creds?.[key];
+      if (v !== undefined && v !== null && String(v) !== '') payload[key] = v;
+    }
+    const encryptedPayload = encrypt(JSON.stringify(payload));
     const row = await prismaClient.integrationCredential.upsert({
       where: { tenantId_sourceSystem: { tenantId, sourceSystem } },
       create: {
@@ -143,7 +159,9 @@ export function createCredentialStore({
     if (!parsed?.username || !parsed?.password) {
       throw new AuthError(`${label} credentials for tenant ${tenantId} missing username/password`);
     }
-    return { username: parsed.username, password: parsed.password };
+    const out = { username: parsed.username, password: parsed.password };
+    for (const key of extras) if (parsed[key] !== undefined) out[key] = parsed[key];
+    return out;
   }
 
   async function recordTestStatus(tenantId, status) {

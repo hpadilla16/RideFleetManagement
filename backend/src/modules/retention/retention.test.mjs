@@ -54,6 +54,9 @@ const MODELS = [
   // attachment's reservation through its citation to apply the open-claim
   // freeze, so BOTH delegates have to exist on the fake.
   'citation', 'citationAttachment',
+  // Inbound Advantage confirmation emails (2026-09-08). The sweep NULLs the
+  // verbatim body at 90 days and keeps the ledger row.
+  'advantageInboundEmail',
 ];
 
 const toTime = (v) => (v instanceof Date ? v.getTime() : (typeof v === 'string' ? Date.parse(v) : v));
@@ -131,6 +134,7 @@ function makeFake(seed) {
 // ---------------------------------------------------------------------------
 const NOW = new Date('2026-08-23T00:00:00.000Z');
 const yAgo = (y) => { const d = new Date(NOW); d.setUTCFullYear(d.getUTCFullYear() - y); return d; };
+const dAgo = (d) => new Date(NOW.getTime() - d * 24 * 60 * 60 * 1000);
 const mAgo = (m) => { const d = new Date(NOW); d.setUTCMonth(d.getUTCMonth() - m); return d; };
 
 function seed() {
@@ -189,6 +193,14 @@ function seed() {
       { id: 'elod_old', day: mAgo(14) },
       { id: 'elod_new', day: mAgo(1) },
     ],
+    advantageInboundEmail: [
+      // Past the 90-day clock, body still present → a candidate.
+      { id: 'aie_old', receivedAt: dAgo(120), rawBody: 'Renter Name : DOE, JANE', rawPurgedAt: null, status: 'IMPORTED', externalRef: 'AEXP1' },
+      // Past the clock but ALREADY purged → idempotency, never picked twice.
+      { id: 'aie_done', receivedAt: dAgo(200), rawBody: null, rawPurgedAt: dAgo(100), status: 'IMPORTED', externalRef: 'AEXP2' },
+      // Inside the clock → left alone.
+      { id: 'aie_new', receivedAt: dAgo(10), rawBody: 'Renter Name : ROE, RICHARD', rawPurgedAt: null, status: 'QUARANTINED', externalRef: 'AEXP3' },
+    ],
   };
 }
 
@@ -229,6 +241,7 @@ function quietLogger() {
 }
 
 const IDENTITY_ENV = ['RETENTION_IDENTITY_YEARS', 'RETENTION_ACCOUNTING_YEARS', 'RETENTION_LOG_MONTHS',
+  'RETENTION_INBOUND_EMAIL_DAYS',
   'RETENTION_SWEEP_BATCH', 'RETENTION_SWEEP_MAX_PER_RUN', 'RETENTION_SWEEP_FORCE',
   'RETENTION_SWEEP_ENABLED', 'RETENTION_SWEEP_APPLY', 'GDPR_ERASURE_ENABLED'];
 
@@ -519,5 +532,65 @@ describe('retention sweep — kill-switch / flag-off scheduler', () => {
     scheduler.startRetentionSweepScheduler();
     scheduler.stopRetentionSweepScheduler();
     assert.ok(scheduler.msUntilNextRun() > 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inbound integration mail (2026-09-08, advantage-email).
+//
+// The Advantage account has no portal to scrape, so confirmations arrive as
+// emails and the verbatim body — which carries the renter's name, phone and
+// personal email address — is stored so a mis-parse can be diagnosed. These
+// cases are the whole reason that storage is defensible: the body goes at 90
+// days, the LEDGER ROW does not, and a re-run does not re-do work.
+// ---------------------------------------------------------------------------
+
+describe('retention sweep — inbound integration mail', () => {
+  it('selects only un-purged bodies past the 90-day clock', async () => {
+    const { deps } = makeDeps(seed());
+    const cands = await computeCandidates(deps, { now: NOW });
+    assert.deepEqual(cands.inboundEmailRaw.ids, ['aie_old']);
+    assert.equal(cands.inboundEmailRaw.kind, 'rawbody');
+  });
+
+  it('preview mutates nothing', async () => {
+    const { deps, prisma } = makeDeps(seed());
+    await runSweep({ apply: false, now: NOW, deps });
+    const row = prisma._store.advantageInboundEmail.find((r) => r.id === 'aie_old');
+    assert.equal(row.rawBody, 'Renter Name : DOE, JANE');
+    assert.equal(row.rawPurgedAt, null);
+  });
+
+  it('apply NULLs the body, stamps rawPurgedAt, and KEEPS the ledger row', async () => {
+    const { deps, prisma } = makeDeps(seed());
+    await runSweep({ apply: true, now: NOW, deps });
+    const store = prisma._store.advantageInboundEmail;
+
+    const purged = store.find((r) => r.id === 'aie_old');
+    assert.equal(purged.rawBody, null, 'the verbatim message must be gone');
+    assert.ok(purged.rawPurgedAt instanceof Date, 'rawPurgedAt must be stamped');
+    // The audit facts survive: without them a quarantined message becomes
+    // unexplainable, and a re-delivery would re-import as new.
+    assert.equal(purged.externalRef, 'AEXP1');
+    assert.equal(purged.status, 'IMPORTED');
+    assert.equal(store.length, 3, 'no ledger row may be deleted');
+
+    const recent = store.find((r) => r.id === 'aie_new');
+    assert.equal(recent.rawBody, 'Renter Name : ROE, RICHARD', 'inside the clock stays');
+  });
+
+  it('is idempotent — a second sweep finds nothing left to purge', async () => {
+    const { deps, prisma } = makeDeps(seed());
+    await runSweep({ apply: true, now: NOW, deps });
+    const again = await computeCandidates({ prisma }, { now: NOW });
+    assert.deepEqual(again.inboundEmailRaw.ids, []);
+  });
+
+  it('the period is env-configurable', async () => {
+    process.env.RETENTION_INBOUND_EMAIL_DAYS = '5';
+    const { deps } = makeDeps(seed());
+    const cands = await computeCandidates(deps, { now: NOW });
+    // At 5 days the 10-day-old message is past the clock too.
+    assert.deepEqual(cands.inboundEmailRaw.ids.sort(), ['aie_new', 'aie_old']);
   });
 });

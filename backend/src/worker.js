@@ -121,6 +121,21 @@ async function registerAllHandlers() {
     }
   }
 
+  // Advantage BY EMAIL (2026-09-08) — the first inbound-mail pipeline in RFM.
+  // Same fail-isolated posture and its OWN flag: the portal scraper and the
+  // mailbox poller must be able to run, fail and be turned off independently.
+  if (String(process.env.ADVANTAGE_EMAIL_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
+    try {
+      const advEmailMod = await import('./modules/integrations/advantage-email/advantage-email.worker.js');
+      advEmailMod.registerAdvantageEmailSyncWorker();
+      logger.info('[worker] registered handler: advantage-email.sync');
+    } catch (err) {
+      logger.warn('[worker] advantage email worker not registered', {
+        message: err.message, stack: err.stack
+      });
+    }
+  }
+
   // MEX Rent a Car franchise sync (2026-07-26) — sibling of Advantage (same
   // TSD RezCentral portal). Own flag, own queue, same fail-isolated posture.
   if (String(process.env.MEX_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
@@ -469,6 +484,18 @@ async function main() {
     });
   }
 
+  // Advantage email poll scheduler (2026-09-08) — gated by
+  // ADVANTAGE_EMAIL_INTEGRATION_ENABLED (checked inside start()).
+  try {
+    const advEmailSchedMod = await import('./modules/integrations/advantage-email/advantage-email.scheduler.js');
+    advEmailSchedMod.startAdvantageEmailScheduler();
+    logger.info('[worker] started: advantage email scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] advantage email scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // MEX autonomous sync scheduler (2026-07-26) — gated by MEX_INTEGRATION_ENABLED.
   try {
     const mexSchedMod = await import('./modules/integrations/mex/mex.scheduler.js');
@@ -536,6 +563,10 @@ async function main() {
     try {
       const advSchedMod = await import('./modules/integrations/advantage/advantage.scheduler.js');
       advSchedMod.stopAdvantageSyncScheduler();
+    } catch {}
+    try {
+      const advEmailSchedMod = await import('./modules/integrations/advantage-email/advantage-email.scheduler.js');
+      advEmailSchedMod.stopAdvantageEmailScheduler();
     } catch {}
     try {
       const mexSchedMod = await import('./modules/integrations/mex/mex.scheduler.js');

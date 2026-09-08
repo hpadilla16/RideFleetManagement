@@ -700,6 +700,7 @@ model Tenant {
   nuLocationConfigs        NuLocationConfig[]
   flexwaysLocationConfigs  FlexwaysLocationConfig[]
   advantageLocationConfigs AdvantageLocationConfig[]
+  advantageInboundEmails   AdvantageInboundEmail[]
   mexLocationConfigs       MexLocationConfig[]
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
@@ -5579,6 +5580,81 @@ model AdvantageLocationConfig {
   // One config row per (tenant, TSD account, branch).
   @@unique([tenantId, tsdNumber, branch])
   @@index([tenantId, enabled])
+}
+
+// ============================================================================
+// ADVANTAGE BY EMAIL (2026-09-08) — the inbound-message ledger.
+//
+// Ryan White (IT Manager, Advantage Car Rental): "Since there is no TSD
+// integration, everything will need to be done VIA email delivery." So this
+// account has no portal to scrape; confirmations arrive as text emails that
+// RFM polls out of a dedicated IMAP mailbox.
+//
+// The BOOKINGS still land in ExternalReservation under sourceSystem
+// 'ADVANTAGE', exactly as the portal worker stages them, and promote through
+// the same shared promoter. This table is not a second staging area — it is the
+// TRANSPORT LEDGER, and it exists for two reasons a staged row cannot serve:
+//
+//   1. IDEMPOTENCY AT THE MESSAGE LEVEL. (tenantId, messageId) is unique, so a
+//      mail server that re-delivers, or a run that dies between fetching and
+//      flagging, cannot re-import. bodyHash makes the stronger statement: a
+//      re-delivery whose body is byte-identical is a no-op, while the SAME
+//      Message-ID with a CHANGED body (a regenerated snapshot — the supplied
+//      sample is exactly that) is re-parsed.
+//   2. QUARANTINE HAS TO BE VISIBLE. A message with an unrecognised banner, an
+//      unconfigured (tsdNumber, branch), or a layout we cannot read is refused
+//      rather than guessed at — and a refusal nobody can see is just data loss
+//      with extra steps. Each one is a row here with its reason, listed in the
+//      panel.
+//
+// PII AND RETENTION. `rawBody` is the verbatim message and carries the renter's
+// name, phone and email address. It is kept only so a mis-parse can be
+// diagnosed and re-run, and the existing retention sweep NULLs it at
+// RETENTION_INBOUND_EMAIL_DAYS (default 90), stamping rawPurgedAt. `parsedJson`
+// is the structured document and stays — it is the same class of record every
+// other integration keeps in ExternalReservation.rawJson, on the same clock.
+//
+// See doc/advantage-email-ingestion-2026-09-08.md
+// ============================================================================
+model AdvantageInboundEmail {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+
+  // RFC 822 Message-ID. Servers are supposed to always send one; when a message
+  // arrives without it the worker synthesises "uid:<mailbox>:<uid>" so the
+  // unique still means something.
+  messageId     String
+  // sha256 of the normalized text body — the same Message-ID with new content
+  // is a NEW document to parse, not a duplicate to skip.
+  bodyHash      String
+  receivedAt    DateTime
+  fromAddress   String?
+  subject       String?
+
+  // What the parser made of it. All nullable: a quarantined message may not
+  // have got far enough to have any of them.
+  docType       String? // CONFIRMATION | MODIFICATION | CANCELLATION | UNKNOWN
+  docTypeRaw    String? // the literal banner token, kept when it is UNKNOWN
+  externalRef   String? // Confirmation # → ExternalReservation.externalRef
+  tsdNumber     String?
+  branch        String?
+
+  status        String // IMPORTED | QUARANTINED | FAILED
+  failureReason String? // unknown_doc_type | layout | no_text_body | ...
+  failureDetail String?
+
+  rawBody       String?   // PII — NULLed by the retention sweep at 90 days
+  rawPurgedAt   DateTime?
+  parsedJson    Json?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([tenantId, messageId])
+  @@index([tenantId, receivedAt(sort: Desc)])
+  @@index([tenantId, status])
+  @@index([rawPurgedAt])
 }
 
 // MEX Rent a Car (2026-07-26): sibling of AdvantageLocationConfig — MEX's

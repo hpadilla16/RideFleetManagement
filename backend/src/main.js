@@ -119,6 +119,7 @@ import { economyRouter } from './modules/integrations/economy/economy.routes.js'
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
 import { flexwaysRouter } from './modules/integrations/flexways/flexways.routes.js';
 import { advantageRouter } from './modules/integrations/advantage/advantage.routes.js';
+import { advantageEmailRouter } from './modules/integrations/advantage-email/advantage-email.routes.js';
 import { mexRouter } from './modules/integrations/mex/mex.routes.js';
 import { pricePolicyRouter } from './modules/integrations/booking-source/price-policy.routes.js';
 import { onestepgpsRouter } from './modules/integrations/onestepgps/onestepgps.routes.js';
@@ -387,6 +388,17 @@ app.use('/api/admin/integrations/flexways', tenantRateLimit, flexwaysRouter);
 // is MULTI-CONFIG keyed by a PAIR: AdvantageLocationConfig rows are unique on
 // (tenantId, tsdNumber, branch) — the portal's `Loc` column, "61302.MCO".
 app.use('/api/admin/integrations/advantage', tenantRateLimit, advantageRouter);
+// Advantage BY EMAIL (2026-09-08). Advantage told us there is no TSD
+// integration for this account — "everything will need to be done VIA email
+// delivery" (Ryan White, IT Manager) — so confirmations are polled out of a
+// dedicated IMAP mailbox instead of scraped. Its own panel because it is a
+// different connection with a different secret and a different failure mode
+// (an IMAP login, not a TSD session); one health pill over two systems is how
+// "Advantage is green" stops meaning anything. It SHARES the
+// AdvantageLocationConfig mapping above (a message routes on the same
+// (tsdNumber, branch) pair) and stages into the same ExternalReservation rows.
+// ADVANTAGE_EMAIL_INTEGRATION_ENABLED gates only the autonomous poll.
+app.use('/api/admin/integrations/advantage-email', tenantRateLimit, advantageEmailRouter);
 // MEX Rent a Car (2026-07-26): same TSD RezCentral portal as Advantage, own
 // module/flag/queue. Routes always available; MEX_INTEGRATION_ENABLED gates
 // only the autonomous scheduler.

@@ -30,6 +30,11 @@
  *     At this clock the accounting residual is anonymised too.
  *   - System/access logs (RETENTION_LOG_MONTHS, default 13) — delete old
  *     ModuleAccessAuditLog / EndpointLoadObservation(+Daily) rows.
+ *   - Inbound integration mail (RETENTION_INBOUND_EMAIL_DAYS, default 90) —
+ *     NULL AdvantageInboundEmail.rawBody, the verbatim Advantage confirmation
+ *     that carries the renter's name, phone and email. The LEDGER ROW survives
+ *     (it is what stops a re-delivered message importing twice); only the body
+ *     goes. Added 2026-09-08 with the email transport.
  *
  * RECORD-scoped, not customer-scoped (a customer can have old AND recent
  * rentals):
@@ -98,6 +103,13 @@ export function getPeriods() {
     identityYears: num('RETENTION_IDENTITY_YEARS', 4),
     accountingYears: num('RETENTION_ACCOUNTING_YEARS', 10),
     logMonths: num('RETENTION_LOG_MONTHS', 13),
+    // Inbound integration mail (2026-09-08, advantage-email). The VERBATIM
+    // message body only — the parsed booking is an ExternalReservation and
+    // lives on the same clock as every other import. 90 days is long enough to
+    // diagnose and replay a mis-parse and short enough that a mailbox we poll
+    // does not become a standing archive of renters' names, phone numbers and
+    // personal email addresses.
+    inboundEmailDays: num('RETENTION_INBOUND_EMAIL_DAYS', 90),
   });
 }
 
@@ -120,12 +132,16 @@ function monthsAgo(now, months) {
   d.setUTCMonth(d.getUTCMonth() - months);
   return d;
 }
+function daysAgo(now, days) {
+  return new Date(now.getTime() - days * MS_PER_DAY);
+}
 
 export function computeCutoffs(now = new Date(), periods = getPeriods()) {
   return {
     identity: yearsAgo(now, periods.identityYears),
     accounting: yearsAgo(now, periods.accountingYears),
     logs: monthsAgo(now, periods.logMonths),
+    inboundEmail: daysAgo(now, periods.inboundEmailDays),
   };
 }
 
@@ -342,6 +358,20 @@ async function hasOpenClaim(prisma, reservationIds) {
   return false;
 }
 
+/**
+ * Inbound integration mail whose VERBATIM body is past the clock and has not
+ * been purged yet. `rawPurgedAt` is the idempotency marker, exactly as
+ * piiPurgedAt is for an agreement: a re-run skips what it already stripped.
+ */
+async function inboundEmailRawCandidates(prisma, cutoff) {
+  if (!prisma.advantageInboundEmail?.findMany) return [];
+  const rows = await prisma.advantageInboundEmail.findMany({
+    where: { receivedAt: { lt: cutoff }, rawPurgedAt: null, rawBody: { not: null } },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
 async function logCandidates(prisma, model, field, cutoff) {
   const rows = await prisma[model].findMany({
     where: { [field]: { lt: cutoff } },
@@ -384,6 +414,13 @@ export async function computeCandidates(deps, { now = new Date(), periods = getP
     citationAttachment: {
       kind: 'attachment', model: 'citationAttachment',
       ids: await citationAttachmentCandidates(prisma, cutoffs.identity),
+    },
+    // The verbatim inbound message, NOT the row: the parse (docType, the
+    // confirmation number, the branch, the quarantine reason) is what makes a
+    // refusal auditable and it survives. Only the body with the PII in it goes.
+    inboundEmailRaw: {
+      kind: 'rawbody', model: 'advantageInboundEmail',
+      ids: await inboundEmailRawCandidates(prisma, cutoffs.inboundEmail),
     },
     moduleAccessLog: {
       kind: 'log', model: 'moduleAccessAuditLog',
@@ -515,6 +552,25 @@ async function purgeAttachmentBatch(deps, model, ids) {
   return deleted;
 }
 
+/**
+ * NULL the verbatim body on a batch of inbound messages and stamp rawPurgedAt.
+ * The row itself is KEPT: it is the idempotency ledger for the mailbox, and
+ * deleting it would let a message that is still sitting in a processed folder
+ * re-import as new.
+ */
+async function purgeRawBodyBatch(deps, model, ids, now) {
+  const { prisma = defaultPrisma } = deps;
+  let purged = 0;
+  for (const c of chunk(ids)) {
+    const { count } = await prisma[model].updateMany({
+      where: { id: { in: c } },
+      data: { rawBody: null, rawPurgedAt: now },
+    });
+    purged += count;
+  }
+  return purged;
+}
+
 /** Delete a batch of log rows by id (bounded — never an unbounded deleteMany). */
 async function purgeLogBatch(deps, model, ids) {
   const { prisma = defaultPrisma } = deps;
@@ -644,6 +700,9 @@ export async function runSweep(args = {}) {
         case 'attachment':
           processed = await purgeAttachmentBatch(deps, info.model, willProcess);
           break;
+        case 'rawbody':
+          processed = await purgeRawBodyBatch(deps, info.model, willProcess, now);
+          break;
         case 'log':
           processed = await purgeLogBatch(deps, info.model, willProcess);
           break;
@@ -659,7 +718,7 @@ export async function runSweep(args = {}) {
   }
 
   const finishedAt = new Date();
-  const notes = `mode=${mode} identityYears=${periods.identityYears} accountingYears=${periods.accountingYears} logMonths=${periods.logMonths} batch=${batch} maxPerRun=${maxPerRun}${force ? ' force=true' : ''}`;
+  const notes = `mode=${mode} identityYears=${periods.identityYears} accountingYears=${periods.accountingYears} logMonths=${periods.logMonths} inboundEmailDays=${periods.inboundEmailDays} batch=${batch} maxPerRun=${maxPerRun}${force ? ' force=true' : ''}`;
 
   // Run-history row (operational metadata, NOT purge-target data — written in
   // BOTH modes so a preview run is itself auditable). Best-effort.
