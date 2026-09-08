@@ -638,15 +638,15 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FIFTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1249 → :1257
-      //   saveCustomerSignature :1279 → :1300  (read is OUTSIDE the
+      //   stampSideEffect       :1253 → :1261
+      //   saveCustomerSignature :1283 → :1304  (read is OUTSIDE the
       //                                         $transaction that starts :1285)
-      //   mintHandoffToken      :1323 → :1383
-      //   setDeclinedInsurance  :1462 → :1494
-      //   markAbandoned         :1504 → :1518
-      //   selectTerminalRegister :1579 → :1632
+      //   mintHandoffToken      :1327 → :1387
+      //   setDeclinedInsurance  :1466 → :1498
+      //   markAbandoned         :1508 → :1522
+      //   selectTerminalRegister :1612 → :1665
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
-      //   spin-charge.service.js:663, :695, :985, :1151, :1342 (five)
+      //   spin-charge.service.js:640, :672, :962, :1128, :1319 (five)
       //   mobile-inspection.service.js:284
       //   vehicle-swap.service.js:130
       //   terms-signing.service.js:331
