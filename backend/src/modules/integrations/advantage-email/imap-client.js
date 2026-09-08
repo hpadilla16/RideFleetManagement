@@ -102,7 +102,15 @@ export class ImapClient {
         ? tls.connect({ host: this.host, port: this.port, servername: this.host })
         : net.connect({ host: this.host, port: this.port });
 
-      socket.setEncoding(null);
+      // NOT setEncoding(null). That reads as "give me Buffers" and does the
+      // opposite: Node builds a StringDecoder from the argument, and
+      // `new StringDecoder(null)` defaults to utf8 — so the socket switches to
+      // TEXT mode and every chunk arrives as a string. Buffer.concat then throws
+      // inside the 'data' handler, the connect promise never settles, and the
+      // caller sees a connect TIMEOUT with no hint of the real cause. That is
+      // exactly what happened on the first real connection (Titan, 2026-09-08).
+      // A socket with no encoding set is already in Buffer mode, so the correct
+      // code is no call at all.
       socket.on('error', (err) => {
         this._error = err;
         this._rejectWaiter(err);
@@ -131,7 +139,12 @@ export class ImapClient {
   }
 
   _onData(chunk) {
-    this._buffer = Buffer.concat([this._buffer, chunk]);
+    // Defensive: a caller that hands us a stream someone else already put in
+    // text mode must not crash the socket. Binary-safe because IMAP literals
+    // are octet counted — latin1 round-trips every byte 1:1, which utf8 would
+    // not.
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'latin1');
+    this._buffer = Buffer.concat([this._buffer, buf]);
     this._pump();
   }
 

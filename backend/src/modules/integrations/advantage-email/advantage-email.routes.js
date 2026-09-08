@@ -59,10 +59,23 @@ advantageEmailRouter.use(requireAuth, requireRole('SUPER_ADMIN', 'ADMIN'));
 // Helpers (same shape as advantage.routes.js / flexways.routes.js)
 // ---------------------------------------------------------------------------
 
+/**
+ * A SUPER_ADMIN belongs to no tenant, so every write has to name one. Omitting
+ * it is a CALLER mistake and must read as one: the bare throw this used to do
+ * surfaced as `500 Internal server error`, which sends whoever hit it looking
+ * for a broken server instead of a missing field (2026-09-08, first real use).
+ */
+class TenantRequiredError extends Error {
+  constructor() {
+    super('tenantId is required (SUPER_ADMIN must pick one)');
+    this.status = 400;
+  }
+}
+
 function resolveTenantId(req) {
   if (isSuperAdmin(req.user)) {
     const t = req.query?.tenantId || req.body?.tenantId || req.user?.tenantId;
-    if (!t) throw new Error('tenantId is required (SUPER_ADMIN must pick one)');
+    if (!t) throw new TenantRequiredError();
     return String(t);
   }
   return req.user?.tenantId;
@@ -73,7 +86,12 @@ function resolveTenantIdOrNull(req) {
 }
 
 function asyncHandler(fn) {
-  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch((err) => {
+    // A caller error carries its own status; anything else is a real fault and
+    // still goes to the shared handler.
+    if (err?.status === 400) return res.status(400).json({ error: err.message });
+    return next(err);
+  });
 }
 
 function send400(res, message) {

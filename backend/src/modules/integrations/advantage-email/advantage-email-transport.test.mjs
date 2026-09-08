@@ -226,3 +226,44 @@ test('login records the capabilities the server volunteers', () => {
     assert.equal(client.capabilities.has('UIDPLUS'), true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The read path must survive a socket that is in TEXT mode (2026-09-08).
+//
+// The header above says feeding _onData "is exactly what the TLS socket does in
+// production". It was not. connect() called `socket.setEncoding(null)`, which
+// reads as "give me Buffers" and does the opposite — Node builds a
+// StringDecoder from the argument and `new StringDecoder(null)` defaults to
+// utf8, so every chunk arrived as a STRING. Buffer.concat threw inside the
+// 'data' handler, the connect promise never settled, and the caller saw a
+// connect TIMEOUT naming the host and port — pointing at the network, which was
+// fine. The first real connection ever attempted (Titan, 2026-09-08) failed
+// this way, and every one of the sixteen tests above passed while it did,
+// because they all feed Buffers.
+//
+// The setEncoding call is gone. This pins the defence that goes with it.
+// ---------------------------------------------------------------------------
+test('a chunk arriving as a STRING is handled, not thrown on', () => {
+  const { client } = fakeClient();
+  const greeting = '* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR ID LITERAL-] At Your Service\r\n';
+
+  assert.doesNotThrow(() => client._onData(greeting), 'a text-mode socket must not crash the reader');
+  assert.ok(Buffer.isBuffer(client._buffer), 'the internal buffer stays a Buffer');
+  assert.equal(client._buffer.toString('latin1'), greeting, 'and the bytes are intact');
+});
+
+test('string and Buffer chunks interleave without corrupting the stream', () => {
+  const { client } = fakeClient();
+  client._onData('* OK part one ');
+  client._onData(Buffer.from('and part two\r\n', 'binary'));
+  assert.equal(client._buffer.toString('latin1'), '* OK part one and part two\r\n');
+});
+
+test('a high byte survives a string chunk — latin1, not utf8', () => {
+  // IMAP literals are octet-counted, so a byte-count read must not be shifted
+  // by a multi-byte decode. 0xE9 is one octet and has to stay one octet.
+  const { client } = fakeClient();
+  client._onData(Buffer.from([0xE9]).toString('latin1'));
+  assert.equal(client._buffer.length, 1, 'one byte in, one byte held');
+  assert.equal(client._buffer[0], 0xE9);
+});

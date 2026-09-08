@@ -34,6 +34,7 @@ import { NuIntegrationPanel } from '../../components/settings/NuIntegrationPanel
 import { FlexwaysIntegrationPanel } from '../../components/settings/FlexwaysIntegrationPanel';
 import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIntegrationPanel';
 import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPanel';
+import { AdvantageEmailPanel } from '../../components/settings/AdvantageEmailPanel';
 import PriceSourcePanel from '../../components/settings/PriceSourcePanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
@@ -4716,6 +4717,13 @@ function SettingsInner({ token, me, logout }) {
                   publishes. Seeing them side by side is the point. */}
               <button
                 type="button"
+                className={activeIntegration === 'advantage-email' ? '' : 'subtle'}
+                onClick={() => setActiveIntegration('advantage-email')}
+              >
+                Advantage (email)
+              </button>
+              <button
+                type="button"
                 className={activeIntegration === 'price-source' ? '' : 'subtle'}
                 onClick={() => setActiveIntegration('price-source')}
               >
@@ -4723,7 +4731,17 @@ function SettingsInner({ token, me, logout }) {
               </button>
             </div>
 
-            {activeIntegration === 'price-source' ? (
+            {activeIntegration === 'advantage-email' ? (
+              <AdvantageEmailPanel
+                token={token}
+                me={me}
+                isSuper={isSuper}
+                isAdmin={isAdmin}
+                tenantName={isSuper ? (activeSettingsTenant?.name || 'Tenant') : (me?.tenant?.name || 'Current tenant')}
+                scopedSettingsPath={scopedSettingsPath}
+                onPageMsg={setMsg}
+              />
+            ) : activeIntegration === 'price-source' ? (
               <PriceSourcePanel
                 token={token}
                 me={me}
