@@ -71,6 +71,7 @@ import {
   windowBoundsForConfig,
 } from './mex.constants.js';
 import { createPromoter } from '../booking-source/promote.js';
+import { applySourceChange, diffStagedRow } from '../booking-source/source-changes.js';
 import {
   maybeCreateCustomerFromSource,
   autoCreateEnabledFromEnv,
@@ -653,14 +654,40 @@ export async function mexSyncHandler(job) {
           const mapped = mapRowToExternalReservation(row);
           const promotable = isPromotableStatus(row.status);
 
-          // A row that is already a live Reservation and has now gone CANCELLED /
-          // NO SHOW at the source: we do NOT touch the Reservation (cancelling a
-          // live rental is an ops/money decision). Log loudly so it can be acted
-          // on, keep the staged row's status honest, and move on.
+          // The staged row as it stood BEFORE this sweep — the only chance to see
+          // what the source changed, because the upsert below overwrites it.
+          // Guarded on the METHOD, not just wrapped in .catch: a client without
+          // findUnique throws a TypeError synchronously, which .catch never sees
+          // and which would take the whole row down with it.
+          const priorStaged = (wasKnown && typeof prisma.externalReservation?.findUnique === 'function')
+            ? await prisma.externalReservation.findUnique({
+              where: { source_ref_unique: { sourceSystem: SOURCE_SYSTEM, externalRef } },
+              select: { pickupAt: true, dropoffAt: true, vehicleAcriss: true, totalAmount: true, promotedToReservationId: true },
+            }).catch(() => null)
+            : null;
+
+          // Cancelled or changed at the source AFTER we made it a live
+          // Reservation (2026-09-08). Until now this only incremented a counter
+          // and wrote a log line nobody reads: two LAX reservations sat
+          // CONFIRMED for bookings MEX had already cancelled. applySourceChange
+          // cancels it when the rental has NOT started and, when it has, writes
+          // the note and leaves the status for a human — a car that is out is
+          // not a scraper's decision. See booking-source/source-changes.js.
           if (alreadyPromoted && !promotable) {
             cancelledAfterPromote++;
-            logger.warn('[mex-sync] source says CANCELLED/NO-SHOW but the row is already promoted — live Reservation left untouched (manual review)', {
+            logger.warn('[mex-sync] source says CANCELLED/NO-SHOW on an already-promoted row', {
               tenantId, externalRef, sourceStatus: row.status, runId: runRow.id,
+            });
+          }
+          if (priorStaged?.promotedToReservationId) {
+            const changes = promotable ? diffStagedRow(priorStaged, mapped) : [];
+            await applySourceChange(prisma, {
+              reservationId: priorStaged.promotedToReservationId,
+              cancelledAtSource: !promotable,
+              changes,
+              sourceName: 'Mex',
+              externalRef,
+              logger,
             });
           }
 
