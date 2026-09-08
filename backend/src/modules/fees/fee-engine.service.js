@@ -463,11 +463,49 @@ async function persistFeesAsCharges({ rentalAgreementId, items, actorUserId }) {
   });
   const baseSortOrder = (Number(lastCharge?.sortOrder) || 0) + 100;
 
+  // IDEMPOTENT PER FEE TYPE (2026-09-08). This used to create unconditionally,
+  // so running check-in twice charged the renter twice: TL-ZE40854597BA was
+  // billed $89.91 of fuel two times, from two submissions 21 seconds apart.
+  //
+  // The key is (agreement, source, sourceRefId) among SELECTED rows only, and
+  // "selected only" is the whole reason this is safe. The fuel/odometer
+  // correction path deliberately SOFT-VOIDS the rows it recomputes and then
+  // re-runs this engine, keeping the voided ones for audit — so after a
+  // correction there is no live row of that type and the create proceeds
+  // exactly as before. What is blocked is only the case with nothing voided in
+  // between, which is a repeat, never a recomputation.
+  //
+  // A repeat carrying a DIFFERENT amount is not silently dropped: skipping is
+  // still right (nobody should be billed twice) but the mismatch is logged,
+  // because it means somebody changed a reading outside the correction flow and
+  // that is a number a human has to reconcile.
+  const live = await prisma.rentalAgreementCharge.findMany({
+    where: { rentalAgreementId, source: 'FEE_ENGINE_CHECKIN', selected: true },
+    select: { sourceRefId: true, total: true },
+  });
+  const alreadyLive = new Map(live.map((r) => [String(r.sourceRefId || ''), r.total]));
+
+  const fresh = [];
+  for (const item of items) {
+    const key = String(item.feeType || '');
+    if (!alreadyLive.has(key)) { fresh.push(item); continue; }
+    const before = Number(alreadyLive.get(key));
+    const now = Number(item.total);
+    logger.warn('[fee-engine] check-in fee already charged on this agreement — not charging it again', {
+      rentalAgreementId, feeType: key, existingTotal: before, recomputedTotal: now,
+      amountsDiffer: Number.isFinite(before) && Number.isFinite(now) && before !== now,
+    });
+  }
+  if (!fresh.length) {
+    await recomputeAgreementTotals(rentalAgreementId);
+    return;
+  }
+
   // Use chargeType: 'UNIT' (valid enum value) + source: 'FEE_ENGINE_CHECKIN'
   // + sourceRefId: feeType. This distinguishes engine-computed fees from
   // pre-existing subtotal items / TAX items without needing a new enum value.
   await prisma.$transaction(
-    items.map((item, idx) => prisma.rentalAgreementCharge.create({
+    fresh.map((item, idx) => prisma.rentalAgreementCharge.create({
       data: {
         rentalAgreementId,
         name: item.description,

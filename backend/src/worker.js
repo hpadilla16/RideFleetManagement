@@ -124,16 +124,28 @@ async function registerAllHandlers() {
   // Advantage BY EMAIL (2026-09-08) — the first inbound-mail pipeline in RFM.
   // Same fail-isolated posture and its OWN flag: the portal scraper and the
   // mailbox poller must be able to run, fail and be turned off independently.
-  if (String(process.env.ADVANTAGE_EMAIL_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
-    try {
-      const advEmailMod = await import('./modules/integrations/advantage-email/advantage-email.worker.js');
-      advEmailMod.registerAdvantageEmailSyncWorker();
-      logger.info('[worker] registered handler: advantage-email.sync');
-    } catch (err) {
-      logger.warn('[worker] advantage email worker not registered', {
-        message: err.message, stack: err.stack
-      });
-    }
+  // REGISTERED UNCONDITIONALLY, unlike its siblings, and the flag gates only the
+  // SCHEDULER below (2026-09-08).
+  //
+  // The module's own contract says ADVANTAGE_EMAIL_INTEGRATION_ENABLED "gates
+  // only the autonomous poll, so flipping it off leaves the panel usable and
+  // the cron dark" — and the panel has a Run now button whose whole purpose is
+  // polling once, deliberately, before trusting a timer. With the consumer
+  // behind the same flag that was false: the button enqueued a job, reported
+  // success, and nothing on earth was listening. Hector pressed it, watched
+  // nothing arrive, and the queue kept the orphan.
+  //
+  // Registering the consumer is safe on its own: it acts only on jobs somebody
+  // explicitly enqueued through an authenticated route. Nothing polls until the
+  // scheduler starts, and that is still gated.
+  try {
+    const advEmailMod = await import('./modules/integrations/advantage-email/advantage-email.worker.js');
+    advEmailMod.registerAdvantageEmailSyncWorker();
+    logger.info('[worker] registered handler: advantage-email.sync (manual runs work with the poll dark)');
+  } catch (err) {
+    logger.warn('[worker] advantage email worker not registered', {
+      message: err.message, stack: err.stack
+    });
   }
 
   // MEX Rent a Car franchise sync (2026-07-26) — sibling of Advantage (same
