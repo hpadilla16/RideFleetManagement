@@ -317,7 +317,15 @@ export async function tlSyncHandler(job) {
           try {
             const newCust = await maybeCreateCustomerFromTl(prisma, upserted, { allowNameOnly: true });
             if (newCust) {
-              decision = await evaluatePromotion(upserted, { prisma });
+              // Hand the customer we JUST created to the re-evaluation. Without
+              // this the matcher looks it up by email/phone, a name-only
+              // customer has neither (placeholder phone, no address), so it
+              // answers customer_not_found again → the row stays MANUAL_REVIEW →
+              // the next sweep re-evaluates it (only AUTO_PROMOTED/PROMOTED are
+              // skipped) → it creates ANOTHER customer, every sweep, forever.
+              // mex.worker.js already guarded this; economy/nu/tl did not, and
+              // name-only creation (2026-09-07) is what made it reachable.
+              decision = await evaluatePromotion(upserted, { prisma, overrideCustomerId: newCust.id });
               logger.info('[tl-sync] re-evaluated after auto-create', {
                 tenantId, externalRef: pickup.externalRef,
                 newDecision: decision.decision, newReason: decision.reason,

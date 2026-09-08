@@ -562,7 +562,18 @@ export async function economySyncHandler(job) {
             // opts in to name-only creation. Other sources keep the old rule
             // until somebody decides the same for them.
             const newCust = await maybeCreateCustomerFromEconomy(prisma, upserted, { allowNameOnly: true });
-            if (newCust) decision = await evaluatePromotion(upserted, promoOpts);
+              // Hand the customer we JUST created to the re-evaluation. Without
+              // this the matcher looks the customer up by email/phone, a
+              // name-only customer has neither (placeholder phone, no address),
+              // so it answers customer_not_found again → the row stays
+              // MANUAL_REVIEW → the next sweep re-evaluates it (only
+              // AUTO_PROMOTED/PROMOTED are skipped) → it creates ANOTHER
+              // customer, every sweep, forever. mex.worker.js already guarded
+              // this; economy/nu/tl did not, and adding name-only creation
+              // (2026-09-07) is what made it reachable here.
+            if (newCust) {
+              decision = await evaluatePromotion(upserted, { ...promoOpts, overrideCustomerId: newCust.id });
+            }
           } catch (createErr) {
             logger.warn('[economy-sync] auto-create customer failed; MANUAL_REVIEW', {
               tenantId, externalRef, message: createErr.message,

@@ -303,7 +303,12 @@ export async function nuSyncHandler(job) {
           && autoCreateCustomersEnabled()) {
           try {
             const newCust = await maybeCreateCustomerFromNu(prisma, upserted);
-            if (newCust) decision = await evaluatePromotion(upserted, promoOpts);
+            // Same guard as Economy/MEX. NU does not opt into name-only today,
+            // but a row with a phone and no email is looked up by phone, and a
+            // caller that ever opts in must not fall into the loop.
+            if (newCust) {
+              decision = await evaluatePromotion(upserted, { ...promoOpts, overrideCustomerId: newCust.id });
+            }
           } catch (createErr) {
             logger.warn('[nu-sync] auto-create customer failed; MANUAL_REVIEW', {
               tenantId, externalRef, message: createErr.message,
