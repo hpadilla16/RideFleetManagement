@@ -500,7 +500,22 @@ export async function mexSyncHandler(job) {
       // Bounded and fail-soft: a detail we cannot read must never cost us the
       // reservation itself, which imports fine without it.
       let detailsFetched = 0;
-      for (const row of rows.slice(0, DETAIL_FETCH_LIMIT)) {
+      // SOONEST ARRIVALS FIRST (2026-09-08). The cap used to take the report's
+      // own order, which is by confirmation number — so with 493 rows and a cap
+      // of 200 the budget was spent on whoever happened to sort first, and a
+      // renter arriving tomorrow could import with no phone while one arriving
+      // in October got a detail fetch. Measured at LAX: 472 of 510 rows had
+      // neither email nor phone.
+      //
+      // Sorting by pickup makes the cap correct instead of merely bigger: what
+      // it can afford now goes to the people the counter sees first. A row with
+      // no readable pickup sorts last rather than jumping the queue.
+      const byPickup = [...rows].sort((a, b) => {
+        const at = a?.pickupAt ? new Date(a.pickupAt).getTime() : Number.POSITIVE_INFINITY;
+        const bt = b?.pickupAt ? new Date(b.pickupAt).getTime() : Number.POSITIVE_INFINITY;
+        return at - bt;
+      });
+      for (const row of byPickup.slice(0, DETAIL_FETCH_LIMIT)) {
         const ref = String(row?.externalRef || '').trim();
         if (!ref) continue;
         try {
