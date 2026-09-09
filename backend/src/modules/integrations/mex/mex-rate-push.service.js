@@ -33,6 +33,7 @@ import {
 import { mexRatePushEligibleCodes } from './mex.constants.js';
 import { loadStopSaleClosures, STOP_SALE_DAILY as SHARED_STOP_SALE_DAILY } from '../booking-source/stop-sale-closures.js';
 import { loadDailyOverrides, resolvePricePolicy, makeConnectionRebaser } from '../booking-source/price-source.js';
+import { resolvePushFranchiseId, selectRatesForFranchise, isFranchiseSpecific } from '../booking-source/rate-franchise.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'MEX';
@@ -117,35 +118,69 @@ export async function loadDesiredMexRates(tenantId, locationId, deps = {}) {
   const db = deps.prisma || prisma;
   const from = deps.from ? new Date(deps.from) : null;
   const to = deps.to ? new Date(deps.to) : null;
-  const rates = await db.rate.findMany({
+  const allRates = await db.rate.findMany({
     where: { tenantId, locationId, active: true },
     select: {
-      id: true, name: true,
+      id: true, name: true, franchiseId: true,
       rateItems: { select: { id: true, daily: true, vehicleTypeId: true, vehicleType: { select: { code: true } } } },
     },
   });
 
-  const byClass = new Map();
-  const conflicts = [];
-  for (const rate of rates) {
-    for (const item of rate.rateItems || []) {
-      const code = String(item?.vehicleType?.code || '').trim().toUpperCase();
-      const daily = Number(item?.daily);
-      if (!code || !Number.isFinite(daily) || daily <= 0) continue;
-      const prior = byClass.get(code);
-      if (prior && prior.daily !== daily) {
-        conflicts.push({ classCode: code, values: [prior.daily, daily] });
-        byClass.delete(code);
-        continue;
-      }
-      if (!prior) {
-        byClass.set(code, {
-          daily, sourceRateItemId: item.id,
-          rateId: rate.id, vehicleTypeId: item.vehicleTypeId,
-          byDate: new Map(),
-        });
+  // Whose shelf is this? A rate carrying no franchise is SHARED, which is what
+  // every rate is today — so with nothing split this narrows to `allRates` and
+  // the behaviour below is byte-identical to what it has always been. See
+  // booking-source/rate-franchise.js for why publishing another brand's prices
+  // is the failure this prevents.
+  const franchiseId = deps.franchiseId !== undefined
+    ? deps.franchiseId
+    : await resolvePushFranchiseId(db, { tenantId, provider: 'MEX' });
+  const rates = selectRatesForFranchise(allRates, franchiseId);
+
+  // Two ACTIVE rates disagreeing on one class is ambiguity, and the class is
+  // excluded rather than guessed at. That rule holds WITHIN a tier; ACROSS
+  // tiers it does not apply, because a brand's own rate beating the house one
+  // is not a disagreement, it is the whole point of splitting them.
+  const fold = (list) => {
+    const byClass = new Map();
+    const conflicts = [];
+    for (const rate of list) {
+      for (const item of rate.rateItems || []) {
+        const code = String(item?.vehicleType?.code || '').trim().toUpperCase();
+        const daily = Number(item?.daily);
+        if (!code || !Number.isFinite(daily) || daily <= 0) continue;
+        const prior = byClass.get(code);
+        if (prior && prior.daily !== daily) {
+          conflicts.push({ classCode: code, values: [prior.daily, daily] });
+          byClass.delete(code);
+          continue;
+        }
+        if (!prior) {
+          byClass.set(code, {
+            daily, sourceRateItemId: item.id,
+            rateId: rate.id, vehicleTypeId: item.vehicleTypeId,
+            byDate: new Map(),
+          });
+        }
       }
     }
+    return { byClass, conflicts };
+  };
+
+  const mine = fold(rates.filter((r) => isFranchiseSpecific(r, franchiseId)));
+  const shared = fold(rates.filter((r) => !isFranchiseSpecific(r, franchiseId)));
+
+  const byClass = mine.byClass;
+  const conflicts = [...mine.conflicts];
+  // A class this brand did not price falls back to the shared rate. A class the
+  // brand's OWN rates disagreed about stays excluded — letting the house rate
+  // fill it would hide a real misconfiguration behind a plausible number.
+  const brandConflicted = new Set(mine.conflicts.map((c) => c.classCode));
+  for (const [code, v] of shared.byClass) {
+    if (byClass.has(code) || brandConflicted.has(code)) continue;
+    byClass.set(code, v);
+  }
+  for (const c of shared.conflicts) {
+    if (!byClass.has(c.classCode) && !brandConflicted.has(c.classCode)) conflicts.push(c);
   }
 
   // Per-date overrides for the window, keyed the way the booking engine keys

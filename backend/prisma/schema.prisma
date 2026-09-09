@@ -3162,6 +3162,13 @@ model Rate {
   name                String?
   locationId          String?
   location            Location?   @relation(fields: [locationId], references: [id])
+  // Which brand's shelf this rate prices (2026-09-09, Hector: "los precios que
+  // son de MEX, escriban a MEX directamente y que los de zezgo escriban al de
+  // zezgo"). NULL = SHARED, which is every rate that exists today, so this is
+  // inert until a sede actually splits its pricing by brand.
+  // See integrations/booking-source/rate-franchise.js.
+  franchiseId         String?
+  franchise           Franchise?  @relation("RateFranchise", fields: [franchiseId], references: [id])
   locationIds         String?
   purpose             RatePurpose @default(RENTAL)
   rateType            RateType    @default(MULTIPLE_CLASSES)
@@ -4340,6 +4347,7 @@ model Franchise {
   createdAt              DateTime      @default(now())
   updatedAt              DateTime      @updatedAt
   reservations           Reservation[] @relation("ReservationFranchise")
+  rates                  Rate[]        @relation("RateFranchise")
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
