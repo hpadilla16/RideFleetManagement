@@ -134,3 +134,104 @@ test('coverage says which branches have their own contract and which fall back',
     { code: 'MIA', source: TERMS_SOURCES.CANONICAL, own: false },
   );
 });
+
+// ---------------------------------------------------------------------------
+// Saving a branch's own contract (2026-09-09).
+//
+// Nothing could write these columns before, so LAX's terms had been seeded
+// straight into the database while four other Corpusa branches quietly printed
+// the canonical Puerto Rico document. These pin the two things that make the
+// write path safe: it sanitizes (the signing page does not), and clearing is a
+// real, deliberate operation rather than a no-op.
+// ---------------------------------------------------------------------------
+const { saveBranchTerms } = await import('./terms-preview.service.js');
+
+function saveDb({ location = { ...LOC, termsHtml: null, termsRiderHtml: null }, capture = {} } = {}) {
+  return {
+    capture,
+    location: {
+      findFirst: async ({ where }) => (where.id === location.id && where.tenantId === 't1' ? location : null),
+      update: async (args) => { capture.update = args; return { ...location, ...args.data }; },
+    },
+    tenant: { findUnique: async () => ({ name: 'Corpusa', termsHtml: null }) },
+  };
+}
+
+test('a script never reaches the database', async () => {
+  const db = saveDb();
+  await saveBranchTerms(SCOPE, {
+    locationId: 'l1', prisma: db,
+    termsHtml: '<h2>1. MILEAGE</h2><p>Unlimited.</p><script>steal()</script>',
+  });
+  const stored = db.capture.update.data.termsHtml;
+  assert.equal(stored.includes('<script'), false);
+  assert.equal(stored.includes('steal'), false);
+  assert.match(stored, /1\. MILEAGE/, 'the contract itself is kept');
+});
+
+test('the document structure survives the filter', async () => {
+  const db = saveDb();
+  await saveBranchTerms(SCOPE, {
+    locationId: 'l1', prisma: db,
+    termsHtml: '<section><header><h1 lang="en">Terms</h1></header><table><tr><td>x</td></tr></table></section>',
+  });
+  const stored = db.capture.update.data.termsHtml;
+  for (const bit of ['<section', '<header', '<h1', 'lang="en"', '<table', '<td']) {
+    assert.ok(stored.includes(bit), `${bit} must survive a save`);
+  }
+});
+
+test('CLEARING is deliberate: an empty string stores NULL and returns to the cascade', async () => {
+  const db = saveDb({ location: { ...LOC, termsHtml: '<h1>old</h1>', termsRiderHtml: null } });
+  const out = await saveBranchTerms(SCOPE, { locationId: 'l1', prisma: db, termsHtml: '' });
+  assert.equal(db.capture.update.data.termsHtml, null, 'NULL, not an empty string');
+  assert.deepEqual(out.cleared, ['termsHtml']);
+});
+
+test('a field NOT sent is left alone — saving the rider does not wipe the base', async () => {
+  const db = saveDb({ location: { ...LOC, termsHtml: '<h1>keep me</h1>', termsRiderHtml: null } });
+  await saveBranchTerms(SCOPE, { locationId: 'l1', prisma: db, termsRiderHtml: '<h2>19. LOCAL</h2>' });
+  assert.equal('termsHtml' in db.capture.update.data, false, 'absent means untouched');
+  assert.match(db.capture.update.data.termsRiderHtml, /19\. LOCAL/);
+});
+
+test('the caller is told what the filter removed', async () => {
+  const db = saveDb();
+  const out = await saveBranchTerms(SCOPE, {
+    locationId: 'l1', prisma: db, termsHtml: '<p>ok</p><script>x()</script>',
+  });
+  assert.equal(out.impact.termsHtml.changed, true);
+  assert.ok(out.impact.termsHtml.removedTags.some((r) => r.tag === 'script'));
+});
+
+test('sending nothing at all is a 400, not a silent no-op', async () => {
+  await assert.rejects(
+    () => saveBranchTerms(SCOPE, { locationId: 'l1', prisma: saveDb() }),
+    (e) => e.httpStatus === 400,
+  );
+});
+
+test("another tenant's branch cannot be written", async () => {
+  const db = saveDb();
+  await assert.rejects(
+    () => saveBranchTerms({ tenantId: 'other' }, { locationId: 'l1', prisma: db, termsHtml: '<p>x</p>' }),
+    (e) => e.httpStatus === 404,
+  );
+  assert.equal(db.capture.update, undefined, 'nothing was written');
+});
+
+test('the editor is given the branch OWN fields, never the cascade output', async () => {
+  // Loading the rendered contract into the edit box and saving it would
+  // promote a fallback into an override: a branch that was correctly
+  // inheriting would acquire a frozen copy and stop following tenant edits.
+  const { getBranchTermsRaw } = await import('./terms-preview.service.js');
+  const out = await getBranchTermsRaw(SCOPE, {
+    locationId: 'l1',
+    prisma: db({
+      location: { ...LOC, termsHtml: null, termsRiderHtml: null },
+      tenant: { name: 'Corpusa', termsHtml: '<h1>Corpusa</h1>' },
+    }),
+  });
+  assert.equal(out.termsHtml, '', 'inheriting from the tenant must present as EMPTY');
+  assert.equal(out.locationCode, 'LAXA01');
+});

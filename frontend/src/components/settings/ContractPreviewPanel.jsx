@@ -24,6 +24,11 @@
  * Backend contract:
  *   GET /api/settings/terms-coverage -> { tenantName, tenantHasBase, tcVersion, locations[] }
  *   GET /api/settings/terms-preview?locationId= -> { html, source, sourceLabel, ... }
+ *   PUT /api/settings/branch-terms { locationId, termsHtml?, termsRiderHtml? }
+ *
+ * Editing is behind a toggle rather than always open: this screen is opened to
+ * CHECK a contract far more often than to rewrite one, and a textarea holding a
+ * legal document is not something to put under an idle cursor.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -56,6 +61,11 @@ export default function ContractPreviewPanel({ token, me, isSuper, isAdmin, scop
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [draftBase, setDraftBase] = useState('');
+  const [draftRider, setDraftRider] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
 
   const loadCoverage = useCallback(async () => {
     try {
@@ -85,6 +95,50 @@ export default function ContractPreviewPanel({ token, me, isSuper, isAdmin, scop
 
   useEffect(() => { if (canAccess) loadCoverage(); }, [canAccess, loadCoverage]);
   useEffect(() => { if (canAccess && locationId) loadPreview(locationId); }, [canAccess, locationId, loadPreview]);
+
+  // The editor works on the branch's OWN fields, never on the rendered
+  // cascade output: opening the tenant's contract in the box and saving it
+  // would silently promote a fallback into a branch override.
+  const startEditing = useCallback(async () => {
+    setError('');
+    setSaveNote('');
+    try {
+      const res = await api(scoped(`/api/settings/branch-terms-raw?locationId=${encodeURIComponent(locationId)}`), { bypassCache: true }, token)
+        .catch(() => null);
+      setDraftBase(res?.termsHtml ?? '');
+      setDraftRider(res?.termsRiderHtml ?? '');
+    } catch {
+      setDraftBase('');
+      setDraftRider('');
+    }
+    setEditing(true);
+  }, [scoped, token, locationId]);
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    setSaveNote('');
+    try {
+      const res = await api(scoped('/api/settings/branch-terms'), {
+        method: 'PUT',
+        body: JSON.stringify({ locationId, termsHtml: draftBase, termsRiderHtml: draftRider }),
+      }, token);
+      const removed = Object.values(res?.impact || {})
+        .flatMap((i) => (i?.removedTags || []).map((r) => `${r.tag} x${r.removed}`));
+      setSaveNote(
+        res?.cleared?.length
+          ? `Saved. Cleared: ${res.cleared.join(', ')} — this branch now falls back.`
+          : `Saved.${removed.length ? ` Filtered out: ${removed.join(', ')}.` : ''}`,
+      );
+      setEditing(false);
+      await loadCoverage();
+      await loadPreview(locationId);
+    } catch (e) {
+      setError(e?.message || 'Could not save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const openInTab = () => {
     if (!preview?.html) return;
@@ -123,6 +177,15 @@ export default function ContractPreviewPanel({ token, me, isSuper, isAdmin, scop
         <button type="button" className="button-subtle" onClick={openInTab} disabled={!preview?.html}>
           Open in a new tab
         </button>
+        {editing ? (
+          <button type="button" className="button-subtle" onClick={() => { setEditing(false); setSaveNote(''); }} disabled={saving}>
+            Cancel
+          </button>
+        ) : (
+          <button type="button" className="button-subtle" onClick={startEditing} disabled={!locationId}>
+            Edit this branch&apos;s terms
+          </button>
+        )}
       </div>
 
       {error ? <div style={{ marginTop: 12, color: '#991b1b' }}>{error}</div> : null}
@@ -143,6 +206,46 @@ export default function ContractPreviewPanel({ token, me, isSuper, isAdmin, scop
           <span className="ui-muted" style={{ fontSize: 12, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>
             {preview.lengths?.rendered?.toLocaleString()} characters rendered
           </span>
+        </div>
+      ) : null}
+
+      {saveNote ? <div style={{ marginTop: 10, color: '#166534' }}>{saveNote}</div> : null}
+
+      {editing ? (
+        <div style={{ marginTop: 14 }}>
+          <div className="ui-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            This edits <strong>this branch&apos;s own</strong> terms, not what is rendered above. Leave
+            a box empty to have the branch fall back to the tenant, or to the built-in document.
+            Scripts, styles, iframes, forms and event handlers are stripped on save; headings, lists,
+            tables and the <code>lang</code> markup that carries the bilingual text are kept.
+          </div>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="ui-muted">Base contract (HTML)</span>
+            <textarea
+              value={draftBase}
+              onChange={(e) => setDraftBase(e.target.value)}
+              rows={14}
+              spellCheck={false}
+              style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
+              placeholder="Empty = fall back to the tenant, then the built-in document"
+            />
+          </label>
+          <label className="stack" style={{ gap: 4, marginTop: 10 }}>
+            <span className="ui-muted">Branch rider — local clauses appended after the base</span>
+            <textarea
+              value={draftRider}
+              onChange={(e) => setDraftRider(e.target.value)}
+              rows={8}
+              spellCheck={false}
+              style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
+              placeholder="Optional"
+            />
+          </label>
+          <div className="inline-actions" style={{ marginTop: 10 }}>
+            <button type="button" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save this branch’s terms'}
+            </button>
+          </div>
         </div>
       ) : null}
 

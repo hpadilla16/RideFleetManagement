@@ -3,7 +3,7 @@ import { settingsService } from './settings.service.js';
 import { franchiseService } from './franchise.service.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
-import { previewTerms, listTermsCoverage } from './terms-preview.service.js';
+import { previewTerms, listTermsCoverage, saveBranchTerms, getBranchTermsRaw } from './terms-preview.service.js';
 
 import { prisma } from '../../lib/prisma.js';
 import {
@@ -139,6 +139,33 @@ settingsRouter.get('/terms-coverage', requireRole('ADMIN'), async (req, res, nex
 settingsRouter.get('/terms-preview', requireRole('ADMIN'), async (req, res, next) => {
   try {
     res.json(await previewTerms(scopeFor(req), { locationId: req.query.locationId || null }));
+  } catch (e) {
+    if (e?.httpStatus) return res.status(e.httpStatus).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Save one branch's own contract. Sanitized on write (the signing page renders
+// these raw); an empty string CLEARS the override and sends the branch back to
+// the tenant or the canonical document, which is a deliberate operation.
+// The branch's OWN stored terms, for the editor — never the cascade output, or
+// a branch that was correctly inheriting would acquire a frozen copy on save.
+settingsRouter.get('/branch-terms-raw', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await getBranchTermsRaw(scopeFor(req), { locationId: req.query.locationId }));
+  } catch (e) {
+    if (e?.httpStatus) return res.status(e.httpStatus).json({ error: e.message });
+    next(e);
+  }
+});
+
+settingsRouter.put('/branch-terms', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await saveBranchTerms(scopeFor(req), {
+      locationId: req.body?.locationId,
+      termsHtml: req.body?.termsHtml,
+      termsRiderHtml: req.body?.termsRiderHtml,
+    }));
   } catch (e) {
     if (e?.httpStatus) return res.status(e.httpStatus).json({ error: e.message });
     next(e);
