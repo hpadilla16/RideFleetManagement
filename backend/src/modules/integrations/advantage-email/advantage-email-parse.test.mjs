@@ -40,6 +40,7 @@ const {
   parseConfirmedRate,
   parseOutIn,
   isSectionHeading,
+  findReportStart,
   toNaiveIso,
   normalizeLabel,
 } = await import('./advantage-email.parser.js');
@@ -417,5 +418,110 @@ describe('advantage email — the sender allowlist', () => {
     assert.equal(extractAddress('"Advantage Rez" <rez@advantage.com>'), 'rez@advantage.com');
     assert.equal(extractAddress('REZ@ADVANTAGE.COM'), 'rez@advantage.com');
     assert.equal(extractAddress('not an address'), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Forwarded messages (2026-09-09).
+//
+// The parser was written against the clean sample Ryan supplied. The first REAL
+// message was a FORWARD, so Outlook put his signature and a From:/Sent:/To:/
+// Subject: block above the report and the two leading non-blank lines were
+// "Thank you," and "Ryan". Every required field came back missing while the
+// whole report sat intact below. These pin that a forward parses identically to
+// a direct send.
+// ---------------------------------------------------------------------------
+describe('a forwarded message parses the same as a direct one', () => {
+  // The real shape of the 2026-09-09 quarantine, around the existing fixture.
+  const forwarded = [
+    '',
+    'Thank you,',
+    '',
+    'Ryan',
+    '',
+    'Ryan White',
+    '',
+    'Advantage Car Rental',
+    '',
+    'IT Manager',
+    '',
+    'M. 407-555-0134',
+    '',
+    'rwhite@advantage.com<mailto:rwhite@advantage.com>',
+    '',
+    '________________________________',
+    'From: Ryan White',
+    'Sent: Tuesday, September 8, 2026 4:28 PM',
+    'To: advantagerez@ridefleetmanager.com <advantagerez@ridefleetmanager.com>',
+    'Subject: AEXP141D54',
+    '',
+    SAMPLE,
+  ].join('\n');
+
+  it('finds the report below the signature and the forward header', () => {
+    const d = parseAdvantageEmail(forwarded);
+    assert.equal(d.tsdNumber, doc.tsdNumber);
+    assert.equal(d.externalRef, doc.externalRef);
+    assert.equal(d.docType, doc.docType);
+    assert.equal(d.pickupAt.toISOString(), doc.pickupAt.toISOString());
+    assert.equal(d.dropoffAt.toISOString(), doc.dropoffAt.toISOString());
+    assert.equal(d.pickupLocation, doc.pickupLocation);
+  });
+
+  it('the signature above it is not mistaken for the masthead', () => {
+    assert.equal(parseAdvantageEmail(forwarded).brand, doc.brand);
+  });
+
+  it('an address line ending in a parenthesised number is not a masthead', () => {
+    // The sample's own agency block carries "ATLANTA, GA (30319)". Matching a
+    // masthead alone — rather than the masthead/banner PAIR — would anchor
+    // there and lose the report.
+    const withAgencyAddress = SAMPLE.replace(
+      /^Booking Source.*$/m,
+      'Booking Source    : 11617270\n                  EXPEDIA.COM\n                  ATLANTA, GA (30319)',
+    );
+    const d = parseAdvantageEmail(withAgencyAddress);
+    assert.equal(d.tsdNumber, doc.tsdNumber);
+    assert.equal(d.externalRef, doc.externalRef);
+  });
+
+  it('a direct (unforwarded) message is unaffected', () => {
+    assert.equal(parseAdvantageEmail(SAMPLE).externalRef, doc.externalRef);
+  });
+});
+
+describe('findReportStart', () => {
+  it('requires the pair, not just a parenthesised number', () => {
+    assert.equal(findReportStart(['ATLANTA, GA (30319)', 'Phone : 1404728-8787']), null);
+    assert.deepEqual(
+      findReportStart(['Advantage Orlando (61302)', 'AMADEUS ***CONFIRMATION***']),
+      { mastheadIndex: 0, bannerIndex: 1 },
+    );
+  });
+
+  it('skips blank lines between the masthead and the banner', () => {
+    assert.deepEqual(
+      findReportStart(['Advantage Orlando (61302)', '', '  ', 'AMADEUS ***CONFIRMATION***']),
+      { mastheadIndex: 0, bannerIndex: 3 },
+    );
+  });
+
+  it('takes the FIRST pair — Outlook stacks a chain newest first', () => {
+    const lines = [
+      'noise',
+      'Advantage Orlando (61302)',
+      'AMADEUS ***MODIFICATION***',
+      'body',
+      'Advantage Orlando (61302)',
+      'AMADEUS ***CONFIRMATION***',
+    ];
+    assert.deepEqual(findReportStart(lines), { mastheadIndex: 1, bannerIndex: 2 });
+  });
+
+  it('is null on a message with no report at all, and never throws', () => {
+    assert.equal(findReportStart(['Thank you,', 'Ryan']), null);
+    assert.equal(findReportStart([]), null);
+    assert.equal(findReportStart(null), null);
+    assert.equal(findReportStart([null, undefined, '']), null);
   });
 });
