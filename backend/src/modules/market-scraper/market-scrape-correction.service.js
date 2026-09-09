@@ -43,6 +43,7 @@ import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 import logger from '../../lib/logger.js';
 import { computeRunComparison, getMarketPricingConfig } from './market-scrape-comparison.service.js';
+import { resolveProfileTargets, autoApplyTargets } from './profile-targets.service.js';
 import { evaluateWrite, guardrailsConfigured, isMarketAutoApplyEnabled } from './market-autoapply-guardrails.js';
 
 function badRequest(msg) {
@@ -92,23 +93,33 @@ function buildCompetitorBasis(row, taxAware) {
  * }>}
  */
 export async function applyRunSuggestions(runId, opts = {}) {
-  const { scope = {}, force = false } = opts;
+  const { scope = {}, force = false, target = null } = opts;
   const mode = opts.mode || (force ? 'manual' : 'auto');
   if (!runId) badRequest('runId required');
 
-  const comparison = await computeRunComparison(runId, { scope });
+  const comparison = await computeRunComparison(runId, { scope, target });
 
   const run = await prisma.marketScrapeRun.findFirst({ where: { id: runId }, include: { profile: true } });
   if (!run) badRequest('Run vanished between comparison and apply');
+  // The Rate this call writes. A target names it; without one it is the
+  // profile's own, which is every caller that predates per-brand targets.
+  // Everything below reads `targetRateId` rather than `profile.targetRateId`
+  // so a fan-out cannot half-apply — write the wrong brand's Rate once and the
+  // prices are live under the wrong company.
   const profile = run.profile;
+  const targetRateId = target?.rateId || profile.targetRateId;
 
   if (comparison.targetRateMissing) badRequest('Profile has no targetRateId — cannot apply suggestions');
-  if (!profile.autoApply && !force) badRequest('Profile is not configured for auto-apply (pass force=true to override)');
+  // A split profile carries the enable on the TARGET: one brand can be trusted
+  // to write while another is still watched, and the profile-level flag alone
+  // cannot say that. Without a target this is the profile's own flag.
+  const autoEnabled = target ? Boolean(target.autoApply) : Boolean(profile.autoApply);
+  if (!autoEnabled && !force) badRequest('Profile is not configured for auto-apply (pass force=true to override)');
 
   // Defense-in-depth: an AUTO apply is a no-op unless the master switch is on.
   if (mode === 'auto' && !force && !isMarketAutoApplyEnabled()) {
     await prisma.marketScrapeRun.update({ where: { id: runId }, data: { pricesApplied: 0, autoApplyAt: new Date() } });
-    return emptyResult(runId, profile, mode, { masterOff: true, comparison });
+    return emptyResult(runId, profile, mode, targetRateId, { masterOff: true, comparison });
   }
 
   const pricingConfig = await getMarketPricingConfig(profile.tenantId, profile.locationCode);
@@ -116,7 +127,7 @@ export async function applyRunSuggestions(runId, opts = {}) {
 
   // Target rate base config: header daily + per-class RateItems (vt→daily) + single-class flag.
   const targetRate = await prisma.rate.findUnique({
-    where: { id: profile.targetRateId },
+    where: { id: targetRateId },
     include: { rateItems: { select: { vehicleTypeId: true, daily: true } } },
   });
   const rateItems = targetRate?.rateItems || [];
@@ -165,7 +176,7 @@ export async function applyRunSuggestions(runId, opts = {}) {
     const auditBase = {
       tenantId: profile.tenantId,
       locationCode: profile.locationCode,
-      rateId: profile.targetRateId,
+      rateId: targetRateId,
       vehicleTypeId,
       date: toDateUTC(anchor.date),
       // For a fallback class (no own RateItem) record the header base customers get today.
@@ -203,7 +214,7 @@ export async function applyRunSuggestions(runId, opts = {}) {
   // truth, all in ONE transaction per class.
   for (const w of baseWrites) {
     const ops = [
-      prisma.rateItem.updateMany({ where: { rateId: profile.targetRateId, vehicleTypeId: w.vehicleTypeId }, data: { daily: w.finalDaily } }),
+      prisma.rateItem.updateMany({ where: { rateId: targetRateId, vehicleTypeId: w.vehicleTypeId }, data: { daily: w.finalDaily } }),
       // Clear future-dated ENGINE-AUTHORED overrides only (source:'MARKET_A') so a
       // stale engine override can't mask the freshly-maintained base. Operator-set
       // overrides (source null / anything ≠ 'MARKET_A' — holiday/event surges) are
@@ -211,11 +222,11 @@ export async function applyRunSuggestions(runId, opts = {}) {
       // steady-state engine writes base-only, so today this clears NOTHING (no
       // engine-authored override exists); any future layered-override path MUST
       // stamp source:'MARKET_A' to stay self-cleaning.
-      prisma.rateDailyPrice.deleteMany({ where: { rateId: profile.targetRateId, vehicleTypeId: w.vehicleTypeId, date: { gte: today }, source: 'MARKET_A' } }),
+      prisma.rateDailyPrice.deleteMany({ where: { rateId: targetRateId, vehicleTypeId: w.vehicleTypeId, date: { gte: today }, source: 'MARKET_A' } }),
     ];
     // Keep the header in sync only for single-class rates (SJU convention header==item);
     // multi-class headers aren't the quote source (resolveForRental uses item.daily).
-    if (singleItem) ops.push(prisma.rate.update({ where: { id: profile.targetRateId }, data: { daily: w.finalDaily } }));
+    if (singleItem) ops.push(prisma.rate.update({ where: { id: targetRateId }, data: { daily: w.finalDaily } }));
     await prisma.$transaction(ops);
   }
 
@@ -246,7 +257,7 @@ export async function applyRunSuggestions(runId, opts = {}) {
   return {
     runId,
     profileId: profile.id,
-    targetRateId: profile.targetRateId,
+    targetRateId,
     mode,
     appliedCount,
     clampedCount,
@@ -258,11 +269,14 @@ export async function applyRunSuggestions(runId, opts = {}) {
   };
 }
 
-function emptyResult(runId, profile, mode, extra = {}) {
+// `targetRateId` is passed in rather than read off the profile: with per-brand
+// targets the Rate this call was writing is not necessarily the profile's own,
+// and reporting the wrong one in a money result is a lie in the audit trail.
+function emptyResult(runId, profile, mode, targetRateId, extra = {}) {
   return {
     runId,
     profileId: profile.id,
-    targetRateId: profile.targetRateId,
+    targetRateId,
     mode,
     appliedCount: 0,
     clampedCount: 0,
@@ -291,8 +305,15 @@ export async function runAutoApplyForProfile(profileId, opts = {}) {
   if (scope.tenantId) where.tenantId = scope.tenantId;
   const profile = await prisma.marketScrapeProfile.findFirst({ where });
   if (!profile) return { skipped: true, reason: 'profile_not_found', profileId };
-  if (!profile.autoApply) return { skipped: true, reason: 'profile_autoapply_off', profileId };
-  if (!profile.targetRateId) return { skipped: true, reason: 'no_target_rate', profileId };
+
+  // One scrape can feed several brands (2026-09-09). With no target rows this
+  // resolves to exactly the one house target the profile has always had, so a
+  // profile nobody has split behaves identically to before — including the two
+  // skip reasons below, which keep their old names and meanings.
+  const targets = await resolveProfileTargets(profile);
+  if (!targets.length) return { skipped: true, reason: 'no_target_rate', profileId };
+  const writable = autoApplyTargets(targets);
+  if (!writable.length) return { skipped: true, reason: 'profile_autoapply_off', profileId };
 
   let runId = opts.runId;
   if (!runId) {
@@ -306,7 +327,39 @@ export async function runAutoApplyForProfile(profileId, opts = {}) {
     runId = latest.id;
   }
 
-  return applyRunSuggestions(runId, { scope, force: false, mode: 'auto' });
+  // A legacy (unsplit) profile returns the single result shape every caller
+  // already handles. Only a genuinely fanned-out profile gets the list, so
+  // nothing downstream has to learn a new shape until somebody splits a sede.
+  if (writable.length === 1 && writable[0].legacy) {
+    return applyRunSuggestions(runId, { scope, force: false, mode: 'auto' });
+  }
+
+  const results = [];
+  for (const target of writable) {
+    try {
+      results.push({
+        franchiseId: target.franchiseId,
+        rateId: target.rateId,
+        ...(await applyRunSuggestions(runId, { scope, force: false, mode: 'auto', target })),
+      });
+    } catch (err) {
+      // One brand's Rate failing must not stop the others: leaving two of three
+      // brands stale is worse than leaving one, and the error is reported.
+      results.push({
+        franchiseId: target.franchiseId, rateId: target.rateId,
+        error: String(err?.message || err),
+      });
+    }
+  }
+  return {
+    profileId,
+    runId,
+    targets: results.length,
+    appliedCount: results.reduce((a, r) => a + (r.appliedCount || 0), 0),
+    heldCount: results.reduce((a, r) => a + (r.heldCount || 0), 0),
+    clampedCount: results.reduce((a, r) => a + (r.clampedCount || 0), 0),
+    results,
+  };
 }
 
 /**
@@ -319,7 +372,16 @@ export async function runMarketAutoApplyAll(opts = {}) {
   const out = { masterEnabled: isMarketAutoApplyEnabled(), profilesRun: 0, applied: 0, held: 0, clamped: 0, results: [], errors: [] };
   if (!out.masterEnabled) return out;
 
-  const where = { autoApply: true, active: true, targetRateId: { not: null } };
+  // A profile qualifies either the old way (its own flag + its own rate) or by
+  // having at least one active target that carries the enable. Without the
+  // second arm a sede that split its brands would silently stop auto-applying.
+  const where = {
+    active: true,
+    OR: [
+      { autoApply: true, targetRateId: { not: null } },
+      { targets: { some: { active: true, autoApply: true } } },
+    ],
+  };
   if (tenantId) where.tenantId = tenantId;
   const profiles = await prisma.marketScrapeProfile.findMany({ where, select: { id: true, tenantId: true } });
 
@@ -354,7 +416,16 @@ export async function getEngineAManagedRateIds(opts = {}) {
   const { tenantId = null } = opts;
   try {
     if (!isMarketAutoApplyEnabled()) return new Set();
-    const where = { autoApply: true, active: true, targetRateId: { not: null } };
+    // A profile qualifies either the old way (its own flag + its own rate) or by
+  // having at least one active target that carries the enable. Without the
+  // second arm a sede that split its brands would silently stop auto-applying.
+  const where = {
+    active: true,
+    OR: [
+      { autoApply: true, targetRateId: { not: null } },
+      { targets: { some: { active: true, autoApply: true } } },
+    ],
+  };
     if (tenantId) where.tenantId = tenantId;
     const profiles = await prisma.marketScrapeProfile.findMany({
       where, select: { targetRateId: true, tenantId: true, locationCode: true },
