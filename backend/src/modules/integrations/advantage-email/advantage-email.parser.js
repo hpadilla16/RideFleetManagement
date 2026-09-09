@@ -218,12 +218,56 @@ export function readFieldBlock(lines) {
 // Header pieces
 // ---------------------------------------------------------------------------
 
+/** Brand + parenthesised TSD account number: "Advantage Orlando (61302)". */
+const MASTHEAD_RE = /^(.*?)\s*\((\d{2,10})\)\s*$/;
+
+/** Channel + the document-type banner: "AMADEUS ***CONFIRMATION***". */
+const BANNER_RE = /^(.*?)\s*\*{2,}\s*([A-Za-z ]+?)\s*\*{2,}\s*$/;
+
 /** "Advantage Orlando (61302)" → { brand, tsdNumber } */
 export function parseMasthead(line) {
   const s = String(line || '').trim();
-  const m = s.match(/^(.*?)\s*\((\d{2,10})\)\s*$/);
+  const m = s.match(MASTHEAD_RE);
   if (!m) return { brand: s || null, tsdNumber: null };
   return { brand: m[1].trim() || null, tsdNumber: m[2] };
+}
+
+/**
+ * Where the report actually starts.
+ *
+ * The parser was written against the clean sample Ryan supplied on 2026-09-08,
+ * which begins at the masthead. The first REAL message, on 2026-09-09, was a
+ * forward: Outlook put his signature and a "From:/Sent:/To:/Subject:" block
+ * above the report, so the two leading non-blank lines were "Thank you," and
+ * "Ryan". Every required field was reported missing while the whole report sat
+ * intact twenty lines further down.
+ *
+ * The anchor is the PAIR — a masthead line immediately followed (blank lines
+ * skipped) by a banner line. Requiring both is what makes it safe to search the
+ * whole body: an address line can perfectly well end in a parenthesised number
+ * (this sample's own "ATLANTA, GA (30319)" does), but it is never followed by a
+ * ***BANNER***. Matching a masthead alone would have picked that up instead.
+ *
+ * The FIRST pair wins. Outlook stacks a forwarded chain newest-first, so when a
+ * modification is forwarded on top of the confirmation it replaced, the first
+ * pair is the current one.
+ *
+ * @returns {{mastheadIndex: number, bannerIndex: number}|null}
+ */
+export function findReportStart(lines) {
+  const rows = Array.isArray(lines) ? lines : [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const line = String(rows[i] ?? '').trim();
+    if (!line || !MASTHEAD_RE.test(line)) continue;
+    // The banner is the next line with content on it.
+    for (let j = i + 1; j < rows.length; j += 1) {
+      const next = String(rows[j] ?? '').trim();
+      if (!next) continue;
+      if (BANNER_RE.test(next)) return { mastheadIndex: i, bannerIndex: j };
+      break; // content, but not a banner — this masthead was a false positive
+    }
+  }
+  return null;
 }
 
 /**
@@ -234,7 +278,7 @@ export function parseMasthead(line) {
  */
 export function parseBanner(line) {
   const s = String(line || '').trim();
-  const m = s.match(/^(.*?)\s*\*{2,}\s*([A-Za-z ]+?)\s*\*{2,}\s*$/);
+  const m = s.match(BANNER_RE);
   if (!m) {
     return { channel: s || null, docType: DOC_TYPES.UNKNOWN, docTypeRaw: null };
   }
@@ -468,12 +512,24 @@ export function parseAdvantageEmail(text, { timeZone = TIME_ZONE } = {}) {
   const body = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const lines = body.split('\n');
 
-  // ---- masthead (first two non-blank lines) --------------------------------
-  const leading = [];
+  // ---- masthead ------------------------------------------------------------
+  // Anchor on the masthead/banner PAIR wherever it sits, so a forwarded message
+  // parses the same as a direct one (see findReportStart). When there is no
+  // pair the message is not a report we recognise: fall back to the first two
+  // non-blank lines so the quarantine still names the fields it could not find
+  // rather than reporting a confusing "no report" for a genuinely broken email.
+  const anchor = findReportStart(lines);
   let i = 0;
-  while (i < lines.length && leading.length < 2) {
-    if (lines[i].trim()) leading.push(lines[i]);
-    i += 1;
+  let leading;
+  if (anchor) {
+    leading = [lines[anchor.mastheadIndex], lines[anchor.bannerIndex]];
+    i = anchor.bannerIndex + 1;
+  } else {
+    leading = [];
+    while (i < lines.length && leading.length < 2) {
+      if (lines[i].trim()) leading.push(lines[i]);
+      i += 1;
+    }
   }
   const masthead = parseMasthead(leading[0]);
   const banner = parseBanner(leading[1]);
