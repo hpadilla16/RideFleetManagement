@@ -461,3 +461,107 @@ describe('price source', () => {
     assert.equal(effectiveDailyOn(desired.byClass.get('CCAR'), '2026-12-24'), STOP_SALE_DAILY);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-franchise rates (2026-09-09).
+//
+// Hector: "los precios que son de MEX, escriban a MEX directamente y que los de
+// zezgo escriban al de zezgo cuando prendemos el rate writeback".
+//
+// THE TRAPDOOR. This loader drops any class two active rates disagree about.
+// Before this, one rate per brand at a sede — Economy $10, Zezgo $14, MEX $7 —
+// made EVERY class ambiguous, so the writeback published NOTHING. Silently,
+// because that guard is doing its job. That is why the writeback has to learn
+// about franchises BEFORE the first per-franchise rate exists.
+// ---------------------------------------------------------------------------
+describe('per-franchise rates', () => {
+  const WINDOW2 = { from: '2026-12-23T00:00:00.000Z', to: '2026-12-26T00:00:00.000Z' };
+  const item = (id, code, daily, vt) => ({ id, daily, vehicleTypeId: vt, vehicleType: { code } });
+
+  function splitDb(rates, franchises = null) {
+    return {
+      rate: { findMany: async () => rates },
+      rateDailyPrice: { findMany: async () => [] },
+      vehicleClassStopSale: { findMany: async () => [] },
+      acrissCategoryMap: { findMany: async () => [] },
+      ...(franchises ? { franchise: { findMany: async () => franchises } } : {}),
+    };
+  }
+
+  const SPLIT = [
+    { id: 'r-mex', franchiseId: 'f-mex', rateItems: [item('i1', 'CCAR', 7, 'vt-ccar')] },
+    { id: 'r-zez', franchiseId: 'f-zez', rateItems: [item('i2', 'CCAR', 14, 'vt-ccar')] },
+    { id: 'r-eco', franchiseId: 'f-eco', rateItems: [item('i3', 'CCAR', 10, 'vt-ccar')] },
+  ];
+
+  it('THE REGRESSION: three brands pricing one class no longer blanks the class', async () => {
+    const desired = await loadDesiredMexRates('t1', 'loc-lax', {
+      prisma: splitDb(SPLIT, [{ id: 'f-mex', code: 'MEX', importSources: [] }]),
+      ...WINDOW2,
+    });
+    assert.equal(desired.byClass.get('CCAR')?.daily, 7, "MEX publishes MEX's price, not a conflict");
+    assert.equal(desired.conflicts.length, 0);
+  });
+
+  it("another brand's price is never published on this portal", async () => {
+    const desired = await loadDesiredMexRates('t1', 'loc-lax', {
+      prisma: splitDb(SPLIT, [{ id: 'f-mex', code: 'MEX', importSources: [] }]),
+      ...WINDOW2,
+    });
+    for (const v of desired.byClass.values()) {
+      assert.notEqual(v.daily, 14, "Zezgo's price must not reach MEX");
+      assert.notEqual(v.daily, 10, "Economy's price must not reach MEX");
+    }
+  });
+
+  it('an unidentifiable brand publishes shared rates only, not somebody else\'s', async () => {
+    // No franchise delegate at all → nothing resolves.
+    const desired = await loadDesiredMexRates('t1', 'loc-lax', { prisma: splitDb(SPLIT), ...WINDOW2 });
+    assert.equal(desired.byClass.size, 0, 'silence beats publishing the wrong company\'s price');
+  });
+
+  it('a class the brand did not price falls back to the shared rate', async () => {
+    const rates = [
+      { id: 'r-mex', franchiseId: 'f-mex', rateItems: [item('i1', 'CCAR', 7, 'vt-ccar')] },
+      { id: 'r-house', franchiseId: null, rateItems: [item('i4', 'IFAR', 33, 'vt-ifar')] },
+    ];
+    const desired = await loadDesiredMexRates('t1', 'loc-lax', {
+      prisma: splitDb(rates, [{ id: 'f-mex', code: 'MEX', importSources: [] }]), ...WINDOW2,
+    });
+    assert.equal(desired.byClass.get('CCAR')?.daily, 7);
+    assert.equal(desired.byClass.get('IFAR')?.daily, 33, 'the house rate still covers what the brand did not price');
+  });
+
+  it("the brand's own rate BEATS a shared one for the same class — not a conflict", async () => {
+    const rates = [
+      { id: 'r-mex', franchiseId: 'f-mex', rateItems: [item('i1', 'CCAR', 7, 'vt-ccar')] },
+      { id: 'r-house', franchiseId: null, rateItems: [item('i4', 'CCAR', 30, 'vt-ccar')] },
+    ];
+    const desired = await loadDesiredMexRates('t1', 'loc-lax', {
+      prisma: splitDb(rates, [{ id: 'f-mex', code: 'MEX', importSources: [] }]), ...WINDOW2,
+    });
+    assert.equal(desired.byClass.get('CCAR')?.daily, 7);
+    assert.equal(desired.conflicts.length, 0, 'more specific is not disagreement');
+  });
+
+  it("a brand's OWN rates disagreeing is still a conflict, and the house rate does NOT paper over it", async () => {
+    const rates = [
+      { id: 'r-mex-a', franchiseId: 'f-mex', rateItems: [item('i1', 'CCAR', 7, 'vt-ccar')] },
+      { id: 'r-mex-b', franchiseId: 'f-mex', rateItems: [item('i2', 'CCAR', 9, 'vt-ccar')] },
+      { id: 'r-house', franchiseId: null, rateItems: [item('i4', 'CCAR', 30, 'vt-ccar')] },
+    ];
+    const desired = await loadDesiredMexRates('t1', 'loc-lax', {
+      prisma: splitDb(rates, [{ id: 'f-mex', code: 'MEX', importSources: [] }]), ...WINDOW2,
+    });
+    assert.equal(desired.byClass.has('CCAR'), false, 'a real misconfiguration must stay visible');
+    assert.equal(desired.conflicts.some((c) => c.classCode === 'CCAR'), true);
+  });
+
+  it('INERT: with no rate carrying a franchise, nothing changes at all', async () => {
+    const rates = [{ id: 'r1', franchiseId: null, rateItems: [item('i1', 'CCAR', 30, 'vt-ccar')] }];
+    const desired = await loadDesiredMexRates('t1', 'loc-lax', {
+      prisma: splitDb(rates, [{ id: 'f-mex', code: 'MEX', importSources: [] }]), ...WINDOW2,
+    });
+    assert.equal(desired.byClass.get('CCAR')?.daily, 30);
+  });
+});

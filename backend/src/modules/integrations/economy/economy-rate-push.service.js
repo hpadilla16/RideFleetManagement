@@ -22,6 +22,7 @@ import { buildPushPlan, verifyPush, SKIP } from './economy-rate-map.js';
 import { readRateGrid, applyRateCell } from './economy-rate-client.js';
 import { loadStopSaleClosures } from '../booking-source/stop-sale-closures.js';
 import { loadDailyOverrides, resolvePricePolicy, makeConnectionRebaser } from '../booking-source/price-source.js';
+import { resolvePushFranchiseId, selectRatesForFranchise, isFranchiseSpecific } from '../booking-source/rate-franchise.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'ECONOMY';
@@ -93,10 +94,10 @@ function parseClassMap(json) {
  */
 export async function loadRfmRates(tenantId, locationId, deps = {}) {
   const db = deps.prisma || prisma;
-  const rates = await db.rate.findMany({
+  const allRates = await db.rate.findMany({
     where: { tenantId, locationId, displayOnline: true },
     select: {
-      id: true,
+      id: true, franchiseId: true,
       rateItems: {
         select: {
           id: true, daily: true, vehicleTypeId: true,
@@ -105,19 +106,41 @@ export async function loadRfmRates(tenantId, locationId, deps = {}) {
       },
     },
   });
+
+  // Only this brand's shelf (2026-09-09). Unlike MEX, this loader returns a
+  // LIST rather than a map keyed by class, so per-brand rates would not have
+  // collided loudly here — they would quietly have produced two entries for one
+  // class and published whichever the caller reached first, which is exactly
+  // how another company's price ends up on our portal. NULL franchise = shared,
+  // so with nothing split this is the same set of rates as before.
+  const franchiseId = deps.franchiseId !== undefined
+    ? deps.franchiseId
+    : await resolvePushFranchiseId(db, { tenantId, provider: 'ECONOMY' });
+  const rates = selectRatesForFranchise(allRates, franchiseId);
+
   const out = [];
+  const seen = new Map(); // classCode -> index in `out`
   for (const rate of rates) {
+    const specific = isFranchiseSpecific(rate, franchiseId);
     for (const item of rate.rateItems || []) {
       const code = item?.vehicleType?.code;
       if (!code || item.daily == null) continue;
-      out.push({
-        classCode: String(code).toUpperCase(),
+      const classCode = String(code).toUpperCase();
+      const row = {
+        classCode,
         daily: Number(item.daily),
         rateItemId: item.id,
         rateId: rate.id,
         vehicleTypeId: item.vehicleTypeId,
         byDate: new Map(),
-      });
+        franchiseId: rate.franchiseId ?? null,
+      };
+      const at = seen.get(classCode);
+      if (at == null) { seen.set(classCode, out.length); out.push(row); continue; }
+      // The brand's own rate replaces a shared one for the same class. Two
+      // rates at the SAME specificity keep the pre-existing first-wins
+      // behaviour rather than changing it under an unrelated feature.
+      if (specific && out[at].franchiseId == null) out[at] = row;
     }
   }
 
