@@ -4628,7 +4628,11 @@ model MarketScrapeProfileTarget {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([profileId, franchiseId])
+  // A brand needs ONE target per Rate, not one in total: LAX keeps a separate
+  // single-class Rate per class (LAX_CCAR_DAILY, LAX_ICAR_DAILY, ...), so a
+  // brand covering seven classes needs seven rows. Keying on (profile,
+  // franchise) alone would have let a brand price exactly one class.
+  @@unique([profileId, franchiseId, rateId])
   @@index([profileId, active])
   @@index([rateId])
 }

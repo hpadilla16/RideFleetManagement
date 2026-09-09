@@ -97,26 +97,29 @@ export async function resolveProfileTargets(profile, deps = {}) {
 }
 
 /**
- * Refuse a second house target on one profile.
+ * Refuse a duplicate target — same profile, same brand, SAME RATE.
  *
- * Postgres treats NULLs as DISTINCT in a unique index, so `@@unique([profileId,
- * franchiseId])` does not stop two rows with a null franchise. Two house
- * targets would both claim "everything not otherwise branded" and write to two
- * different Rates from one run — so it is checked here, where the row is
- * created.
+ * The key is the triple, not (profile, franchise). A brand needs one target per
+ * Rate: LAX keeps a separate single-class Rate per class, so a brand covering
+ * seven classes has seven rows and refusing the second would have let it price
+ * exactly one class.
+ *
+ * It is still checked here rather than left to the index, because Postgres
+ * treats NULLs as DISTINCT: a house target has a null franchise, so the unique
+ * index would happily accept the same (profile, null, rate) twice.
  */
-export async function assertTargetIsUnique(profileId, franchiseId, deps = {}) {
+export async function assertTargetIsUnique(profileId, franchiseId, rateId, deps = {}) {
   const db = deps.prisma || defaultPrisma;
-  if (!profileId) return;
-  const where = { profileId, franchiseId: franchiseId ?? null };
+  if (!profileId || !rateId) return;
+  const where = { profileId, franchiseId: franchiseId ?? null, rateId };
   const clash = typeof db?.marketScrapeProfileTarget?.findFirst === 'function'
     ? await db.marketScrapeProfileTarget.findFirst({ where, select: { id: true } })
     : null;
   if (clash && clash.id !== deps.ignoreId) {
     const e = new Error(
       franchiseId
-        ? 'This profile already has a target for that franchise'
-        : 'This profile already has a house target (no franchise)',
+        ? 'That brand already writes to this rate from this profile'
+        : 'The house target already writes to this rate from this profile',
     );
     e.httpStatus = 409;
     throw e;

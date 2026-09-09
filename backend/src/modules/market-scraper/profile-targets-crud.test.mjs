@@ -107,12 +107,23 @@ test('a franchise from another tenant is refused', async () => {
   );
 });
 
-test('a SECOND house target is refused — Postgres cannot catch it', async () => {
+test('the same brand writing the same rate twice is refused', async () => {
   const db = fakeDb({ existingTarget: { id: 'existing' } });
   await assert.rejects(
     () => createProfileTarget('p1', { rateId: 'rate-mex' }, { scope: SCOPE, prisma: db }),
     /house target/,
   );
+});
+
+test('ONE BRAND, MANY RATES is allowed — LAX keeps a Rate per class', async () => {
+  // Seven single-class rates at LAX; a brand covering them needs seven rows.
+  const db = fakeDb({
+    rates: [{ id: 'rate-ccar', tenantId: 't1' }, { id: 'rate-icar', tenantId: 't1' }],
+  });
+  await createProfileTarget('p1', { rateId: 'rate-ccar', franchiseId: 'f-mex' }, { scope: SCOPE, prisma: db });
+  assert.equal(db.capture.create.data.rateId, 'rate-ccar');
+  await createProfileTarget('p1', { rateId: 'rate-icar', franchiseId: 'f-mex' }, { scope: SCOPE, prisma: db });
+  assert.equal(db.capture.create.data.rateId, 'rate-icar');
 });
 
 test('a valid target is created with the franchise normalized to null', async () => {
@@ -156,7 +167,7 @@ test('a negative or non-numeric amount is refused', async () => {
 // Updating and deleting
 // ---------------------------------------------------------------------------
 test('the rate cannot be cleared — that would be a silent no-op target', async () => {
-  const db = fakeDb({ existingTarget: { id: 'tg1', profileId: 'p1', franchiseId: 'f-mex' } });
+  const db = fakeDb({ existingTarget: { id: 'tg1', profileId: 'p1', franchiseId: 'f-mex', rateId: 'rate-mex' } });
   await assert.rejects(
     () => updateProfileTarget('tg1', { rateId: '' }, { scope: SCOPE, prisma: db }),
     /delete the target instead/,
@@ -164,7 +175,7 @@ test('the rate cannot be cleared — that would be a silent no-op target', async
 });
 
 test('editing a target without moving its franchise does not trip the uniqueness check', async () => {
-  const db = fakeDb({ existingTarget: { id: 'tg1', profileId: 'p1', franchiseId: 'f-mex' } });
+  const db = fakeDb({ existingTarget: { id: 'tg1', profileId: 'p1', franchiseId: 'f-mex', rateId: 'rate-mex' } });
   await updateProfileTarget('tg1', { autoApply: true }, { scope: SCOPE, prisma: db });
   assert.equal(db.capture.update.data.autoApply, true);
 });
@@ -179,7 +190,7 @@ test('a missing target is a 404 on update, and a silent no-op on delete', async 
 });
 
 test('deleting checks the tenant before it deletes', async () => {
-  const db = fakeDb({ existingTarget: { id: 'tg1', profileId: 'p1' } });
+  const db = fakeDb({ existingTarget: { id: 'tg1', profileId: 'p1', rateId: 'rate-mex' } });
   await assert.rejects(
     () => deleteProfileTarget('tg1', { scope: { tenantId: 'other' }, prisma: db }),
     (e) => e.httpStatus === 404,
