@@ -4,6 +4,9 @@ import { computeRunComparison, buildRunComparisonWorkbook } from './market-scrap
 import { applyRunSuggestions } from './market-scrape-correction.service.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { runSelfCheck } from './price-self-check.service.js';
+import {
+  listProfileTargets, createProfileTarget, updateProfileTarget, deleteProfileTarget,
+} from './profile-targets.crud.js';
 
 /**
  * Routes for the Market Intelligence pipeline:
@@ -20,6 +23,11 @@ import { runSelfCheck } from './price-self-check.service.js';
  *   POST   /api/market-scraper/runs/:runId/apply         (write suggestions to RateDailyPrice — B.4)
  *
  *   GET    /api/market-scraper/profiles/:id/observations
+ *
+ *   GET    /api/market-scraper/profiles/:id/targets      per-brand write targets
+ *   POST   /api/market-scraper/profiles/:id/targets
+ *   PATCH  /api/market-scraper/targets/:targetId
+ *   DELETE /api/market-scraper/targets/:targetId
  *
  *   GET    /api/market-scraper/self-check?locationCode=&days=
  *          Are we publishing what the strategy said? Two axes per cell: vs the
@@ -174,5 +182,34 @@ marketScraperRouter.get('/self-check', async (req, res, next) => {
       tolerance: req.query.tolerance,
       minSample: req.query.minSample,
     }));
+  } catch (e) { handle(e, res, next); }
+});
+
+// ----- Per-brand write targets --------------------------------------------
+//
+// One scrape can feed several brands, each writing its own Rate (2026-09-09).
+// A profile with no rows here keeps using its own targetRateId, so these routes
+// are additive: not calling them leaves every profile exactly as it was.
+marketScraperRouter.get('/profiles/:id/targets', async (req, res, next) => {
+  try {
+    res.json(await listProfileTargets(req.params.id, { scope: scopeFor(req) }));
+  } catch (e) { handle(e, res, next); }
+});
+
+marketScraperRouter.post('/profiles/:id/targets', async (req, res, next) => {
+  try {
+    res.status(201).json(await createProfileTarget(req.params.id, req.body, { scope: scopeFor(req) }));
+  } catch (e) { handle(e, res, next); }
+});
+
+marketScraperRouter.patch('/targets/:targetId', async (req, res, next) => {
+  try {
+    res.json(await updateProfileTarget(req.params.targetId, req.body, { scope: scopeFor(req) }));
+  } catch (e) { handle(e, res, next); }
+});
+
+marketScraperRouter.delete('/targets/:targetId', async (req, res, next) => {
+  try {
+    res.json(await deleteProfileTarget(req.params.targetId, { scope: scopeFor(req) }));
   } catch (e) { handle(e, res, next); }
 });

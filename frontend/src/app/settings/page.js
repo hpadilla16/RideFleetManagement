@@ -37,6 +37,7 @@ import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPan
 import { AdvantageEmailPanel } from '../../components/settings/AdvantageEmailPanel';
 import PriceSourcePanel from '../../components/settings/PriceSourcePanel';
 import PriceSelfCheckPanel from '../../components/settings/PriceSelfCheckPanel';
+import MarketTargetsPanel from '../../components/settings/MarketTargetsPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
 import { SelfReturnQrSettings } from '../../components/settings/SelfReturnQrSettings';
@@ -6916,6 +6917,13 @@ function SettingsInner({ token, me, logout }) {
                 <button type="button" onClick={savePricingConfig}>Save location config</button>
               </div>
             </section>
+            <MarketTargetsPanel
+              token={token}
+              me={me}
+              isSuper={isSuper}
+              isAdmin={isAdmin}
+              onPageMsg={setMsg}
+            />
             <PriceSelfCheckPanel
               token={token}
               me={me}
