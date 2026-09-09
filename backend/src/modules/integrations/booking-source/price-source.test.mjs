@@ -278,3 +278,82 @@ test('rebaser: an unsolvable value passes through rather than disappearing', asy
   assert.equal(f(null), null, 'a class with no price stays a class with no price');
   assert.equal(f(0), 0, 'zero cannot be re-solved, and dropping it would unpublish the class');
 });
+
+// ---------------------------------------------------------------------------
+// findPricingConfigForLocation (2026-09-09).
+//
+// MarketPricingConfig.locationCode is the AIRPORT code, not the sede code. For
+// most sedes they are equal (IRC's sede at SJU is "SJU"), which is why keying
+// on Location.code passed every test and still failed at LAX, where the sede is
+// LAXA01 and the airport is LAX. It failed SILENTLY, because this path fails
+// soft — the rebase would simply never have happened at the one sede it was
+// built for.
+// ---------------------------------------------------------------------------
+const { findPricingConfigForLocation } = await import('./price-source.js');
+
+function cfgDb({ code, rows = [] }) {
+  const byKey = new Map(rows.map((r) => [String(r.locationCode).toUpperCase(), r]));
+  return {
+    location: { findUnique: async () => (code ? { code } : null) },
+    marketPricingConfig: {
+      findUnique: async ({ where }) => byKey.get(where.tenantId_locationCode.locationCode) || null,
+      findMany: async () => rows,
+    },
+  };
+}
+const LAXCFG = { locationCode: 'LAX', connectionType: 'TITANIUM', taxes: [{ pct: 9.75 }], brokeragePct: 46.43 };
+const SJUCFG = { locationCode: 'SJU', connectionType: 'TITANIUM', taxes: [{ pct: 11.5 }], brokeragePct: 20.1 };
+
+test('config: the sede code IS the airport code — the common case still wins directly', async () => {
+  const got = await findPricingConfigForLocation(cfgDb({ code: 'SJU', rows: [SJUCFG, LAXCFG] }), 't1', 'l1');
+  assert.equal(got.locationCode, 'SJU');
+});
+
+test('config: LAXA01 resolves to the LAX airport row', async () => {
+  const got = await findPricingConfigForLocation(cfgDb({ code: 'LAXA01', rows: [SJUCFG, LAXCFG] }), 't1', 'l1');
+  assert.equal(got.locationCode, 'LAX', 'the sede LAXA01 sells at the airport LAX');
+});
+
+test('config: matching is case- and space-insensitive on the sede code', async () => {
+  const got = await findPricingConfigForLocation(cfgDb({ code: ' laxa01 ', rows: [LAXCFG] }), 't1', 'l1');
+  assert.equal(got.locationCode, 'LAX');
+});
+
+test('config: REFUSES when two airport codes both prefix the sede code', async () => {
+  // Contrived, but the rule has to be stated: converting a price through the
+  // wrong airport's taxes is worse than not converting it at all.
+  const rows = [{ ...LAXCFG, locationCode: 'LAX' }, { ...LAXCFG, locationCode: 'LAXA' }];
+  assert.equal(await findPricingConfigForLocation(cfgDb({ code: 'LAXA01', rows }), 't1', 'l1'), null);
+});
+
+test('config: a short key is never used as a prefix', async () => {
+  const rows = [{ ...LAXCFG, locationCode: 'LA' }];
+  assert.equal(await findPricingConfigForLocation(cfgDb({ code: 'LAXA01', rows }), 't1', 'l1'), null,
+    'a two-letter key would match half the catalog');
+});
+
+test('config: no match, no sede, no client — null, never a throw', async () => {
+  assert.equal(await findPricingConfigForLocation(cfgDb({ code: 'MIA', rows: [SJUCFG] }), 't1', 'l1'), null);
+  assert.equal(await findPricingConfigForLocation(cfgDb({ code: null, rows: [SJUCFG] }), 't1', 'l1'), null);
+  assert.equal(await findPricingConfigForLocation(null, 't1', 'l1'), null);
+  assert.equal(await findPricingConfigForLocation({}, 't1', 'l1'), null);
+  assert.equal(await findPricingConfigForLocation(cfgDb({ code: 'MIA' }), null, 'l1'), null);
+});
+
+test('config: a client WITHOUT findMany fails soft instead of throwing', async () => {
+  // The trap that has bitten this codebase before: calling an absent delegate
+  // method throws a TypeError synchronously, which `.catch` never sees.
+  const db = {
+    location: { findUnique: async () => ({ code: 'LAXA01' }) },
+    marketPricingConfig: { findUnique: async () => null },
+  };
+  assert.equal(await findPricingConfigForLocation(db, 't1', 'l1'), null);
+});
+
+test('rebaser: LAX (sede LAXA01) now actually re-solves through the LAX config', async () => {
+  const f = await makeConnectionRebaser(
+    cfgDb({ code: 'LAXA01', rows: [LAXCFG] }),
+    { tenantId: 't1', locationId: 'l1', connectionType: 'AMADEUS' },
+  );
+  assert.notEqual(f(40), 40, 'before this fix the config was unreachable and 40 came back unchanged');
+});

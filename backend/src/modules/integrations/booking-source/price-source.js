@@ -146,6 +146,61 @@ export async function loadDailyOverrides(db, { pairs = [], from, to, priceSource
 }
 
 /**
+ * The MarketPricingConfig governing a SEDE — which is not simply the sede's own
+ * code (2026-09-09).
+ *
+ * `MarketPricingConfig.locationCode` is the AIRPORT code ("SJU", "MCO" per the
+ * schema); it is what MarketScrapeProfile.locationCode carries and what the
+ * whole market-scraper path keys on. For most sedes the two happen to be equal
+ * — IRC's sede at SJU is literally "SJU" — so keying on Location.code looked
+ * right and passed every test.
+ *
+ * LAX is where they diverge: the sede is `LAXA01`, the airport is `LAX`, and
+ * looking up `LAXA01` finds nothing. Silently, because this path fails soft —
+ * so the rebase would simply never happen at the one sede it was built for.
+ *
+ * Resolution order:
+ *   1. the sede's own code, exactly      (SJU, FLL, MIA — the common case)
+ *   2. failing that, the tenant's OWN configured airport codes, matched as a
+ *      prefix of the sede code (LAXA01 -> LAX)
+ *
+ * Step 2 asks the tenant's real configuration which airport codes exist instead
+ * of guessing at the shape of a sede code, and REFUSES when more than one
+ * matches: converting a price through the wrong airport's taxes is worse than
+ * not converting it.
+ */
+export async function findPricingConfigForLocation(db, tenantId, locationId) {
+  if (!db?.location?.findUnique || !db?.marketPricingConfig || !tenantId || !locationId) return null;
+
+  const loc = await db.location.findUnique({
+    where: { id: locationId }, select: { code: true },
+  }).catch(() => null);
+  const code = String(loc?.code || '').trim().toUpperCase();
+  if (!code) return null;
+
+  const select = { connectionType: true, taxes: true, brokeragePct: true, locationCode: true };
+
+  // Guard on the METHOD, not just the delegate: calling an absent one throws a
+  // TypeError synchronously, which `.catch` never sees, and would take the
+  // whole writeback down instead of failing soft the way this path promises.
+  const exact = typeof db.marketPricingConfig.findUnique === 'function'
+    ? await db.marketPricingConfig.findUnique({
+      where: { tenantId_locationCode: { tenantId, locationCode: code } }, select,
+    }).catch(() => null)
+    : null;
+  if (exact) return exact;
+
+  if (typeof db.marketPricingConfig.findMany !== 'function') return null;
+  const all = await db.marketPricingConfig.findMany({ where: { tenantId }, select }).catch(() => []);
+  const hits = (all || []).filter((c) => {
+    const key = String(c?.locationCode || '').trim().toUpperCase();
+    // A 1-2 character key would match far too much to be a safe prefix.
+    return key.length >= 3 && key !== code && code.startsWith(key);
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
  * A function that converts a maintained base rate into the base THIS
  * integration should publish (2026-09-08).
  *
@@ -169,15 +224,7 @@ export async function makeConnectionRebaser(db, { tenantId, locationId, connecti
   const want = normalizeConnectionType(connectionType);
   if (!want || !db?.location?.findUnique || !tenantId || !locationId) return identity;
 
-  const loc = await db.location.findUnique({
-    where: { id: locationId }, select: { code: true },
-  }).catch(() => null);
-  if (!loc?.code) return identity;
-
-  const cfg = await db.marketPricingConfig.findUnique({
-    where: { tenantId_locationCode: { tenantId, locationCode: loc.code } },
-    select: { connectionType: true, taxes: true, brokeragePct: true },
-  }).catch(() => null);
+  const cfg = await findPricingConfigForLocation(db, tenantId, locationId);
   if (!cfg) return identity;
 
   const from = normalizeConnectionType(cfg.connectionType) || 'TITANIUM';
