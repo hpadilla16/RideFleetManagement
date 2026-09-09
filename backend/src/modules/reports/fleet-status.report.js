@@ -43,6 +43,33 @@ const ACTIVE_RESERVATION_STATUSES = ['CHECKED_OUT'];
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
+/**
+ * Registration expiry, as something you can act on (2026-09-09, Hector).
+ *
+ * A bare date is a column nobody reads. What a fleet manager needs off this
+ * report is which plates are ALREADY illegal to rent and which are about to
+ * be, so the date comes with a state and a day count.
+ *
+ * Compared on whole days in the tenant's timezone, not on the raw instant: a
+ * registration that expires today is expired for the whole of today, and
+ * comparing timestamps would call it valid until the exact hour it was issued.
+ */
+const REGISTRATION_SOON_DAYS = 30;
+
+function registrationState(expiresAt, asOf, tz = DEFAULT_TENANT_TIMEZONE) {
+  if (!expiresAt) return { state: 'UNKNOWN', label: 'Not recorded', days: null, iso: null };
+  const exp = new Date(expiresAt);
+  if (Number.isNaN(exp.getTime())) return { state: 'UNKNOWN', label: 'Not recorded', days: null, iso: null };
+  const expDay = startOfDayInTz(exp, tz);
+  const today = startOfDayInTz(asOf, tz);
+  const days = Math.round((expDay.getTime() - today.getTime()) / 86400000);
+  const iso = exp.toISOString().slice(0, 10);
+  if (days < 0) return { state: 'EXPIRED', label: `Expired ${Math.abs(days)}d ago`, days, iso };
+  if (days === 0) return { state: 'EXPIRED', label: 'Expires today', days, iso };
+  if (days <= REGISTRATION_SOON_DAYS) return { state: 'SOON', label: `${days}d left`, days, iso };
+  return { state: 'OK', label: iso, days, iso };
+}
+
 // 2026-05-26: tz-aware helpers — asOfLabel was rendering server-local time.
 function startOfDay(d, tz = DEFAULT_TENANT_TIMEZONE) { return startOfDayInTz(d, tz); }
 function isoDay(d) { return d.toISOString().slice(0, 10); }
@@ -81,7 +108,7 @@ function buildVehicleWhere({ tenantId, locationId, status }) {
  * Project a prisma-shaped vehicle row into the wire-format used by the page
  * and Excel/PDF renderers.
  */
-function projectVehicle(v) {
+function projectVehicle(v, asOf = new Date(), tz = DEFAULT_TENANT_TIMEZONE) {
   const reservation = v.reservations?.[0] || null;
   const ret = reservation?.returnAt ? new Date(reservation.returnAt) : null;
   // 2026-05-28: derive the displayed status from active reservations,
@@ -108,6 +135,7 @@ function projectVehicle(v) {
     mileage: num(v.mileage),
     status: effective,
     statusLabel: STATUS_LABEL[effective] || effective,
+    registration: registrationState(v.registrationExpiresAt, asOf, tz),
     vehicleType: v.vehicleType
       ? { id: v.vehicleType.id, code: v.vehicleType.code || null, name: v.vehicleType.name || null }
       : null,
@@ -157,6 +185,7 @@ async function computeData({ tenantId, query }, deps = {}) {
       color: true,
       mileage: true,
       status: true,
+      registrationExpiresAt: true,
       vehicleType: { select: { id: true, code: true, name: true } },
       homeLocation: { select: { id: true, name: true } },
       reservations: {
@@ -229,7 +258,23 @@ async function computeData({ tenantId, query }, deps = {}) {
   totals.availablePct = totals.capacity > 0 ? totals.AVAILABLE / totals.capacity : 0;
   totals.onRentPct    = totals.capacity > 0 ? totals.ON_RENT / totals.capacity : 0;
 
-  const projected = vehicles.map(projectVehicle);
+  // Bound explicitly: `.map(projectVehicle)` would hand the INDEX in as asOf
+  // and the array as the timezone.
+  const projected = vehicles.map((v) => projectVehicle(v, asOf, tenantTz));
+
+  // Registration is a fleet-wide fact, so it is counted over the WHOLE fleet
+  // rather than the filtered list — an expired plate does not stop being
+  // expired because someone filtered to "Available".
+  totals.registrationExpired = 0;
+  totals.registrationExpiringSoon = 0;
+  totals.registrationUnknown = 0;
+  for (const v of wholeFleet) {
+    if (v.status === 'SOLD') continue; // sold cars are not ours to register
+    const r = registrationState(v.registrationExpiresAt, asOf, tenantTz);
+    if (r.state === 'EXPIRED') totals.registrationExpired += 1;
+    else if (r.state === 'SOON') totals.registrationExpiringSoon += 1;
+    else if (r.state === 'UNKNOWN') totals.registrationUnknown += 1;
+  }
 
   return {
     asOf: asOf.toISOString(),
@@ -276,6 +321,7 @@ function renderHtml(data) {
       <th class="num">Mileage</th>
       <th style="text-align:left">Location</th>
       <th style="text-align:left">Status</th>
+      <th style="text-align:left">Registration</th>
       <th style="text-align:left">Current customer</th>
     </tr></thead><tbody>`;
   for (const v of vehicles) {
@@ -290,6 +336,7 @@ function renderHtml(data) {
       <td class="num">${v.mileage > 0 ? v.mileage.toLocaleString() : '—'}</td>
       <td>${escapeHtml(v.homeLocation?.name || '—')}</td>
       <td>${escapeHtml(v.statusLabel)}</td>
+      <td${v.registration?.state === 'EXPIRED' ? ' style="color:#991b1b;font-weight:600"' : (v.registration?.state === 'SOON' ? ' style="color:#92400e"' : '')}>${escapeHtml(v.registration?.label || '—')}</td>
       <td>${customer}</td>
     </tr>`;
   }
@@ -328,6 +375,8 @@ function buildExcelSpec(data) {
         { header: 'Mileage',        key: 'mileage',       width: 12, type: 'integer' },
         { header: 'Location',       key: 'location',      width: 18 },
         { header: 'Status',         key: 'status',        width: 14 },
+        { header: 'Registration',   key: 'registration',  width: 14 },
+        { header: 'Reg. status',    key: 'registrationState', width: 16 },
         { header: 'Customer',       key: 'customer',      width: 22 },
         { header: 'Return',         key: 'returnLabel',   width: 22 },
         { header: 'Reservation',    key: 'reservation',   width: 14 },
@@ -343,6 +392,8 @@ function buildExcelSpec(data) {
         mileage: v.mileage,
         location: v.homeLocation?.name || '',
         status: v.statusLabel,
+        registration: v.registration?.iso || '',
+        registrationState: v.registration?.label || '',
         customer: v.currentReservation?.customerName || '',
         returnLabel: v.currentReservation?.returnLabel || '',
         reservation: v.currentReservation?.reservationNumber || '',
@@ -366,6 +417,8 @@ registerReport({
 export const _fleetStatusInternal = {
   computeData,
   projectVehicle,
+  registrationState,
+  REGISTRATION_SOON_DAYS,
   VEHICLE_STATUSES,
   STATUS_LABEL,
   ACTIVE_RESERVATION_STATUSES,
