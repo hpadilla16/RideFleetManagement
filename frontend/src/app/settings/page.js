@@ -37,6 +37,7 @@ import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPan
 import { AdvantageEmailPanel } from '../../components/settings/AdvantageEmailPanel';
 import PriceSourcePanel from '../../components/settings/PriceSourcePanel';
 import PriceSelfCheckPanel from '../../components/settings/PriceSelfCheckPanel';
+import ContractPreviewPanel from '../../components/settings/ContractPreviewPanel';
 import MarketTargetsPanel from '../../components/settings/MarketTargetsPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
@@ -3589,6 +3590,13 @@ function SettingsInner({ token, me, logout }) {
                 </div>
               </div>
             </div>
+            <ContractPreviewPanel
+              token={token}
+              me={me}
+              isSuper={isSuper}
+              isAdmin={isAdmin}
+              scopedSettingsPath={scopedSettingsPath}
+            />
           </div>
         )}
 

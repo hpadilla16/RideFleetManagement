@@ -3,6 +3,7 @@ import { settingsService } from './settings.service.js';
 import { franchiseService } from './franchise.service.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
+import { previewTerms, listTermsCoverage } from './terms-preview.service.js';
 
 import { prisma } from '../../lib/prisma.js';
 import {
@@ -118,6 +119,28 @@ settingsRouter.get('/market-pricing-config', requireRole('ADMIN'), async (req, r
   try {
     res.json(await settingsService.listMarketPricingConfigs(scopeFor(req)));
   } catch (e) {
+    next(e);
+  }
+});
+
+// ----- Contract preview ---------------------------------------------------
+//
+// See the contract a sede would actually print, unsigned, before anybody rents
+// (2026-09-09). It asks the REAL resolver for the document and reports which
+// layer of the cascade won — a branch with no override and a branch whose
+// lookup failed render byte-identical HTML, so the document alone cannot tell
+// you whether the text you saved is the text that prints.
+settingsRouter.get('/terms-coverage', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await listTermsCoverage(scopeFor(req)));
+  } catch (e) { next(e); }
+});
+
+settingsRouter.get('/terms-preview', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await previewTerms(scopeFor(req), { locationId: req.query.locationId || null }));
+  } catch (e) {
+    if (e?.httpStatus) return res.status(e.httpStatus).json({ error: e.message });
     next(e);
   }
 });
