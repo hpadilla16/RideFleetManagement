@@ -36,6 +36,16 @@ const STATUS_PILL = {
   OUT_OF_SERVICE: { cls: 'chip chip--danger',  label: 'Out of service' },
 };
 
+// Registration expiry chips. Sorted by URGENCY rather than by date, because
+// the question this column answers is "what can I not rent today", and a plate
+// with no date recorded is not the same as one that is fine (2026-09-09).
+const REG_PILL = {
+  EXPIRED: { cls: 'chip chip--danger',  rank: 0 },
+  SOON:    { cls: 'chip chip--warn',    rank: 1 },
+  OK:      { cls: 'chip chip--ok',      rank: 2 },
+  UNKNOWN: { cls: 'chip chip--neutral', rank: 3 },
+};
+
 // Sort order used when sorting by `status` column — urgency-first.
 const STATUS_RANK = {
   ON_RENT: 0,
@@ -52,6 +62,8 @@ const COLUMNS = [
   { key: 'mileage',  label: 'Mileage',   align: 'right', accessor: (v) => v.mileage || 0,  numeric: true },
   { key: 'location', label: 'Location',  align: 'left',  accessor: (v) => v.homeLocation?.name || '' },
   { key: 'status',   label: 'Status',    align: 'left',  accessor: (v) => STATUS_RANK[v.status] ?? 99, custom: true },
+  { key: 'registration', label: 'Registration', align: 'left', custom: true,
+    accessor: (v) => REG_PILL[v.registration?.state]?.rank ?? 9 },
   { key: 'customer', label: 'Current customer', align: 'left',
     accessor: (v) => v.currentReservation?.customerName || '￿' /* sort no-customer last */ },
 ];
@@ -260,6 +272,12 @@ function ReportBody({ data, visibleVehicles, sort, onSort, searchActive, statusF
           hint={`${totals.IN_MAINTENANCE} maint. · ${totals.OUT_OF_SERVICE} OOS`}
           accent={totals.outOfServiceTotal > 0 ? 'warn' : undefined}
         />
+        <Card
+          label="Registration"
+          value={String(totals.registrationExpired ?? 0)}
+          hint={`expired · ${totals.registrationExpiringSoon ?? 0} within 30d · ${totals.registrationUnknown ?? 0} not recorded`}
+          accent={(totals.registrationExpired ?? 0) > 0 ? 'danger' : ((totals.registrationExpiringSoon ?? 0) > 0 ? 'warn' : undefined)}
+        />
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '.05em', marginBottom: 6 }}>
@@ -291,6 +309,7 @@ function ReportBody({ data, visibleVehicles, sort, onSort, searchActive, statusF
 
 function Row({ v }) {
   const pill = STATUS_PILL[v.status] || { cls: 'chip chip--neutral', label: v.status };
+  const reg = REG_PILL[v.registration?.state] || REG_PILL.UNKNOWN;
   return (
     <tr>
       <td style={{ fontWeight: 500 }}>
@@ -310,6 +329,11 @@ function Row({ v }) {
       <td style={{ color: 'var(--text-3)' }}>{v.homeLocation?.name || '—'}</td>
       <td>
         <span className={pill.cls}>{pill.label}</span>
+      </td>
+      <td>
+        <span className={reg.cls} title={v.registration?.iso || 'No registration expiry recorded'}>
+          {v.registration?.label || 'Not recorded'}
+        </span>
       </td>
       <td>
         {v.currentReservation ? (
@@ -334,9 +358,12 @@ function Row({ v }) {
 // Flat KPI card on the token layer; `accent` tints the VALUE only — labels
 // and hints never drop below the 5.04:1 state-text floor.
 const CARD_ACCENTS = {
-  ok:    'var(--ok-tx)',
-  warn:  'var(--warn-tx)',
-  brand: 'var(--brand-tx)',
+  ok:     'var(--ok-tx)',
+  warn:   'var(--warn-tx)',
+  brand:  'var(--brand-tx)',
+  // An expired registration is not a warning, it is a car that cannot legally
+  // be rented — same token the danger chip already uses.
+  danger: 'var(--danger-tx)',
 };
 function Card({ label, value, hint, accent }) {
   return (

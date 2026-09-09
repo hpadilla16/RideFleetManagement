@@ -183,3 +183,79 @@ test('registerReport mounts standard routes for fleet-status (no sub-routes)', (
   assert.ok(paths.has('/fleet-status/pdf'),   'pdf route');
   assert.ok(paths.has('/fleet-status/excel'), 'excel route');
 });
+
+// ---------------------------------------------------------------------------
+// Registration expiry (2026-09-09, Hector: "can we add registration
+// expiration date").
+//
+// The date alone is a column nobody reads. What the report has to answer is
+// which plates are already illegal to rent and which are about to be, so the
+// cases that matter are the BOUNDARIES — today, and the edge of the warning
+// window — and they are compared on whole days in the tenant's timezone.
+// ---------------------------------------------------------------------------
+const { registrationState, REGISTRATION_SOON_DAYS } = _fleetStatusInternal;
+
+const AS_OF = new Date('2026-09-09T16:00:00Z');
+const day = (n) => new Date(AS_OF.getTime() + n * 86400000);
+
+test('registration: a date in the past is EXPIRED and says how long ago', () => {
+  const r = registrationState(day(-5), AS_OF, 'UTC');
+  assert.equal(r.state, 'EXPIRED');
+  assert.equal(r.days, -5);
+  assert.match(r.label, /Expired 5d ago/);
+});
+
+test('registration: expiring TODAY is expired, not still valid', () => {
+  // A registration that lapses today is no good for the whole of today;
+  // comparing raw instants would call it valid until the hour it was issued.
+  const r = registrationState(new Date('2026-09-09T23:59:00Z'), AS_OF, 'UTC');
+  assert.equal(r.state, 'EXPIRED');
+  assert.equal(r.days, 0);
+  assert.equal(r.label, 'Expires today');
+});
+
+test('registration: an hour EARLIER the same day is still today, not yesterday', () => {
+  const r = registrationState(new Date('2026-09-09T01:00:00Z'), AS_OF, 'UTC');
+  assert.equal(r.days, 0, 'whole days, not elapsed hours');
+});
+
+test('registration: the warning window is inclusive at its edge', () => {
+  assert.equal(registrationState(day(REGISTRATION_SOON_DAYS), AS_OF, 'UTC').state, 'SOON');
+  assert.equal(registrationState(day(REGISTRATION_SOON_DAYS + 1), AS_OF, 'UTC').state, 'OK');
+  assert.equal(registrationState(day(1), AS_OF, 'UTC').label, '1d left');
+});
+
+test('registration: a far date is OK and shows the plain date', () => {
+  const r = registrationState(new Date('2027-06-30T00:00:00Z'), AS_OF, 'UTC');
+  assert.equal(r.state, 'OK');
+  assert.equal(r.label, '2027-06-30');
+  assert.equal(r.iso, '2027-06-30');
+});
+
+test('registration: MISSING is its own state — never quietly "OK"', () => {
+  // Most of the fleet has no date recorded. Rendering that as valid would be
+  // the report telling somebody a car is legal when nobody has checked.
+  for (const bad of [null, undefined, '', 'not a date', new Date('nope')]) {
+    const r = registrationState(bad, AS_OF, 'UTC');
+    assert.equal(r.state, 'UNKNOWN', `${String(bad)} must not read as OK`);
+    assert.equal(r.label, 'Not recorded');
+    assert.equal(r.days, null);
+  }
+});
+
+test('projectVehicle carries the registration state through', () => {
+  const v = {
+    id: 'v1', internalNumber: '101', plate: 'ABC123', status: 'AVAILABLE',
+    mileage: 100, registrationExpiresAt: day(-1), reservations: [],
+  };
+  const out = projectVehicle(v, AS_OF, 'UTC');
+  assert.equal(out.registration.state, 'EXPIRED');
+});
+
+test('projectVehicle without a registration date does not throw', () => {
+  const out = projectVehicle(
+    { id: 'v1', internalNumber: '1', status: 'AVAILABLE', mileage: 0, reservations: [] },
+    AS_OF, 'UTC',
+  );
+  assert.equal(out.registration.state, 'UNKNOWN');
+});
