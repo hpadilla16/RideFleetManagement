@@ -104,10 +104,19 @@ export default function MarketTargetsPanel({ token, me, isSuper, isAdmin, onPage
     return `${rate.rateCode}${rate.name ? ` · ${rate.name}` : ''}${loc ? ` · ${loc.code}` : ''}`;
   }, [data]);
 
-  const usedFranchises = useMemo(
-    () => new Set((data?.targets || []).map((t) => t.franchiseId ?? '')),
+  // A brand needs one row per RATE, not one in total — LAX keeps a separate
+  // single-class rate per class, so Economy covering its seven classes has
+  // seven rows here. What cannot repeat is the PAIR.
+  const usedPairs = useMemo(
+    () => new Set((data?.targets || []).map((t) => `${t.franchiseId ?? ''}|${t.rateId}`)),
     [data],
   );
+  const takenRatesForDraft = useMemo(() => {
+    const f = draft.franchiseId || '';
+    return new Set((data?.targets || [])
+      .filter((t) => (t.franchiseId ?? '') === f)
+      .map((t) => t.rateId));
+  }, [data, draft.franchiseId]);
 
   const mutate = async (fn, msg) => {
     setBusy(msg);
@@ -289,9 +298,7 @@ export default function MarketTargetsPanel({ token, me, isSuper, isAdmin, onPage
             <select value={draft.franchiseId} onChange={(e) => setDraft({ ...draft, franchiseId: e.target.value })}>
               <option value="">House (everything unbranded)</option>
               {(data?.franchises || []).map((f) => (
-                <option key={f.id} value={f.id} disabled={usedFranchises.has(f.id)}>
-                  {f.name}{usedFranchises.has(f.id) ? ' — already has a row' : ''}
-                </option>
+                <option key={f.id} value={f.id}>{f.name}</option>
               ))}
             </select>
           </label>
@@ -300,7 +307,9 @@ export default function MarketTargetsPanel({ token, me, isSuper, isAdmin, onPage
             <select value={draft.rateId} onChange={(e) => setDraft({ ...draft, rateId: e.target.value })}>
               <option value="">Pick a rate…</option>
               {(data?.rates || []).map((r) => (
-                <option key={r.id} value={r.id}>{rateLabel(r)}</option>
+                <option key={r.id} value={r.id} disabled={takenRatesForDraft.has(r.id)}>
+                  {rateLabel(r)}{takenRatesForDraft.has(r.id) ? ' — this brand already writes it' : ''}
+                </option>
               ))}
             </select>
           </label>
@@ -341,6 +350,8 @@ export default function MarketTargetsPanel({ token, me, isSuper, isAdmin, onPage
         <div className="ui-muted" style={{ fontSize: 12, marginTop: 6 }}>
           Leave a number blank to inherit the profile&apos;s. Blank is not zero — an amount of 0 would
           turn &ldquo;cheapest minus a dollar&rdquo; into &ldquo;match the cheapest&rdquo;.
+          {' '}A brand needs one row per rate: these sedes keep a separate rate per vehicle class, so a
+          brand covering seven classes has seven rows.
         </div>
         <div className="inline-actions" style={{ marginTop: 10, gap: 10, alignItems: 'center' }}>
           <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>

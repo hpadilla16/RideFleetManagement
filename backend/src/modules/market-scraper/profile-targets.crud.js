@@ -159,7 +159,7 @@ export async function createProfileTarget(profileId, body, { scope = {}, prisma:
   const data = normalizeBody(body);
   if (!data.rateId) fail('rateId is required — a target with no rate writes nowhere', 400);
   await assertOwned(db, profile, data);
-  await assertTargetIsUnique(profile.id, data.franchiseId ?? null, { prisma: db });
+  await assertTargetIsUnique(profile.id, data.franchiseId ?? null, data.rateId, { prisma: db });
   return db.marketScrapeProfileTarget.create({
     data: { ...data, profileId: profile.id, franchiseId: data.franchiseId ?? null },
   });
@@ -168,15 +168,19 @@ export async function createProfileTarget(profileId, body, { scope = {}, prisma:
 export async function updateProfileTarget(targetId, body, { scope = {}, prisma: client } = {}) {
   const db = client || defaultPrisma;
   const existing = await db.marketScrapeProfileTarget.findFirst({
-    where: { id: targetId }, select: { id: true, profileId: true, franchiseId: true },
+    where: { id: targetId }, select: { id: true, profileId: true, franchiseId: true, rateId: true },
   });
   if (!existing) fail('Target not found', 404);
   const profile = await loadProfile(db, existing.profileId, scope);
   const data = normalizeBody(body);
   if ('rateId' in data && !data.rateId) fail('rateId cannot be cleared — delete the target instead', 400);
   await assertOwned(db, profile, data);
-  if ('franchiseId' in data && (data.franchiseId ?? null) !== (existing.franchiseId ?? null)) {
-    await assertTargetIsUnique(profile.id, data.franchiseId ?? null, { prisma: db, ignoreId: existing.id });
+  // Re-check whenever EITHER half of the identity moves — changing only the rate
+  // can collide just as easily as changing only the brand.
+  const nextFranchise = 'franchiseId' in data ? (data.franchiseId ?? null) : (existing.franchiseId ?? null);
+  const nextRate = 'rateId' in data ? data.rateId : existing.rateId;
+  if (nextFranchise !== (existing.franchiseId ?? null) || nextRate !== existing.rateId) {
+    await assertTargetIsUnique(profile.id, nextFranchise, nextRate, { prisma: db, ignoreId: existing.id });
   }
   return db.marketScrapeProfileTarget.update({ where: { id: existing.id }, data });
 }

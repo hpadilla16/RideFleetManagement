@@ -155,22 +155,34 @@ test('one brand can write while another is still watched', () => {
 // ---------------------------------------------------------------------------
 // The NULL-uniqueness hole Postgres leaves open
 // ---------------------------------------------------------------------------
-test('a SECOND house target is refused — the unique index cannot catch it', async () => {
-  // Postgres treats NULLs as distinct, so @@unique([profileId, franchiseId])
-  // happily allows two null-franchise rows, and both would claim "everything".
+test('the SAME brand writing the SAME rate twice is refused', async () => {
+  // Postgres treats NULLs as distinct, so the unique index would accept the
+  // same (profile, null, rate) twice and both would claim "everything".
   const withRow = { marketScrapeProfileTarget: { findFirst: async () => ({ id: 'existing' }) } };
-  await assert.rejects(() => assertTargetIsUnique('p1', null, { prisma: withRow }), /house target/);
-  await assert.rejects(() => assertTargetIsUnique('p1', 'f-mex', { prisma: withRow }), /that franchise/);
+  await assert.rejects(() => assertTargetIsUnique('p1', null, 'rate-ccar', { prisma: withRow }), /house target/);
+  await assert.rejects(() => assertTargetIsUnique('p1', 'f-mex', 'rate-ccar', { prisma: withRow }), /already writes to this rate/);
+});
+
+test('ONE BRAND, MANY RATES is allowed — LAX keeps a Rate per class', async () => {
+  // Seven single-class rates at LAX means a brand covering its classes has
+  // seven rows. Keying on (profile, franchise) alone let it price exactly one.
+  const seen = [];
+  const db = { marketScrapeProfileTarget: { findFirst: async ({ where }) => { seen.push(where); return null; } } };
+  await assertTargetIsUnique('p1', 'f-mex', 'rate-ccar', { prisma: db });
+  await assertTargetIsUnique('p1', 'f-mex', 'rate-icar', { prisma: db });
+  assert.deepEqual(seen.map((w) => w.rateId), ['rate-ccar', 'rate-icar']);
+  assert.equal(seen.every((w) => w.profileId === 'p1' && w.franchiseId === 'f-mex'), true);
 });
 
 test('editing the row that already exists is allowed', async () => {
   const withRow = { marketScrapeProfileTarget: { findFirst: async () => ({ id: 'existing' }) } };
-  await assertTargetIsUnique('p1', null, { prisma: withRow, ignoreId: 'existing' });
+  await assertTargetIsUnique('p1', null, 'rate-ccar', { prisma: withRow, ignoreId: 'existing' });
 });
 
-test('no clash, no profile, or no delegate: silent pass', async () => {
+test('no clash, no profile, no rate, or no delegate: silent pass', async () => {
   const empty = { marketScrapeProfileTarget: { findFirst: async () => null } };
-  await assertTargetIsUnique('p1', 'f-mex', { prisma: empty });
-  await assertTargetIsUnique(null, null, { prisma: empty });
-  await assertTargetIsUnique('p1', null, { prisma: {} });
+  await assertTargetIsUnique('p1', 'f-mex', 'rate-ccar', { prisma: empty });
+  await assertTargetIsUnique(null, null, 'rate-ccar', { prisma: empty });
+  await assertTargetIsUnique('p1', null, null, { prisma: empty });
+  await assertTargetIsUnique('p1', null, 'rate-ccar', { prisma: {} });
 });
