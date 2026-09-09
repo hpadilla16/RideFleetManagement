@@ -2907,7 +2907,7 @@
     }
   },
   "checkinWizard": {
-    "selfReturnTitle": "Customer marked the return",
+    "selfReturnTitle": "Customer soft check-in",
     "selfReturnApplied": "Customer marked the return at {{time}} — the late fee is computed up to that hour, not the check-in hour.",
     "selfReturnLater": "Customer marked the return at {{time}} (after the return time of this close — it does not change the fee).",
     "selfReturnVoided": "A customer return mark exists but was voided by an admin — it is not used.",

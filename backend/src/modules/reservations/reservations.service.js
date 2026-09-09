@@ -173,6 +173,16 @@ const reservationListSelect = {
   isPrepaid: true,
   pickupAt: true,
   returnAt: true,
+  // QR self-return stamp (2026-09-09). The whole point of the feature is that
+  // the AGENT closes the check-in hours after the customer handed the car
+  // back, so the moment the customer marked it has to be visible on the
+  // reservation itself — not only inside the check-in wizard, which is the
+  // last screen anyone opens. Hector, after the first live stamp at LAX:
+  // "no veo donde cayo el soft checkin en la reserva".
+  customerReportedReturnAt: true,
+  customerReportedReturnLocationId: true,
+  customerReportedReturnVoidedAt: true,
+  customerReportedReturnVoidReason: true,
   // overdueIgnored: surfaced to the FE so the dashboard's client-side
   // overdue fallback respects the grandfather flag (2026-05-27). The
   // dashboard tile is the canonical consumer; UI list views also use
