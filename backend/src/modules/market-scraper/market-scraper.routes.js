@@ -3,6 +3,7 @@ import { marketScrapeProfileService } from './market-scrape-profile.service.js';
 import { computeRunComparison, buildRunComparisonWorkbook } from './market-scrape-comparison.service.js';
 import { applyRunSuggestions } from './market-scrape-correction.service.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
+import { runSelfCheck } from './price-self-check.service.js';
 
 /**
  * Routes for the Market Intelligence pipeline:
@@ -19,6 +20,11 @@ import { scopeFor } from '../../lib/tenant-scope.js';
  *   POST   /api/market-scraper/runs/:runId/apply         (write suggestions to RateDailyPrice — B.4)
  *
  *   GET    /api/market-scraper/profiles/:id/observations
+ *
+ *   GET    /api/market-scraper/self-check?locationCode=&days=
+ *          Are we publishing what the strategy said? Two axes per cell: vs the
+ *          TARGET (leaving money / priced out) and vs the CHEAPEST COMPETITOR
+ *          (undercut). Read-only — it reports, it never writes a price.
  *
  * All routes are tenant-scoped via scopeFor(req). Auth + role middleware is
  * mounted in main.js. Errors thrown by the service with `httpStatus` get
@@ -151,5 +157,22 @@ marketScraperRouter.get('/profiles/:id/observations', async (req, res, next) => 
       limit: limit ? Number(limit) : 500
     });
     res.json(out);
+  } catch (e) { handle(e, res, next); }
+});
+
+// ----- Self-check ---------------------------------------------------------
+//
+// "quiero un mostrador que ensena estos correciones cuando sucedan" (Hector,
+// 2026-09-09). Computed on demand from RateOffer rather than persisted: the
+// answer is only ever as good as the last scrape, and a stored copy would go
+// stale silently while looking authoritative.
+marketScraperRouter.get('/self-check', async (req, res, next) => {
+  try {
+    res.json(await runSelfCheck(scopeFor(req), {
+      locationCode: req.query.locationCode,
+      days: req.query.days,
+      tolerance: req.query.tolerance,
+      minSample: req.query.minSample,
+    }));
   } catch (e) { handle(e, res, next); }
 });
