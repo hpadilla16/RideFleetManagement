@@ -31,6 +31,7 @@
 
 import { prisma as defaultPrisma } from '../../lib/prisma.js';
 import { getEffectiveTermsHtml, INITIALS_KEYS } from '../../lib/terms/index.js';
+import { sanitizeContractHtml, describeSanitizerImpact } from '../../lib/terms/sanitize-contract.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 
 export const TERMS_SOURCES = Object.freeze({
@@ -151,5 +152,102 @@ export async function listTermsCoverage(scope = {}, opts = {}) {
         ? TERMS_SOURCES.LOCATION
         : (tenantHasBase ? TERMS_SOURCES.TENANT : TERMS_SOURCES.CANONICAL),
     })),
+  };
+}
+
+/**
+ * Save (or clear) one branch's own contract.
+ *
+ * Until 2026-09-09 nothing in the application could write these columns — the
+ * location list omits them and no route touched them — so LAX's terms had been
+ * seeded straight into the database and four other Corpusa branches silently
+ * fell through to the canonical Puerto Rico document. This is the write path
+ * that makes "terms per branch" something an operator can actually do.
+ *
+ * SANITIZED ON WRITE, because the readers do not sanitize: the signing page
+ * renders these straight into the customer's browser. See
+ * lib/terms/sanitize-contract.js for why the partnerships allowlist could not
+ * be reused.
+ *
+ * CLEARING IS A REAL OPERATION. An empty string stores NULL, which sends the
+ * branch back to the tenant (or the canonical document) on purpose. It is not
+ * the same as "no change", so the caller must pass the field to clear it.
+ */
+export async function saveBranchTerms(scope = {}, opts = {}) {
+  const db = opts.prisma || defaultPrisma;
+  const tenantId = scope?.tenantId;
+  const locationId = opts.locationId ? String(opts.locationId) : null;
+  if (!tenantId || !locationId) {
+    const e = new Error('tenantId and locationId are required');
+    e.httpStatus = 400;
+    throw e;
+  }
+
+  const location = await db.location.findFirst({
+    where: { id: locationId, tenantId },
+    select: { id: true, code: true, termsHtml: true, termsRiderHtml: true },
+  });
+  if (!location) {
+    const e = new Error('Location not found for this tenant');
+    e.httpStatus = 404;
+    throw e;
+  }
+
+  const data = {};
+  const impact = {};
+  for (const [field, incoming] of [['termsHtml', opts.termsHtml], ['termsRiderHtml', opts.termsRiderHtml]]) {
+    if (incoming === undefined) continue;          // absent = leave alone
+    impact[field] = describeSanitizerImpact(incoming);
+    const clean = sanitizeContractHtml(incoming);
+    data[field] = clean || null;                    // '' clears it deliberately
+  }
+  if (!Object.keys(data).length) {
+    const e = new Error('Nothing to save — pass termsHtml and/or termsRiderHtml');
+    e.httpStatus = 400;
+    throw e;
+  }
+
+  await db.location.update({ where: { id: location.id }, data });
+
+  return {
+    ok: true,
+    locationCode: location.code,
+    saved: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v ? v.length : 0])),
+    cleared: Object.entries(data).filter(([, v]) => v === null).map(([k]) => k),
+    impact,
+  };
+}
+
+/**
+ * A branch's OWN stored terms, raw, for the editor.
+ *
+ * Deliberately NOT the cascade output. Loading the rendered contract into the
+ * edit box and saving it would promote a fallback into a branch override: a
+ * branch that was correctly inheriting would silently acquire a frozen copy of
+ * the tenant's document, and would then stop following later tenant edits.
+ */
+export async function getBranchTermsRaw(scope = {}, opts = {}) {
+  const db = opts.prisma || defaultPrisma;
+  const tenantId = scope?.tenantId;
+  const locationId = opts.locationId ? String(opts.locationId) : null;
+  if (!tenantId || !locationId) {
+    const e = new Error('tenantId and locationId are required');
+    e.httpStatus = 400;
+    throw e;
+  }
+  const location = await db.location.findFirst({
+    where: { id: locationId, tenantId },
+    select: { id: true, code: true, termsHtml: true, termsRiderHtml: true },
+  });
+  if (!location) {
+    const e = new Error('Location not found for this tenant');
+    e.httpStatus = 404;
+    throw e;
+  }
+  return {
+    locationId: location.id,
+    locationCode: location.code,
+    termsHtml: location.termsHtml || '',
+    termsRiderHtml: location.termsRiderHtml || '',
   };
 }
