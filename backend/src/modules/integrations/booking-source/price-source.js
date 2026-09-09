@@ -33,6 +33,17 @@ export const MARKET_AUTHOR = 'MARKET_A';
 
 export const PRICE_SOURCES = Object.freeze({ MANUAL: 'MANUAL', MARKET: 'MARKET' });
 
+/**
+ * The GDS-style connection an integration sells on, or null to inherit the
+ * sede's. Never guesses: an unrecognised value reads as "not declared" rather
+ * than as one of the two, because picking one would re-solve real prices under
+ * a formula nobody chose.
+ */
+export function normalizeConnectionType(value) {
+  const v = String(value || '').trim().toUpperCase();
+  return v === 'TITANIUM' || v === 'AMADEUS' ? v : null;
+}
+
 /** Unknown / absent → MANUAL. Never throws: this decides a money write. */
 export function normalizePriceSource(value) {
   const raw = String(value || '').trim().toUpperCase();
@@ -57,7 +68,10 @@ export function normalizePriceSource(value) {
  * permission (OFF beats an enabled sede), never grant it.
  */
 export async function resolvePricePolicy(db, { tenantId, locationId, provider } = {}) {
-  const closed = { ratePushEnabled: false, priceSource: PRICE_SOURCES.MANUAL, explicit: false };
+  const closed = {
+    ratePushEnabled: false, priceSource: PRICE_SOURCES.MANUAL,
+    connectionType: null, explicit: false,
+  };
   if (!db?.integrationPricePolicy?.findUnique || !tenantId || !locationId || !provider) return closed;
   const row = await db.integrationPricePolicy.findUnique({
     where: {
@@ -67,12 +81,16 @@ export async function resolvePricePolicy(db, { tenantId, locationId, provider } 
         provider: String(provider).toUpperCase(),
       },
     },
-    select: { priceSource: true, ratePushEnabled: true },
+    select: { priceSource: true, ratePushEnabled: true, connectionType: true },
   }).catch(() => null);
   if (!row) return closed;
   return {
     ratePushEnabled: row.ratePushEnabled === true,
     priceSource: normalizePriceSource(row.priceSource),
+    // NULL means "inherit the sede", and null is what the caller must see —
+    // substituting a default here would silently claim an integration declared
+    // a connection it never did.
+    connectionType: normalizeConnectionType(row.connectionType),
     explicit: true,
   };
 }
@@ -125,6 +143,60 @@ export async function loadDailyOverrides(db, { pairs = [], from, to, priceSource
     out.get(key).set(new Date(row.date).toISOString().slice(0, 10), Math.round((daily + Number.EPSILON) * 100) / 100);
   }
   return out;
+}
+
+/**
+ * A function that converts a maintained base rate into the base THIS
+ * integration should publish (2026-09-08).
+ *
+ * Market Intelligence keeps one base per class, back-solved under the sede's
+ * single connection type. Titanium compounds tax and brokerage while Amadeus
+ * adds them, so that one number reaches two different customer-facing prices.
+ * An integration that declares its own connection gets its base re-solved so
+ * the SHELF PRICE lands where the strategy aimed, instead of the base merely
+ * matching.
+ *
+ * Returns the identity function whenever nothing should change — no declared
+ * connection, same connection as the sede, or no pricing config to convert
+ * through. That is the common case and it must cost nothing and alter nothing.
+ *
+ * Best-effort: a config that cannot be read leaves prices exactly as they are.
+ * Publishing an unconverted base is a positioning error; publishing a number
+ * derived from a config we failed to load would be a fabrication.
+ */
+export async function makeConnectionRebaser(db, { tenantId, locationId, connectionType } = {}) {
+  const identity = (v) => v;
+  const want = normalizeConnectionType(connectionType);
+  if (!want || !db?.location?.findUnique || !tenantId || !locationId) return identity;
+
+  const loc = await db.location.findUnique({
+    where: { id: locationId }, select: { code: true },
+  }).catch(() => null);
+  if (!loc?.code) return identity;
+
+  const cfg = await db.marketPricingConfig.findUnique({
+    where: { tenantId_locationCode: { tenantId, locationCode: loc.code } },
+    select: { connectionType: true, taxes: true, brokeragePct: true },
+  }).catch(() => null);
+  if (!cfg) return identity;
+
+  const from = normalizeConnectionType(cfg.connectionType) || 'TITANIUM';
+  if (from === want) return identity;
+
+  const priced = {
+    connectionType: from,
+    taxes: Array.isArray(cfg.taxes) ? cfg.taxes : [],
+    brokeragePct: Number(cfg.brokeragePct) || 0,
+  };
+
+  const { rebaseForConnection } = await import('../../market-scraper/pricing-grossup.js');
+  return (value) => {
+    const out = rebaseForConnection(value, priced, want);
+    // A value we could not re-solve is passed through unchanged rather than
+    // dropped: an unconverted price is wrong by a margin, a missing one is a
+    // class that silently stops being published.
+    return out == null ? value : out;
+  };
 }
 
 /** Pure: the effective daily for a pair on a date — override wins, base backs it. */

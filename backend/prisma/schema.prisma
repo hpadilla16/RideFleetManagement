@@ -5394,6 +5394,24 @@ model IntegrationPricePolicy {
   // not touch anyone's prices until somebody says so.
   ratePushEnabled Boolean @default(false)
 
+  // Which GDS-style connection THIS integration sells on (2026-09-08, Hector:
+  // "para una cuenta que tiene multiples integraciones y no todas son las
+  // mismas, deberian poder configurarlo por sedes y por integracion").
+  //
+  // 'TITANIUM' | 'AMADEUS'. NULL = inherit the sede's MarketPricingConfig, which
+  // is what every row does today and is why this is additive: nothing changes
+  // until somebody says an integration differs from its sede.
+  //
+  // WHY IT MATTERS. Market Intelligence maintains ONE base per class,
+  // back-solved under the sede's single connection type, and every writeback
+  // pushes that same number. The two connections compose the customer-facing
+  // price differently — Titanium compounds tax and brokerage, Amadeus adds them
+  // — so one base lands at two different shelf prices. Where a sede runs one
+  // integration on each, only one of them sits where the pricing strategy
+  // aimed. With this set, the writeback re-solves the base for its own
+  // connection so BOTH land on the intended all-in.
+  connectionType  String?
+
   updatedByUserId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

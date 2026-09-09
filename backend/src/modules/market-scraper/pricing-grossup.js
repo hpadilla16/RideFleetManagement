@@ -96,4 +96,46 @@ export function baseFromCustomerAllIn(targetAllIn, config = {}) {
   return round2(net / f);
 }
 
+/**
+ * Re-solve a base rate for a DIFFERENT connection type at the same location.
+ *
+ * Hector, 2026-09-08: "market intelligence hace precios dependiendo si es
+ * amadeus o titanium, pero para una cuenta que tiene multiples integraciones y
+ * no todas son las mismas, deberian poder configurarlo por sedes y por
+ * integracion".
+ *
+ * The engine maintains ONE base per class, back-solved under the location's
+ * single connectionType, and every writeback then pushes that same number to
+ * every integration. When two integrations at one sede sit on different
+ * connections that is wrong for one of them: the customer-facing all-in is
+ * composed differently, so the same base lands at a different shelf price and
+ * only one of the two is positioned where the strategy intended.
+ *
+ * The connection-independent quantity is the ALL-IN — what the customer sees.
+ * So: reconstruct it from the stored base under the type it was solved for,
+ * then back-solve again under the target type.
+ *
+ *   all_in   = base_from × factor_from + flat
+ *   base_to  = (all_in − flat) / factor_to
+ *            = base_from × factor_from / factor_to
+ *
+ * The flat per-day fees CANCEL, and that is not a shortcut — they are the
+ * location's own licence and facility charges, identical on both connections.
+ * Only the shape of the tax/brokerage composition differs, which is exactly the
+ * factor. Written the long way anyway, through the two existing functions, so
+ * this cannot drift from the forward math it has to agree with.
+ *
+ * Returns the input unchanged when the two types are the same, and null when
+ * either side cannot be solved — never a guess.
+ */
+export function rebaseForConnection(base, config = {}, toConnectionType) {
+  const to = String(toConnectionType || '').toUpperCase();
+  if (!CONNECTION_TYPES.includes(to)) return null;
+  if (connType(config) === to) return base == null ? null : round2(Number(base));
+
+  const allIn = customerAllInFromBase(base, config);
+  if (allIn == null) return null;
+  return baseFromCustomerAllIn(allIn, { ...config, connectionType: to });
+}
+
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }

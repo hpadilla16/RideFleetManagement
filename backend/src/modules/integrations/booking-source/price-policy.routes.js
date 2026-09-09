@@ -21,7 +21,7 @@ import { requireAuth, requireRole, isSuperAdmin } from '../../../middleware/auth
 import { prisma } from '../../../lib/prisma.js';
 import { userAllowedLocationIds } from '../../../lib/tenant-scope.js';
 import { auditFromReq } from '../../audit/audit.service.js';
-import { PRICE_SOURCES, normalizePriceSource, MARKET_AUTHOR } from './price-source.js';
+import { PRICE_SOURCES, normalizePriceSource, normalizeConnectionType, MARKET_AUTHOR } from './price-source.js';
 
 export const pricePolicyRouter = Router();
 
@@ -100,7 +100,7 @@ pricePolicyRouter.get('/', asyncHandler(async (req, res) => {
     prisma.integrationPricePolicy.findMany({
       where: { tenantId, locationId: { in: locationIds } },
       select: {
-        locationId: true, provider: true, priceSource: true,
+        locationId: true, provider: true, priceSource: true, connectionType: true,
         ratePushEnabled: true, updatedAt: true, updatedByUserId: true,
       },
     }),
@@ -140,6 +140,9 @@ pricePolicyRouter.get('/', asyncHandler(async (req, res) => {
       // Absent row is not an error — it is the closed default (no push, MANUAL
       // source), and saying so keeps the screen from looking unconfigured.
       priceSource: normalizePriceSource(policy?.priceSource),
+      // null = inherit the sede's own connection, which is what every row does
+      // until somebody says this integration differs.
+      connectionType: policy?.connectionType || null,
       explicit: Boolean(policy),
       updatedAt: policy?.updatedAt || null,
       marketIntelligenceAutoApplies: autoApplyByCode.get(code) || false,
@@ -157,6 +160,7 @@ pricePolicyRouter.put('/', asyncHandler(async (req, res) => {
   const {
     locationId, provider: rawProvider,
     priceSource: rawSource, ratePushEnabled: rawEnabled,
+    connectionType: rawConnection,
   } = req.body || {};
   if (!locationId) return res.status(400).json({ error: 'locationId is required' });
 
@@ -170,7 +174,16 @@ pricePolicyRouter.put('/', asyncHandler(async (req, res) => {
   // swallow — it usually means a field name drifted.
   const wantsSource = rawSource !== undefined;
   const wantsSwitch = rawEnabled !== undefined;
-  if (!wantsSource && !wantsSwitch) {
+  const wantsConnection = rawConnection !== undefined;
+  // An empty string is how the screen says "inherit the sede" — a real choice,
+  // distinct from not mentioning the field at all.
+  const connection = wantsConnection
+    ? (String(rawConnection || '').trim() === '' ? null : normalizeConnectionType(rawConnection))
+    : undefined;
+  if (wantsConnection && connection === null && String(rawConnection || '').trim() !== '') {
+    return res.status(400).json({ error: 'connectionType must be TITANIUM, AMADEUS, or empty to inherit the sede' });
+  }
+  if (!wantsSource && !wantsSwitch && !wantsConnection) {
     return res.status(400).json({ error: 'Nothing to change: send priceSource, ratePushEnabled, or both' });
   }
 
@@ -202,16 +215,18 @@ pricePolicyRouter.put('/', asyncHandler(async (req, res) => {
   const key = { tenantId_locationId_provider: { tenantId, locationId: location.id, provider } };
   const before = await prisma.integrationPricePolicy.findUnique({
     where: key,
-    select: { priceSource: true, ratePushEnabled: true },
+    select: { priceSource: true, ratePushEnabled: true, connectionType: true },
   });
   const previous = {
     priceSource: normalizePriceSource(before?.priceSource),
     ratePushEnabled: before?.ratePushEnabled === true,
+    connectionType: before?.connectionType || null,
   };
 
   const patch = {
     ...(wantsSource ? { priceSource: wanted } : {}),
     ...(wantsSwitch ? { ratePushEnabled: rawEnabled } : {}),
+    ...(wantsConnection ? { connectionType: connection } : {}),
   };
 
   const saved = await prisma.integrationPricePolicy.upsert({
@@ -223,11 +238,12 @@ pricePolicyRouter.put('/', asyncHandler(async (req, res) => {
       tenantId, locationId: location.id, provider,
       priceSource: PRICE_SOURCES.MANUAL,
       ratePushEnabled: false,
+      connectionType: null,
       ...patch,
       updatedByUserId: req.user?.id || null,
     },
     update: { ...patch, updatedByUserId: req.user?.id || null },
-    select: { locationId: true, provider: true, priceSource: true, ratePushEnabled: true, updatedAt: true },
+    select: { locationId: true, provider: true, priceSource: true, ratePushEnabled: true, connectionType: true, updatedAt: true },
   });
 
   await auditFromReq(req, {
@@ -239,7 +255,7 @@ pricePolicyRouter.put('/', asyncHandler(async (req, res) => {
       locationCode: location.code,
       locationName: location.name,
       from: previous,
-      to: { priceSource: saved.priceSource, ratePushEnabled: saved.ratePushEnabled },
+      to: { priceSource: saved.priceSource, ratePushEnabled: saved.ratePushEnabled, connectionType: saved.connectionType || null },
       wasExplicit: Boolean(before),
     },
   });

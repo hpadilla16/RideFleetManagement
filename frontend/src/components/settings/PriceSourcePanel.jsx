@@ -20,9 +20,9 @@
  * Backend contract (mounted at /api/admin/integrations/price-policy):
  *   GET  /   -> { providers[], sources[], rows: [{ locationId, locationName,
  *                 locationCode, provider, externalCode, integrationEnabled,
- *                 ratePushEnabled, priceSource, explicit, updatedAt,
+ *                 ratePushEnabled, priceSource, connectionType, explicit, updatedAt,
  *                 marketIntelligenceAutoApplies }] }
- *   PUT  /   { locationId, provider, priceSource?, ratePushEnabled? }
+ *   PUT  /   { locationId, provider, priceSource?, ratePushEnabled?, connectionType? }
  *            -> { ok, priceSource, ratePushEnabled, previous }
  */
 
@@ -124,6 +124,12 @@ export default function PriceSourcePanel({
     row, { priceSource }, `now publishing ${SOURCE_LABEL[priceSource]}`,
   );
 
+  const setConnection = (row, value) => patch(
+    row,
+    { connectionType: value },
+    value ? `connection ${value}` : 'connection follows the sede',
+  );
+
   const setPush = (row, ratePushEnabled) => patch(
     row,
     { ratePushEnabled },
@@ -176,6 +182,7 @@ export default function PriceSourcePanel({
                 <th style={{ padding: '8px 10px' }}>Portal code</th>
                 <th style={{ padding: '8px 10px' }}>Push rates</th>
                 <th style={{ padding: '8px 10px' }}>Publishes</th>
+                <th style={{ padding: '8px 10px' }}>Connection</th>
               </tr>
             </thead>
             <tbody>
@@ -218,6 +225,29 @@ export default function PriceSourcePanel({
                             This sede is not mapped for {row.provider} imports right now.
                           </span>
                         ) : null}
+                      </div>
+                    </td>
+                    <td style={{ padding: '8px 10px', width: 190 }}>
+                      {/* Titanium compounds tax and brokerage; Amadeus adds
+                          them. The same base therefore reaches two different
+                          shelf prices, so an integration that sells on the
+                          other connection needs its base re-solved or it sits
+                          somewhere the pricing strategy never chose. */}
+                      <div style={{ display: 'grid', gap: 4, opacity: row.ratePushEnabled ? 1 : 0.55 }}>
+                        <select
+                          value={row.connectionType || ''}
+                          disabled={busy}
+                          onChange={(e) => setConnection(row, e.target.value)}
+                        >
+                          <option value="">Same as the sede</option>
+                          <option value="TITANIUM">Titanium</option>
+                          <option value="AMADEUS">Amadeus</option>
+                        </select>
+                        <span className="ui-muted" style={{ fontSize: 12 }}>
+                          {row.connectionType
+                            ? 'Rates are re-solved for this connection so the price the customer sees matches the target.'
+                            : 'Uses whatever the sede is configured for.'}
+                        </span>
                       </div>
                     </td>
                     <td style={{ padding: '8px 10px' }}>

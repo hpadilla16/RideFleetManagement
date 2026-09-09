@@ -32,7 +32,7 @@ import {
 } from './mex.service.js';
 import { mexRatePushEligibleCodes } from './mex.constants.js';
 import { loadStopSaleClosures, STOP_SALE_DAILY as SHARED_STOP_SALE_DAILY } from '../booking-source/stop-sale-closures.js';
-import { loadDailyOverrides, resolvePricePolicy } from '../booking-source/price-source.js';
+import { loadDailyOverrides, resolvePricePolicy, makeConnectionRebaser } from '../booking-source/price-source.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'MEX';
@@ -181,6 +181,20 @@ export async function loadDesiredMexRates(tenantId, locationId, deps = {}) {
   // NISSAN VERSA; IRC's economy class is CCAR). The tenant's AcrissCategoryMap
   // already encodes that redirect for imports — reuse it in reverse rather
   // than invent a second mapping that can drift.
+  // Same-sede, different-connection re-solve (2026-09-08). Applied to the base
+  // AND to every per-date override, but NEVER to a stop-sale: STOP_SALE_DAILY is
+  // a sentinel that closes a class by pricing it out, not a price, and running
+  // it through a gross-up would turn a closure into an oddly specific number.
+  const rebase = await makeConnectionRebaser(db, {
+    tenantId, locationId, connectionType: deps.connectionType,
+  });
+  for (const entry of byClass.values()) {
+    if (entry.daily != null) entry.daily = rebase(entry.daily);
+    for (const [iso, v] of entry.byDate) {
+      if (v !== STOP_SALE_DAILY) entry.byDate.set(iso, rebase(v));
+    }
+  }
+
   const maps = await db.acrissCategoryMap.findMany({
     where: { OR: [{ tenantId }, { tenantId: null }] },
     select: { acrissCode: true, vehicleCategory: true, tenantId: true },
@@ -425,6 +439,7 @@ export async function runMexRatePush(tenantId, opts = {}) {
     // MEX has to mirror, not just today's number.
     const desired = await loadDesiredMexRates(tenantId, locationId, {
       prisma: db, from: dates[0], to: toExclusive, priceSource,
+      connectionType: policy.connectionType,
     });
     // Reported so a dry run says which prices it planned from. Reading a plan
     // without knowing the source is how you approve MI's numbers thinking they

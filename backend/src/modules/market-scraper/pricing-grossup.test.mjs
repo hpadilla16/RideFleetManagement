@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  grossupFactor, customerAllInFromBase, baseFromCustomerAllIn, taxesFraction, flatPerDay,
+  grossupFactor, customerAllInFromBase, baseFromCustomerAllIn, taxesFraction, flatPerDay, rebaseForConnection,
 } from './pricing-grossup.js';
 
 // SJU / ZezGo config Hector gave: Titanium, PR tax 11.5% + airport 10.5% = 22%, brokerage 20.1%.
@@ -95,4 +95,80 @@ test('flat fee round-trips under a real factor (undercut math stays exact)', () 
   const cfg = { connectionType: 'TITANIUM', taxes: [{ pct: 22 }, { amountPerDay: 2 }], brokeragePct: 20.1 };
   const base = baseFromCustomerAllIn(77.67, cfg);
   assert.ok(customerAllInFromBase(base, cfg) <= 77.68, `round trip ${customerAllInFromBase(base, cfg)}`);
+});
+
+// ---------------------------------------------------------------------------
+// rebaseForConnection — one sede, two integrations, two connection types
+// (2026-09-08).
+//
+// The engine maintains ONE base per class under the location's single
+// connectionType, and every writeback pushes that same number everywhere. Where
+// a sede runs Economy on Amadeus and Zezgo on Titanium, the same base reaches a
+// different shelf price on each, so only one of them sits where the strategy
+// aimed. The invariant that has to hold is that the CUSTOMER-FACING all-in is
+// preserved across the conversion — that is the whole point of the exercise.
+// ---------------------------------------------------------------------------
+test('rebase preserves the all-in the customer sees', () => {
+  const cfg = {
+    connectionType: 'TITANIUM',
+    taxes: [{ pct: 11.5 }, { pct: 10.5 }],
+    brokeragePct: 12,
+  };
+  const base = 40;
+  const allIn = customerAllInFromBase(base, cfg);
+
+  const amadeus = rebaseForConnection(base, cfg, 'AMADEUS');
+  const backAllIn = customerAllInFromBase(amadeus, { ...cfg, connectionType: 'AMADEUS' });
+
+  assert.ok(amadeus > base, 'AMADEUS composes additively, so it needs a HIGHER base for the same shelf price');
+  assert.ok(Math.abs(backAllIn - allIn) <= 0.02, `all-in must survive the conversion: ${allIn} vs ${backAllIn}`);
+});
+
+test('rebase is symmetric — a round trip returns where it started', () => {
+  const cfg = { connectionType: 'AMADEUS', taxes: [{ pct: 22 }], brokeragePct: 12 };
+  const base = 55.25;
+  const there = rebaseForConnection(base, cfg, 'TITANIUM');
+  const back = rebaseForConnection(there, { ...cfg, connectionType: 'TITANIUM' }, 'AMADEUS');
+  assert.ok(Math.abs(back - base) <= 0.02, `${base} -> ${there} -> ${back}`);
+});
+
+test('rebase to the SAME type changes nothing', () => {
+  const cfg = { connectionType: 'TITANIUM', taxes: [{ pct: 11.5 }], brokeragePct: 10 };
+  assert.equal(rebaseForConnection(42.5, cfg, 'TITANIUM'), 42.5);
+  assert.equal(rebaseForConnection(42.5, cfg, 'titanium'), 42.5, 'case must not matter');
+});
+
+test('flat per-day fees survive the conversion, they do not double or vanish', () => {
+  // LAX's $2/day vehicle licence fee. It is the location's charge and is
+  // identical on both connections, so the customer all-in must still carry it
+  // exactly once after rebasing.
+  const cfg = {
+    connectionType: 'TITANIUM',
+    taxes: [{ pct: 11.5 }, { amountPerDay: 2 }],
+    brokeragePct: 12,
+  };
+  const base = 40;
+  const allIn = customerAllInFromBase(base, cfg);
+  const amadeus = rebaseForConnection(base, cfg, 'AMADEUS');
+  const backAllIn = customerAllInFromBase(amadeus, { ...cfg, connectionType: 'AMADEUS' });
+  assert.ok(Math.abs(backAllIn - allIn) <= 0.02, `${allIn} vs ${backAllIn}`);
+});
+
+test('rebase refuses rather than guesses', () => {
+  const cfg = { connectionType: 'TITANIUM', taxes: [{ pct: 11.5 }], brokeragePct: 10 };
+  assert.equal(rebaseForConnection(40, cfg, 'SABRE'), null, 'an unknown connection is not a connection');
+  assert.equal(rebaseForConnection(40, cfg, ''), null);
+  assert.equal(rebaseForConnection(40, cfg, null), null);
+  assert.equal(rebaseForConnection(null, cfg, 'AMADEUS'), null);
+  assert.equal(rebaseForConnection('', cfg, 'AMADEUS'), null);
+  assert.equal(rebaseForConnection('abc', cfg, 'AMADEUS'), null);
+});
+
+test('a base that cannot clear the flat fees yields null, never a negative price', () => {
+  const cfg = { connectionType: 'TITANIUM', taxes: [{ amountPerDay: 50 }], brokeragePct: 0 };
+  // all_in = 1 × 1 + 50 = 51; back-solving under AMADEUS subtracts 50 → 1, fine.
+  assert.ok(rebaseForConnection(1, cfg, 'AMADEUS') > 0);
+  // But a config whose flat fees exceed the whole all-in cannot be solved.
+  const heavy = { connectionType: 'TITANIUM', taxes: [{ amountPerDay: 0 }], brokeragePct: 0 };
+  assert.equal(rebaseForConnection(0, heavy, 'AMADEUS'), null, 'zero base has no positive all-in to split');
 });

@@ -177,16 +177,16 @@ const { resolvePricePolicy } = await import('./price-source.js');
 const ARGS = { tenantId: 't', locationId: 'l', provider: 'MEX' };
 
 test('resolvePricePolicy: a stored row is read verbatim', async () => {
-  const db = { integrationPricePolicy: { findUnique: async () => ({ priceSource: 'MARKET', ratePushEnabled: true }) } };
+  const db = { integrationPricePolicy: { findUnique: async () => ({ priceSource: 'MARKET', ratePushEnabled: true, connectionType: 'AMADEUS' }) } };
   assert.deepEqual(await resolvePricePolicy(db, ARGS), {
-    ratePushEnabled: true, priceSource: PRICE_SOURCES.MARKET, explicit: true,
+    ratePushEnabled: true, priceSource: PRICE_SOURCES.MARKET, connectionType: 'AMADEUS', explicit: true,
   });
 });
 
 test('resolvePricePolicy: no row is the closed default — imports fine, publishes nothing', async () => {
   const db = { integrationPricePolicy: { findUnique: async () => null } };
   assert.deepEqual(await resolvePricePolicy(db, ARGS), {
-    ratePushEnabled: false, priceSource: PRICE_SOURCES.MANUAL, explicit: false,
+    ratePushEnabled: false, priceSource: PRICE_SOURCES.MANUAL, connectionType: null, explicit: false,
   });
 });
 
@@ -217,4 +217,64 @@ test('resolvePriceSource still answers the source half alone', async () => {
   const db = { integrationPricePolicy: { findUnique: async () => ({ priceSource: 'MARKET', ratePushEnabled: false }) } };
   assert.equal(await resolvePriceSource(db, ARGS), PRICE_SOURCES.MARKET,
     'a paused sede still has a source — the screen shows what it WOULD publish');
+});
+
+// ---------------------------------------------------------------------------
+// Per-integration connection type (2026-09-08). Hector: "para una cuenta que
+// tiene multiples integraciones y no todas son las mismas, deberian poder
+// configurarlo por sedes y por integracion".
+// ---------------------------------------------------------------------------
+const { normalizeConnectionType, makeConnectionRebaser } = await import('./price-source.js');
+
+test('connection type: only the two real ones, everything else is "not declared"', () => {
+  assert.equal(normalizeConnectionType('AMADEUS'), 'AMADEUS');
+  assert.equal(normalizeConnectionType(' titanium '), 'TITANIUM');
+  for (const bad of [null, undefined, '', 'SABRE', 'amadeus2', 0, {}]) {
+    assert.equal(normalizeConnectionType(bad), null,
+      `${JSON.stringify(bad)} must read as "inherit the sede", never as a connection`);
+  }
+});
+
+function rebaserDb({ code = 'LAXA01', cfg } = {}) {
+  return {
+    location: { findUnique: async () => ({ code }) },
+    marketPricingConfig: { findUnique: async () => cfg },
+  };
+}
+const SEDE = { connectionType: 'TITANIUM', taxes: [{ pct: 11.5 }, { pct: 10.5 }], brokeragePct: 12 };
+const ARGS2 = { tenantId: 't1', locationId: 'l1' };
+
+test('rebaser: a declared DIFFERENT connection re-solves the base', async () => {
+  const f = await makeConnectionRebaser(rebaserDb({ cfg: SEDE }), { ...ARGS2, connectionType: 'AMADEUS' });
+  const out = f(40);
+  assert.notEqual(out, 40, 'a different composition needs a different base for the same shelf price');
+  assert.ok(out > 40);
+});
+
+test('rebaser: identity whenever nothing should change', async () => {
+  // Not declared — the common case, and it must cost nothing.
+  const a = await makeConnectionRebaser(rebaserDb({ cfg: SEDE }), ARGS2);
+  assert.equal(a(40), 40);
+  // Declared, but the same as the sede.
+  const b = await makeConnectionRebaser(rebaserDb({ cfg: SEDE }), { ...ARGS2, connectionType: 'TITANIUM' });
+  assert.equal(b(40), 40);
+  // No pricing config to convert through.
+  const c = await makeConnectionRebaser(rebaserDb({ cfg: null }), { ...ARGS2, connectionType: 'AMADEUS' });
+  assert.equal(c(40), 40);
+});
+
+test('rebaser: a config that cannot be read leaves prices untouched, never invented', async () => {
+  const boom = {
+    location: { findUnique: async () => { throw new Error('down'); } },
+    marketPricingConfig: { findUnique: async () => SEDE },
+  };
+  const f = await makeConnectionRebaser(boom, { ...ARGS2, connectionType: 'AMADEUS' });
+  assert.equal(f(40), 40, 'an unconverted price is wrong by a margin; a fabricated one is worse');
+  assert.equal((await makeConnectionRebaser(null, { ...ARGS2, connectionType: 'AMADEUS' }))(40), 40);
+});
+
+test('rebaser: an unsolvable value passes through rather than disappearing', async () => {
+  const f = await makeConnectionRebaser(rebaserDb({ cfg: SEDE }), { ...ARGS2, connectionType: 'AMADEUS' });
+  assert.equal(f(null), null, 'a class with no price stays a class with no price');
+  assert.equal(f(0), 0, 'zero cannot be re-solved, and dropping it would unpublish the class');
 });

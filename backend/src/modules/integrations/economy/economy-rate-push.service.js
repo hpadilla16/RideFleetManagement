@@ -21,7 +21,7 @@ import logger from '../../../lib/logger.js';
 import { buildPushPlan, verifyPush, SKIP } from './economy-rate-map.js';
 import { readRateGrid, applyRateCell } from './economy-rate-client.js';
 import { loadStopSaleClosures } from '../booking-source/stop-sale-closures.js';
-import { loadDailyOverrides, resolvePricePolicy } from '../booking-source/price-source.js';
+import { loadDailyOverrides, resolvePricePolicy, makeConnectionRebaser } from '../booking-source/price-source.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'ECONOMY';
@@ -131,6 +131,23 @@ export async function loadRfmRates(tenantId, locationId, deps = {}) {
       if (byDate) row.byDate = new Map(byDate);
     }
   }
+
+  // If this integration sells on a different connection than its sede, re-solve
+  // every number so the CUSTOMER-FACING price lands where the strategy aimed
+  // (2026-09-08). Identity — and free — when it does not, which is every sede
+  // today. Applied to the base AND to each per-date override, because both are
+  // published and both are grossed up the same way.
+  const rebase = await makeConnectionRebaser(db, {
+    tenantId, locationId, connectionType: deps.connectionType,
+  });
+  if (rebase !== undefined) {
+    for (const row of out) {
+      row.daily = rebase(row.daily);
+      if (row.byDate?.size) {
+        for (const [iso, v] of row.byDate) row.byDate.set(iso, rebase(v));
+      }
+    }
+  }
   return out;
 }
 
@@ -171,6 +188,7 @@ export async function pushArea(config, deps = {}) {
   const rfmRates = await (deps.loadRfmRates || loadRfmRates)(tenantId, locationId, {
     ...deps,
     priceSource,
+    connectionType: deps.connectionType ?? policy.connectionType,
     from: `${dates[0]}T00:00:00.000Z`,
     to: new Date(new Date(`${dates[dates.length - 1]}T00:00:00.000Z`).getTime() + DAY_MS),
   });
