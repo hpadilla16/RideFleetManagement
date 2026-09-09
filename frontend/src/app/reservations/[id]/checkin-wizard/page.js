@@ -1002,6 +1002,25 @@ function Step3Metrics({
             <div style={{ fontWeight: 500, fontSize: 13, color: selfReturnStamp.voided ? '#6B7280' : '#065F46' }}>
               {t('checkinWizard.selfReturnTitle')}
             </div>
+            {/*
+              The HOUR as a field, not only inside the sentence (Hector,
+              2026-09-09). It is the number an agent compares against the
+              return time, and reading it out of a paragraph is slower than
+              reading it off a line.
+            */}
+            <div
+              data-testid="self-return-time"
+              style={{
+                fontSize: 16, fontWeight: 600, marginTop: 4,
+                fontVariantNumeric: 'tabular-nums',
+                color: selfReturnStamp.voided ? '#6B7280' : '#065F46',
+                textDecoration: selfReturnStamp.voided ? 'line-through' : 'none',
+              }}
+            >
+              {new Date(selfReturnStamp.reportedAt).toLocaleString([], {
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+              })}
+            </div>
             <div style={{ fontSize: 11.5, color: selfReturnStamp.voided ? '#6B7280' : '#047857', marginTop: 2, lineHeight: 1.45 }}>
               {selfReturnStamp.voided
                 ? t('checkinWizard.selfReturnVoided')

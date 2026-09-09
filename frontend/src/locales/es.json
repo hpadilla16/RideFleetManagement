@@ -2907,7 +2907,7 @@
     }
   },
   "checkinWizard": {
-    "selfReturnTitle": "Cliente marcó la devolución",
+    "selfReturnTitle": "Soft check-in del cliente",
     "selfReturnApplied": "Cliente marcó la devolución a las {{time}} — el late fee se calcula hasta esa hora, no hasta la hora del check-in.",
     "selfReturnLater": "Cliente marcó la devolución a las {{time}} (después de la hora de retorno de este cierre — no cambia el cargo).",
     "selfReturnVoided": "Existe una marca de devolución del cliente pero un admin la anuló — no se usa.",

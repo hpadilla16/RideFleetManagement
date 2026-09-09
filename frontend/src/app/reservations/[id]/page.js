@@ -2991,6 +2991,44 @@ token
                   </span>
                 </div>
               ) : null}
+              {/*
+                Customer soft check-in (QR self-return, 2026-09-09). Shown HERE,
+                next to the return date, because the whole point of the feature
+                is that the agent closes the check-in hours later — so the hour
+                the customer actually handed the car back has to be readable
+                without opening the wizard, which is the last screen anyone
+                opens. A voided stamp still shows, greyed: knowing somebody
+                voided it is more useful than the row silently disappearing.
+              */}
+              {row?.customerReportedReturnAt ? (
+                <div
+                  className="label"
+                  style={{
+                    marginTop: 6, textTransform: 'none', letterSpacing: 0,
+                    color: row.customerReportedReturnVoidedAt ? '#6b7a9a' : '#047857',
+                  }}
+                  title={row.customerReportedReturnVoidedAt
+                    ? 'The customer marked the return by QR, but an admin voided the mark — the late fee ignores it.'
+                    : 'The customer marked the return by QR. Check-in close uses this hour for the late fee when it is earlier than the close.'}
+                >
+                  Customer soft check-in:{' '}
+                  <span style={{ color: row.customerReportedReturnVoidedAt ? '#6b7a9a' : '#065F46', fontWeight: 600 }}>
+                    {new Date(row.customerReportedReturnAt).toLocaleString()}
+                  </span>
+                  {row.customerReportedReturnVoidedAt ? (
+                    <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 6, background: '#F3F4F6', color: '#6B7280', fontSize: 11, fontWeight: 700, letterSpacing: '.05em' }}>
+                      VOIDED
+                    </span>
+                  ) : (
+                    <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 6, background: '#ECFDF5', color: '#047857', fontSize: 11, fontWeight: 700, letterSpacing: '.05em' }}>
+                      BY CUSTOMER
+                    </span>
+                  )}
+                  {row.customerReportedReturnVoidedAt && row.customerReportedReturnVoidReason ? (
+                    <div style={{ marginTop: 2 }}>Reason: {row.customerReportedReturnVoidReason}</div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div><span className="label">Pickup Location</span><select value={form.pickupLocationId} onChange={(e) => setForm({ ...form, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
             <div><span className="label">Return Location</span><select value={form.returnLocationId} onChange={(e) => setForm({ ...form, returnLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
