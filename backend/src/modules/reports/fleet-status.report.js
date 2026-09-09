@@ -224,7 +224,11 @@ async function computeData({ tenantId, query }, deps = {}) {
     ? await prisma.vehicle.findMany({
         where: buildVehicleWhere({ tenantId, locationId, status: null }),
         select: {
-          id: true, status: true,
+          // registrationExpiresAt is selected HERE too, not only on the
+          // filtered list: the registration KPIs count the whole fleet, and
+          // reading a field this query never selected made every vehicle look
+          // like "not recorded" while the rows themselves were right.
+          id: true, status: true, registrationExpiresAt: true,
           reservations: {
             // Grace period: include CHECKED_OUT whose returnAt is up to 14 days
         // overdue. Past that = stale data, surfaced in the Overdue Returns
@@ -234,7 +238,7 @@ async function computeData({ tenantId, query }, deps = {}) {
           },
         },
       })
-    : vehicles.map((v) => ({ id: v.id, status: v.status, reservations: v.reservations }));
+    : vehicles.map((v) => ({ id: v.id, status: v.status, registrationExpiresAt: v.registrationExpiresAt, reservations: v.reservations }));
 
   const totals = {
     capacity: 0,

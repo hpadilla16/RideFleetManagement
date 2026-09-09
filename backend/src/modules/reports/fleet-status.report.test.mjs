@@ -27,9 +27,18 @@ function makePrisma({ vehicles = [] } = {}) {
         if (Array.isArray(orderBy)) {
           rows = [...rows].sort((a, b) => (a.plate || '').localeCompare(b.plate || ''));
         }
-        // The two select shapes used by computeData: full row OR { id, status }
-        if (select && select.id && select.status && !select.reservations) {
-          return rows.map((v) => ({ id: v.id, status: v.status }));
+        // The two select shapes used by computeData. The reduced one mirrors
+        // the REAL select field for field — when it did not carry
+        // registrationExpiresAt, the KPI read undefined for every vehicle and
+        // reported a fleet with no registrations at all while the rows below
+        // were correct.
+        if (select && select.id && select.status && !select.vehicleType) {
+          return rows.map((v) => ({
+            id: v.id,
+            status: v.status,
+            ...(select.registrationExpiresAt ? { registrationExpiresAt: v.registrationExpiresAt ?? null } : {}),
+            reservations: v.reservations || [],
+          }));
         }
         return rows;
       },
@@ -38,7 +47,7 @@ function makePrisma({ vehicles = [] } = {}) {
 }
 
 let _idSeq = 0;
-function veh({ id, status, type, location = null, plate = null, reservation = null, tenantId = 't1', mileage = 12000 }) {
+function veh({ id, status, type, location = null, plate = null, reservation = null, tenantId = 't1', mileage = 12000, registrationExpiresAt = null }) {
   const useId = id || `v${++_idSeq}`;
   return {
     id: useId,
@@ -50,6 +59,7 @@ function veh({ id, status, type, location = null, plate = null, reservation = nu
     homeLocationId: location,
     vehicleType: typeof type === 'string' ? { id: type, code: type, name: type } : type,
     homeLocation: location ? { id: location, name: `Loc ${location}` } : null,
+    registrationExpiresAt: registrationExpiresAt ?? null,
     reservations: reservation ? [reservation] : [],
   };
 }
@@ -258,4 +268,51 @@ test('projectVehicle without a registration date does not throw', () => {
     AS_OF, 'UTC',
   );
   assert.equal(out.registration.state, 'UNKNOWN');
+});
+
+// ---------------------------------------------------------------------------
+// The KPI must agree with the rows.
+//
+// It did not, the first time this shipped: the registration counters read a
+// field the whole-fleet query never selected, so a tenant with 21 expired
+// plates showed "0 expired · 127 not recorded" above a table that listed all
+// 21 correctly. A KPI that disagrees with the list under it is worse than no
+// KPI, because it is the number somebody reads first.
+// ---------------------------------------------------------------------------
+test('registration KPIs agree with the rows, filtered or not', async () => {
+  const past = new Date(Date.now() - 40 * 86400000);
+  const soon = new Date(Date.now() + 10 * 86400000);
+  const far  = new Date(Date.now() + 400 * 86400000);
+  const prisma = makePrisma({
+    vehicles: [
+      veh({ status: 'AVAILABLE', type: 'CCAR', location: 'L1', registrationExpiresAt: past }),
+      veh({ status: 'ON_RENT',   type: 'CCAR', location: 'L1', registrationExpiresAt: past }),
+      veh({ status: 'AVAILABLE', type: 'ICAR', location: 'L2', registrationExpiresAt: soon }),
+      veh({ status: 'AVAILABLE', type: 'ICAR', location: 'L2', registrationExpiresAt: far }),
+      veh({ status: 'AVAILABLE', type: 'ICAR', location: 'L2' }),               // no date
+      veh({ status: 'SOLD',      type: 'ICAR', location: 'L2', registrationExpiresAt: past }), // excluded
+    ],
+  });
+
+  const all = await computeData({ tenantId: 't1', query: {} }, { prisma });
+  assert.equal(all.totals.registrationExpired, 2, 'SOLD is not ours to register');
+  assert.equal(all.totals.registrationExpiringSoon, 1);
+  assert.equal(all.totals.registrationUnknown, 1);
+
+  const rowsExpired = all.vehicles.filter((v) => v.registration.state === 'EXPIRED' && v.status !== 'SOLD').length;
+  assert.equal(rowsExpired, all.totals.registrationExpired, 'the KPI and the table must not disagree');
+
+  // A STATUS filter narrows the list but not the counters: an expired plate
+  // does not stop being expired because somebody looked at "Available" only.
+  const byStatus = await computeData({ tenantId: 't1', query: { status: 'AVAILABLE' } }, { prisma });
+  assert.equal(byStatus.totals.registrationExpired, 2, 'the status filter must not move the KPI');
+  assert.ok(byStatus.vehicles.length < all.vehicles.length, 'but the list itself IS filtered');
+
+  // LOCATION is different, and deliberately so: it scopes which fleet the
+  // report is about, so the counters follow it. Both expired plates are at L1,
+  // so L2 legitimately reports none.
+  const byLocation = await computeData({ tenantId: 't1', query: { locationId: 'L2' } }, { prisma });
+  assert.equal(byLocation.totals.registrationExpired, 0);
+  assert.equal(byLocation.totals.registrationExpiringSoon, 1);
+  assert.equal(byLocation.totals.registrationUnknown, 1);
 });
