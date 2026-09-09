@@ -208,7 +208,7 @@ export function aggregateCheapestBySippDate(observations, { excludeSet, useEffec
  *   summary: { sampled, withCurrent, willUpdate, missingVehicleType }
  * }>}
  */
-export async function computeRunComparison(runId, { scope = {} } = {}) {
+export async function computeRunComparison(runId, { scope = {}, target = null } = {}) {
   if (!runId) badRequest('runId required');
 
   // Load the run + its profile in one shot. We need both to apply the
@@ -221,7 +221,22 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
   if (scope.tenantId && run.profile.tenantId !== scope.tenantId) {
     notFound('Run not found');
   }
-  const profile = run.profile;
+  // One scrape can feed several brands, each writing its own Rate and, if it
+  // says so, sitting somewhere different on the ladder (2026-09-09). Every
+  // strategy helper below already takes the profile as an argument, so a target
+  // is applied by handing them an EFFECTIVE profile rather than by threading an
+  // override through each one. Without a target this is `run.profile`
+  // unchanged, which is every caller that existed before.
+  const profile = target
+    ? {
+      ...run.profile,
+      targetRateId: target.rateId || run.profile.targetRateId,
+      strategy: target.strategy || run.profile.strategy,
+      strategyAmount: target.strategyAmount ?? run.profile.strategyAmount,
+      strategyPct: target.strategyPct ?? run.profile.strategyPct,
+      strategyFloor: target.strategyFloor ?? run.profile.strategyFloor,
+    }
+    : run.profile;
 
   // Load competitor rows for the run — dual-read (RateOffer + legacy
   // MarketObservation) through the adapter. purpose:'pricing' → Kayak teaser

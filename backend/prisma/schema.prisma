@@ -3203,6 +3203,7 @@ model Rate {
   rateItems            RateItem[]
   dailyPrices          RateDailyPrice[]
   marketScrapeProfiles MarketScrapeProfile[] @relation("MarketScrapeProfileTargetRate")
+  marketTargets        MarketScrapeProfileTarget[] @relation("MarketTargetRate")
   pricingRule          PricingRule?
   pricingSuggestions   PricingSuggestion[]
   partner              Partner?
@@ -4348,6 +4349,7 @@ model Franchise {
   updatedAt              DateTime      @updatedAt
   reservations           Reservation[] @relation("ReservationFranchise")
   rates                  Rate[]        @relation("RateFranchise")
+  marketTargets          MarketScrapeProfileTarget[] @relation("MarketTargetFranchise")
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -4571,10 +4573,64 @@ model MarketScrapeProfile {
   runs         MarketScrapeRun[]
   observations MarketObservation[]
   rateOffers   RateOffer[]
+  targets      MarketScrapeProfileTarget[]
 
   @@unique([tenantId, name])
   @@index([tenantId, active])
   @@index([targetRateId])
+}
+
+/**
+ * Where ONE scrape's suggestions land, per brand (2026-09-09).
+ *
+ * Hector: "los precios que son de MEX, escriban a MEX directamente y que los de
+ * zezgo escriban al de zezgo cuando prendemos el rate writeback".
+ *
+ * The scrape is the expensive half — Scrapfly credits, a real browser, minutes
+ * per run — and the market data at one airport is IDENTICAL for every brand
+ * selling there. Cloning a whole profile per franchise would pay that cost
+ * three times to read the same page. So one profile fans out to several
+ * targets, each with its own Rate and, optionally, its own strategy: Economy
+ * can undercut by a dollar while Zezgo matches, off one scrape.
+ *
+ * BACK-COMPATIBLE BY CONSTRUCTION. A profile with no target rows keeps using
+ * MarketScrapeProfile.targetRateId and its own strategy, which is every profile
+ * that exists today, so this changes nothing until somebody adds a row.
+ *
+ * franchiseId NULL = the house target, the same "shared" meaning Rate.franchiseId
+ * carries. Postgres treats NULLs as DISTINCT in a unique index, so the one-house-
+ * target-per-profile rule is enforced in the service, not by @@unique.
+ */
+model MarketScrapeProfileTarget {
+  id        String              @id @default(cuid())
+  profileId String
+  profile   MarketScrapeProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  franchiseId String?
+  franchise   Franchise? @relation("MarketTargetFranchise", fields: [franchiseId], references: [id], onDelete: Cascade)
+
+  // The Rate whose RateDailyPrice rows this target writes.
+  rateId String
+  rate   Rate   @relation("MarketTargetRate", fields: [rateId], references: [id], onDelete: Cascade)
+
+  // NULL = inherit the profile's rule. A brand only needs a row here when it
+  // wants to sit somewhere different on the ladder.
+  strategy       MarketPricingStrategy?
+  strategyAmount Decimal?               @db.Decimal(10, 2)
+  strategyPct    Decimal?               @db.Decimal(5, 2)
+  strategyFloor  Decimal?               @db.Decimal(10, 2)
+
+  // Per-target, because one brand may be trusted to auto-apply while another
+  // is still being watched by a human.
+  autoApply Boolean @default(false)
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([profileId, franchiseId])
+  @@index([profileId, active])
+  @@index([rateId])
 }
 
 // Tax-aware pricing config per (tenant, location). Lets the engine back-solve the
