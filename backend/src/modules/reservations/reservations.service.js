@@ -1598,7 +1598,138 @@ export const reservationsService = {
             ] }
           : {})
       },
-      include: {
+      // 2026-09-09 — `include` was returning EVERY Reservation scalar, which is
+      // how the customer's IP address (customerReportedReturnMetaJson) ended up
+      // on the reservation detail screen. This is now an explicit `select`: the
+      // scalar list below is the Reservation model minus the fields no consumer
+      // reads. Adding a column to the schema no longer adds it to this payload —
+      // if a screen needs a new field, add it here on purpose.
+      //
+      // DELIBERATELY OMITTED (verified write-only across backend/src +
+      // frontend/src — the only references are the writes in
+      // self-return.service.js):
+      //   customerReportedReturnMetaJson       capped {ip,userAgent} of the QR
+      //                                        scan. Abuse forensics, read out
+      //                                        of the DB when a stamp is
+      //                                        disputed — never displayed. It is
+      //                                        the customer's IP; it has no
+      //                                        business on an agent's screen.
+      //   customerReportedReturnVoidedByUserId no consumer resolves it to a name
+      //                                        (the void line renders At +
+      //                                        VoidReason).
+      // The other four self-return columns STAY — the reservation page renders
+      // the soft check-in line from them (09bcadf3).
+      select: {
+        id: true,
+        tenantId: true,
+        reservationNumber: true,
+        sourceRef: true,
+        status: true,
+        workflowMode: true,
+        loanerBillingMode: true,
+        repairOrderNumber: true,
+        claimNumber: true,
+        serviceAdvisorName: true,
+        serviceAdvisorEmail: true,
+        serviceAdvisorPhone: true,
+        serviceStartAt: true,
+        estimatedServiceCompletionAt: true,
+        serviceVehicleYear: true,
+        serviceVehicleMake: true,
+        serviceVehicleModel: true,
+        serviceVehiclePlate: true,
+        serviceVehicleVin: true,
+        loanerLiabilityAccepted: true,
+        loanerLiabilityAcceptedAt: true,
+        loanerProgramNotes: true,
+        loanerBorrowerPacketJson: true,
+        loanerBorrowerPacketCompletedAt: true,
+        loanerBorrowerPacketCompletedBy: true,
+        loanerBillingContactName: true,
+        loanerBillingContactEmail: true,
+        loanerBillingContactPhone: true,
+        loanerBillingAuthorizationRef: true,
+        loanerBillingNotes: true,
+        loanerReturnExceptionFlag: true,
+        loanerReturnExceptionNotes: true,
+        loanerBillingStatus: true,
+        loanerBillingSubmittedAt: true,
+        loanerBillingSettledAt: true,
+        serviceAdvisorNotes: true,
+        serviceAdvisorUpdatedAt: true,
+        loanerServiceCompletedAt: true,
+        loanerServiceCompletedBy: true,
+        loanerCloseoutNotes: true,
+        loanerSelfServiceSubmittedAt: true,
+        loanerPurchaseOrderNumber: true,
+        loanerDealerInvoiceNumber: true,
+        loanerAccountingNotes: true,
+        loanerAccountingClosedAt: true,
+        loanerAccountingClosedBy: true,
+        loanerLastExtendedAt: true,
+        loanerLastVehicleSwapAt: true,
+        bookingChannel: true,
+        partnerId: true,
+        partnerTermsVersion: true,
+        partnerPreferredVehicleTypeId: true,
+        partnerDisclosureAcceptedAt: true,
+        partnerDisclosureVersion: true,
+        partnerPolicyNumber: true,
+        createdByUserId: true,
+        isPrepaid: true,
+        // QR self-return stamp — the four the detail page renders. The meta and
+        // voidedByUserId columns are omitted on purpose (see above).
+        customerReportedReturnAt: true,
+        customerReportedReturnLocationId: true,
+        customerReportedReturnVoidedAt: true,
+        customerReportedReturnVoidReason: true,
+        customerId: true,
+        vehicleId: true,
+        vehicleTypeId: true,
+        serviceVehicleTypeId: true,
+        pickupAt: true,
+        returnAt: true,
+        originalReturnAt: true,
+        overdueIgnored: true,
+        autochargeBlocked: true,
+        autochargeAt: true,
+        autochargeAttempts: true,
+        autochargeLastError: true,
+        checkinEmailDueAt: true,
+        checkinEmailSentAt: true,
+        pickupLocationId: true,
+        returnLocationId: true,
+        franchiseId: true,
+        dailyRate: true,
+        estimatedTotal: true,
+        paymentStatus: true,
+        sendConfirmationEmail: true,
+        confirmationEmailSentAt: true,
+        flightNumber: true,
+        pickupInstructions: true,
+        notes: true,
+        notesUpdatedAt: true,
+        customerInfoToken: true,
+        customerInfoTokenExpiresAt: true,
+        customerInfoCompletedAt: true,
+        precheckinAutoInviteSentAt: true,
+        precheckinAutoReminderSentAt: true,
+        customerInfoReviewedAt: true,
+        customerInfoReviewedByUserId: true,
+        customerInfoReviewNote: true,
+        readyForPickupAt: true,
+        readyForPickupByUserId: true,
+        readyForPickupOverrideNote: true,
+        signatureToken: true,
+        signatureTokenExpiresAt: true,
+        paymentRequestToken: true,
+        paymentRequestTokenExpiresAt: true,
+        signatureSignedAt: true,
+        signatureSignedBy: true,
+        signatureDataUrl: true,
+        termsVersion: true,
+        createdAt: true,
+        updatedAt: true,
         customer: {
           select: {
             id: true,

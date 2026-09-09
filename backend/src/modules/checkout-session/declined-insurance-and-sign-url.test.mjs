@@ -47,7 +47,11 @@ test('getById asks Prisma for rentalAgreement.declinedInsurance', async () => {
     prisma.reservation.findFirst = realFindFirst;
   }
 
-  const agSelect = captured?.include?.rentalAgreement?.select;
+  // 2026-09-09 — getById moved from a top-level `include` to an explicit
+  // `select` (it was leaking the customer's IP via customerReportedReturnMetaJson);
+  // the nested rentalAgreement select now hangs off `select`, not `include`.
+  // See reservations/reservation-detail-select.test.mjs.
+  const agSelect = captured?.select?.rentalAgreement?.select;
   assert.ok(agSelect, 'getById should use an explicit rentalAgreement select');
   assert.equal(
     agSelect.declinedInsurance, true,
@@ -486,6 +490,12 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     // exactly one field, Location.termsSectionsJson. No gate applies.
     'src/modules/locations/location-clauses.test.mjs',
     'src/modules/rental-agreements/clause-history-immutability.test.mjs',
+    // Reservation detail select shape (2026-09-09). TEST ONLY, and a READER of
+    // the READER: it asserts that getById's nested rentalAgreement select still
+    // carries declinedInsurance after the top-level `include` became an explicit
+    // `select` (the trim that stopped the customer's IP shipping to the detail
+    // screen). It never touches the column. No gate applies.
+    'src/modules/reservations/reservation-detail-select.test.mjs',
   ]);
 
   const found = [];
