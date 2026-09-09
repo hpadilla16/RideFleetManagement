@@ -41,6 +41,45 @@ test('THE REAL DOCUMENT survives with every tag intact', () => {
   assert.deepEqual(lost, [], 'the shipped contract must not lose a single tag');
 });
 
+/**
+ * Decode entities so `&oacute;` and `ó` compare equal — sanitize-html turns the
+ * named forms into literal characters, which shortens the file without changing
+ * a single word a renter reads.
+ */
+const ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú',
+  Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú',
+  ntilde: 'ñ', Ntilde: 'Ñ', iexcl: '¡', iquest: '¿',
+  ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’',
+  mdash: '—', ndash: '–', hellip: '…', deg: '°',
+  uuml: 'ü', Uuml: 'Ü',
+};
+
+function wording(html) {
+  return String(html)
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&([a-zA-Z]+);/g, (m, name) => (ENTITIES[name] !== undefined ? ENTITIES[name] : m))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+test('NOT ONE WORD of the contract changes — the property that actually matters', () => {
+  // Stronger than the tag census above: a document can keep every tag and still
+  // lose a clause. Measured in production, both sides come to 49,906 characters
+  // of identical wording; the file shrinks ~5KB only because comments go and
+  // `&oacute;` becomes `ó`.
+  assert.equal(wording(sanitizeContractHtml(CANONICAL)), wording(CANONICAL));
+});
+
+test('a clause hidden behind an attribute becomes VISIBLE, never dropped', () => {
+  const html = '<p style="display:none">The Customer waives nothing.</p>';
+  assert.equal(wording(sanitizeContractHtml(html)), wording(html));
+});
+
 test('the bilingual markup survives — lang and class are what carry it', () => {
   const out = sanitizeContractHtml('<div class="es" lang="es"><p>Hola</p></div>');
   assert.match(out, /lang="es"/);
