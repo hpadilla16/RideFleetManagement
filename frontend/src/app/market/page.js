@@ -658,6 +658,15 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
           {data.yourRate?.allIn && data.yourRate?.base != null && (
             <div style={{ fontSize: 10, color: '#6e7587' }}>all-in · base {fmtMoney(Number(data.yourRate.base))}</div>
           )}
+          {/* Say what the ladder is measured in. QUOTED means this airport has
+              no tax config, so the rank compares our all-in against raw quotes
+              and is not a like-for-like number. */}
+          {data.priceBasis === 'QUOTED' && vendorCount > 0 && (
+            <div
+              title="No tax/fee config for this airport, so competitor prices are raw quotes and your rank is not like-for-like."
+              style={{ fontSize: 10, color: '#fbbf24', cursor: 'help' }}
+            >rank vs raw quotes</div>
+          )}
           {cheapestDeltaPct != null && <DeltaBadge pct={cheapestDeltaPct} days={rangeDays} />}
         </div>
       </div>

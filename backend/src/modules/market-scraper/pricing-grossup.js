@@ -97,6 +97,58 @@ export function baseFromCustomerAllIn(targetAllIn, config = {}) {
 }
 
 /**
+ * COMPETITOR side of the same coin (2026-09-10).
+ *
+ * The module header above assumes we scrape the competitor ALL-IN. Measured
+ * that day, we do not: Kayak's number is a TEASER. Expedia's legacy rows carry
+ * both halves and they differ in 15,864 of 17,011 rows; against those, Kayak
+ * sits at 0.871x the teaser and 0.582x the all-in, weighted over 5,188 rows and
+ * seven classes at SJU. So ranking our grossed-up price against their raw quote
+ * compares what our customer pays against what theirs is merely shown -- which
+ * is why SJU read "#4 of 4" while being roughly at market.
+ *
+ * This lifts a competitor quote to the all-in their customer will pay:
+ *
+ *   competitor_all_in = quoted x (1 + taxes) + flatPerDay
+ *
+ * BROKERAGE IS DELIBERATELY EXCLUDED. It is our channel cost, already inside
+ * the price they are advertising through theirs. Including it would inflate
+ * every rival by our own commission.
+ *
+ * `basis` travels with the number so a screen can label it and a suggestion can
+ * be audited:
+ *   MEASURED    - the location carries a calibrated factor (config.competitorAllInFactor)
+ *   TAXES_ONLY  - built from the location's own tax + flat-fee layer
+ *   QUOTED      - no tax layer configured: the quote passes through untouched,
+ *                 and the comparison is quote-vs-base. Same as before this
+ *                 existed, so a location without config behaves identically.
+ *
+ * Known residual: at SJU the configured layer is 1.22 while Expedia's own
+ * all-in/teaser ratio measured 1.444, so a TAXES_ONLY basis still understates
+ * the competition by ~18%. That gap is fees Kayak omits beyond the configured
+ * taxes; closing it needs a per-airport calibrated factor, which is what
+ * MEASURED is for.
+ */
+export function competitorAllInBasis(config = {}) {
+  const calibrated = Number(config?.competitorAllInFactor);
+  if (Number.isFinite(calibrated) && calibrated > 1) {
+    return { factor: calibrated, flat: flatPerDay(config), basis: 'MEASURED' };
+  }
+  const taxes = taxesFraction(config);
+  const flat = flatPerDay(config);
+  if (taxes > 0 || flat > 0) return { factor: 1 + taxes, flat, basis: 'TAXES_ONLY' };
+  return { factor: 1, flat: 0, basis: 'QUOTED' };
+}
+
+/** A competitor quote lifted to the all-in their customer pays. Null in, null out. */
+export function competitorAllIn(quoted, config = {}) {
+  const q = Number(quoted);
+  if (!Number.isFinite(q)) return null;
+  const { factor, flat } = competitorAllInBasis(config);
+  return Math.round((q * factor + flat) * 100) / 100;
+}
+
+/**
  * Re-solve a base rate for a DIFFERENT connection type at the same location.
  *
  * Hector, 2026-09-08: "market intelligence hace precios dependiendo si es

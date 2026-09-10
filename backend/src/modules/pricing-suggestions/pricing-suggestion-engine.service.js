@@ -3,6 +3,7 @@ import { cache } from '../../lib/cache.js';
 import { settingsService } from '../settings/settings.service.js';
 import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
 import { vendorKey } from '../market-scraper/market-vendor.js';
+import { competitorAllIn, competitorAllInBasis, baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
 import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
@@ -24,6 +25,40 @@ import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js
  */
 
 const SUGGESTION_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+
+function round2(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.round((v + Number.EPSILON) * 100) / 100 : null;
+}
+
+/**
+ * The location's tax/fee config, used for BOTH halves of the comparison: to
+ * lift competitor quotes to the all-in their customer pays, and to back-solve
+ * the base this tenant must upload to land on a chosen all-in.
+ *
+ * Keyed on the Rate's location CODE, which is how every other MI read is keyed.
+ * That is also the known IATA-vs-Location.code trap (Corpusa's branch is
+ * LAXA01 while its config and profile are LAX): the lookup misses, the config
+ * is null, the gross-up degrades to the identity, and the engine behaves
+ * exactly as it did before any of this. Wrong, but never silently wrong in the
+ * expensive direction -- and it cannot bite Corpusa today, which has no
+ * PricingRule rows at all.
+ */
+async function resolvePricingConfig(rule, getPricingConfig = null) {
+  // ALWAYS an object, never null: a default parameter only fires on
+  // undefined, so passing an explicit null downstream would make
+  // taxesFraction(null) throw on .taxes -- the same trap as Number(null).
+  try {
+    if (getPricingConfig) return (await getPricingConfig(rule)) || {};
+    const row = await prisma.marketPricingConfig.findFirst({
+      where: { tenantId: rule.tenantId, locationCode: rule.rate.location.code },
+    });
+    return row || {};
+  } catch {
+    // No config = identity gross-up = today's behavior. Never go dark.
+    return {};
+  }
+}
 
 /** Distinct agencies a cell must contain before a rule may move a live price. */
 const DEFAULT_MIN_SAMPLE_VENDORS = 3;
@@ -234,7 +269,7 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
  * Pure logic + a single PricingSuggestion write (+ optional Rate.daily
  * update for AUTO mode). Safe to retry.
  */
-export async function evaluateRule(rule, { utilizationContext = null, getMinSampleConfig = null } = {}) {
+export async function evaluateRule(rule, { utilizationContext = null, getMinSampleConfig = null, getPricingConfig = null } = {}) {
   if (rule.strategy === 'MANUAL') {
     return { skipped: true, reason: 'manual_rule_no_op' };
   }
@@ -319,7 +354,20 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     return { skipped: true, reason: 'below_min_sample' };
   }
 
-  const ordered = Array.from(perVendor.values()).sort((a, b) => a.price - b.price);
+  // ALL-IN vs ALL-IN, then recommend the BASE (2026-09-10, Hector: "que veamos
+  // la competencia pero todavia recomienda el precio que ellos tienen que poner
+  // en sus integraciones para reflejar ese precio que ve el cliente").
+  //
+  // The competitor rows are QUOTES -- Kayak's number is a teaser, measured that
+  // day at 0.582x Expedia's all-in. Lift them to what their customer actually
+  // pays, choose a position on THAT ladder, and back-solve the base to upload.
+  // Without a tax layer configured the lift is the identity and everything
+  // below behaves exactly as it did before.
+  const pricingConfig = await resolvePricingConfig(rule, getPricingConfig);
+  const allInBasis = competitorAllInBasis(pricingConfig);
+  const ordered = Array.from(perVendor.values())
+    .map((r) => ({ ...r, quoted: r.price, price: competitorAllIn(r.price, pricingConfig) }))
+    .sort((a, b) => a.price - b.price);
   const prices = ordered.map((r) => r.price);
   const marketMin = prices[0];
   const marketMedian = prices[Math.floor(prices.length / 2)];
@@ -385,6 +433,14 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     priced = utilizationInfo.price;
   }
 
+  // Everything above is the ALL-IN the customer should see. What the tenant
+  // types into the integration is the BASE that grosses up to it, so back-solve
+  // before the bounds: rule.floorPrice / rule.ceilingPrice are BASE bounds (a
+  // $69.66 floor against a $115 base), and clamping an all-in number against
+  // them would compare two different currencies.
+  const targetAllIn = priced;
+  priced = baseFromCustomerAllIn(priced, pricingConfig);
+
   // Clamp to floor/ceiling.
   const floor = Number(rule.floorPrice);
   const ceiling = Number(rule.ceilingPrice);
@@ -412,6 +468,15 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     paddingPct: padPct,
     marketMin,
     marketMedian,
+    // The money trail for the two-domain math: what the rivals were QUOTED at,
+    // what their customer pays, the all-in we aimed for, and the all-in our own
+    // recommendation implies. `basis` says how the lift was computed.
+    priceBasis: allInBasis.basis,
+    competitorFactor: allInBasis.factor,
+    competitorFlatPerDay: allInBasis.flat,
+    marketMinQuoted: ordered.length ? ordered[0].quoted : null,
+    targetAllIn: round2(targetAllIn),
+    suggestedAllIn: round2(customerAllInFromBase(suggestedPrice, pricingConfig)),
     marketVendorCount: ordered.length,
     yourRankAfter: yourRank,
     guardrailsHit,

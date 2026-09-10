@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingConfig } from '../market-scraper/market-scrape-comparison.service.js';
 import { isExcludedVendor, normalizeVendorName, vendorKey } from '../market-scraper/market-vendor.js';
 import { loadCompetitorRows, kayakAllInConfirmed } from '../market-scraper/rate-offer-source.js';
-import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
+import { baseFromCustomerAllIn, customerAllInFromBase, competitorAllIn, competitorAllInBasis } from '../market-scraper/pricing-grossup.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { renderReportExcel } from '../reports/reports-export.js';
@@ -346,13 +346,24 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
   // Competitor-pool hygiene: drop the tenant's own brand / configured exclusions
   // and normalize vendor spellings so one brand isn't double-counted.
   const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
+  // ALL-IN on BOTH sides (2026-09-10). `yourRate.daily` below is grossed up to
+  // the all-in a customer pays whenever the airport has a tax config, but the
+  // competitor ladder was the raw QUOTE -- and Kayak's quote is a teaser,
+  // measured that day at 0.582x Expedia's all-in. Ranking one against the other
+  // is why SJU read "#4 of 4" while sitting roughly at market: the card was
+  // comparing our price WITH taxes against theirs WITHOUT. Lift theirs the same
+  // way (taxes and flat fees, never our brokerage -- that is our channel cost,
+  // already inside the price they advertise through theirs).
+  const allInBasis = competitorAllInBasis(pricingConfig);
   const bySipp = new Map();
   for (const o of obs) {
     if (isExcludedVendor(o.vendor, excludeSet)) continue;
     if (!bySipp.has(o.sipp)) bySipp.set(o.sipp, []);
+    const quoted = priceOf(o);
     bySipp.get(o.sipp).push({
       vendor: normalizeVendorName(o.vendor),
-      price: priceOf(o),
+      price: pricingConfig ? competitorAllIn(quoted, pricingConfig) : quoted,
+      quotedPrice: quoted,
       teaserPrice: NUM(o.dailyPrice),
       observedAt: o.observedAt,
     });
@@ -367,10 +378,10 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
     for (const r of rows) {
       const key = (r.vendor || '?').trim();
       const prev = perVendor.get(key);
-      if (prev == null || r.price < prev) perVendor.set(key, r.price);
+      if (prev == null || r.price < prev.price) perVendor.set(key, { price: r.price, quoted: r.quotedPrice });
     }
     const ordered = Array.from(perVendor.entries())
-      .map(([vendor, price]) => ({ vendor, price }))
+      .map(([vendor, v]) => ({ vendor, price: v.price, quoted: v.quoted }))
       .sort((a, b) => a.price - b.price);
 
     const prices = ordered.map((v) => v.price);
@@ -409,6 +420,11 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       median,
       min,
       max,
+      // How the competitor ladder was lifted: MEASURED | TAXES_ONLY | QUOTED.
+      // QUOTED means no tax config for this airport, so the ranking is
+      // quote-vs-base and the screen must not claim otherwise.
+      priceBasis: allInBasis.basis,
+      competitorFactor: allInBasis.factor,
       vendorCount: ordered.length,
       topVendors: ordered.slice(0, 5),
       yourRate: yourRow,
