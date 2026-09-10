@@ -4,7 +4,10 @@ import { isExcludedVendor, normalizeVendorName, vendorKey } from '../market-scra
 import { loadCompetitorRows, kayakAllInConfirmed } from '../market-scraper/rate-offer-source.js';
 import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
 import { buildRankClaim, describeDurability, claimSentence } from './market-claim.js';
-import { splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, TIER } from './self-position.js';
+import {
+  splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, TIER,
+  ratioWindowStart, resolveRatio, measureLocationRatio, RATIO_SOURCE,
+} from './self-position.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { renderReportExcel } from '../reports/reports-export.js';
@@ -324,7 +327,9 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       },
       select: {
         sipp: true,
-        rate: { select: { id: true, rateCode: true, daily: true, name: true } },
+        // updatedAt anchors the ratio window: evidence from before the base
+        // moved is evidence about a different base.
+        rate: { select: { id: true, rateCode: true, daily: true, name: true, updatedAt: true } },
       },
     });
     for (const r of rules) {
@@ -431,6 +436,40 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
     }
   }
 
+  // OUR OWN LISTINGS, over the ratio's own window (2026-09-10).
+  //
+  // The ladder above is 24 hours old because it is today's market. The ratio is
+  // a slow property of the channel, and measuring it in the same 24 hours threw
+  // away nearly all the evidence: at SJU our own listing appears 979 times over
+  // 27 days for CFAR and 3 times in the last day, so four classes read
+  // UNCALIBRATED for no reason but the window.
+  //
+  // Anchored per rate to the last time its base moved -- an old listing divided
+  // by today's base measures the price change, not the channel.
+  const selfWindowBySipp = new Map();
+  const locationRatioInput = [];
+  if (profileIds.length && ownRatesBySipp.size) {
+    for (const [sipp, rate] of ownRatesBySipp.entries()) {
+      try {
+        const since = ratioWindowStart({ baseChangedAt: rate.updatedAt || null });
+        const rows = await prisma.rateOffer.findMany({
+          where: { profileId: { in: profileIds }, sipp, observedAt: { gte: since }, effectiveDailyPrice: { not: null } },
+          select: { supplier: true, effectiveDailyPrice: true, observedAt: true },
+        });
+        const mine = rows
+          .filter((r) => r.supplier && isExcludedVendor(r.supplier, excludeSet))
+          .map((r) => ({ supplier: r.supplier, price: Number(r.effectiveDailyPrice), observedAt: r.observedAt }));
+        selfWindowBySipp.set(sipp, { rows: mine, since });
+        locationRatioInput.push({ base: Number(rate.daily), selfRows: mine });
+      } catch (_) {
+        // A class without its window simply falls back down the hierarchy.
+      }
+    }
+  }
+  // Every class at one airport goes through the same channel, so one class's
+  // listings are real evidence about another's base.
+  const locationRatio = measureLocationRatio(locationRatioInput);
+
   const sipps = [];
   for (const [sipp, rows] of bySipp.entries()) {
     if (rows.length === 0) continue;
@@ -493,7 +532,21 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
     // did NOT catch our listing for the date in question.
     const selfRows = selfBySipp.get(sipp) || [];
     const ownBase = yourRow ? yourRow.base : null;
-    const selfRatio = measureSelfBaseRatio(selfRows, ownBase);
+    // The class's own ratio, measured over the ratio window rather than the
+    // ladder's 24 hours; then the hierarchy: class -> location -> assume 1.
+    const windowRows = selfWindowBySipp.get(sipp)?.rows || selfRows;
+    const classRatio = measureSelfBaseRatio(windowRows, ownBase);
+    const resolved = resolveRatio({ classRatio, locationRatio });
+    const selfRatio = {
+      ...classRatio,
+      // What was actually used, and where it came from -- the card renders
+      // ASSUMED as UNCALIBRATED.
+      used: resolved.ratio,
+      source: resolved.source,
+      usedN: resolved.n,
+      windowFrom: selfWindowBySipp.get(sipp)?.since || null,
+      location: locationRatio,
+    };
 
     // Position per pickup date, at the highest tier the data supports.
     const positionByDate = new Map();
@@ -503,7 +556,7 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
         selfRows: onDate(selfRows),
         rivalRows: onDate(rows),
         base: ownBase,
-        ratio: selfRatio.median,
+        ratio: resolved.source === RATIO_SOURCE.ASSUMED ? null : resolved.ratio,
         pickupDate: d,
       }));
     }
@@ -515,7 +568,7 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
     // number answering a different question.
     const ourListedForClaim = nearestPosition && nearestPosition.ourListed != null
       ? nearestPosition.ourListed
-      : (ownBase != null && selfRatio.median ? ownBase * selfRatio.median : ownBase);
+      : (ownBase != null ? ownBase * resolved.ratio : null);
     const claim = buildRankClaim({
       rows: nearestKey
         ? rows.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === nearestKey)

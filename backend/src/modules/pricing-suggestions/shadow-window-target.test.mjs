@@ -129,15 +129,32 @@ test('the shadow builds its ladder PER PICKUP DATE, not across the window', asyn
   } finally { m.restore(); }
 });
 
-test('our own brand is excluded from the shadow ladder and used for the ratio', async () => {
+test('our own brand is recognised, and TWO listings is anecdote rather than calibration', async () => {
+  // The hierarchy needs three of our own listings before it will price off
+  // them. Two are still measured and reported -- they just do not get used.
   const m = installMock({ offers: POOL });
   try {
     await evaluateRule(rule());
     const s = m.state.suggestionCreates[0].reason.shadow;
     assert.equal(s.selfListingsSeen, 2, 'both ZezGo rows recognised as ours');
-    assert.equal(s.ratio.n, 2, 'and used to measure listed/base');
-    assert.ok(s.ratio.median > 0.9 && s.ratio.median < 1.0, `ratio ${s.ratio.median}`);
-    assert.equal(s.ratioAssumed, false, 'measured, not assumed');
+    assert.equal(s.ratio.n, 2, 'measured');
+    assert.ok(s.ratio.median > 0.9 && s.ratio.median < 1.0, 'and reported');
+    assert.equal(s.ratio.source, 'ASSUMED', 'but not used: two is not a sample');
+    assert.equal(s.ratioAssumed, true);
+  } finally { m.restore(); }
+});
+
+test('THREE of our own listings and the ratio is used, sourced CLASS', async () => {
+  const withThird = [...POOL, offer('ZezGo', 13.5, '2026-09-13'),
+    offer('Payless', 15.5, '2026-09-13'), offer('Advantage', 16.5, '2026-09-13'), offer('Hertz', 22, '2026-09-13')];
+  const m = installMock({ offers: withThird });
+  try {
+    await evaluateRule(rule());
+    const s = m.state.suggestionCreates[0].reason.shadow;
+    assert.equal(s.ratio.n, 3);
+    assert.equal(s.ratio.source, 'CLASS');
+    assert.equal(s.ratioAssumed, false, 'now it is calibration');
+    assert.ok(s.ratioUsed > 0.9 && s.ratioUsed < 1.0, `used ${s.ratioUsed}`);
   } finally { m.restore(); }
 });
 

@@ -109,6 +109,99 @@ export function measureSelfBaseRatio(selfRows = [], base = null) {
 }
 
 /**
+ * How far back the RATIO may look (2026-09-10).
+ *
+ * The ladder must be fresh -- 24 hours, because it is today's market. The ratio
+ * is a slow property of the CHANNEL, and measuring it in the same 24 hours
+ * throws away almost all the evidence: at SJU the tenant's own listing appears
+ * 979 times over 27 days for CFAR and 3 times in the last day, 199 times over
+ * 12 days for SFAR and zero in the last day. Four classes read UNCALIBRATED
+ * purely because of the window.
+ *
+ * But it cannot look back indefinitely either, and this is the trap: the BASE
+ * moved during those 30 days (56 suggestions were applied, SFAR going $21.66 to
+ * $37.90), so dividing an old listing by today's base measures the price
+ * change, not the channel. Measured that way the ratios blew out to 0.702-3.809
+ * for CFAR — noise wearing a calibration's clothes.
+ *
+ * So the window starts at the LATER of (now - days) and the last time the base
+ * moved. A rate edited an hour ago simply has nothing to measure yet, which is
+ * the honest answer rather than a confident wrong one.
+ */
+export const DEFAULT_RATIO_WINDOW_DAYS = 14;
+
+export function ratioWindowStart({ now = new Date(), days = DEFAULT_RATIO_WINDOW_DAYS, baseChangedAt = null } = {}) {
+  const end = new Date(now);
+  if (Number.isNaN(end.getTime())) return null;
+  const back = new Date(end.getTime() - Math.max(1, Number(days) || DEFAULT_RATIO_WINDOW_DAYS) * 86400000);
+  const changed = baseChangedAt ? new Date(baseChangedAt) : null;
+  if (!changed || Number.isNaN(changed.getTime())) return back;
+  return changed > back ? changed : back;
+}
+
+/**
+ * Which ratio to actually use, and where it came from.
+ *
+ * A class with one or two of its own listings is not calibrated, it is
+ * anecdotal, so it falls back to the location's ratio — every class at one
+ * airport goes through the same channel, so the tenant's own CCAR listings are
+ * real evidence about what that channel does to a CFAR base. Only when neither
+ * has a sample does it assume 1, and then it says so: `ASSUMED` is what the
+ * card renders as UNCALIBRATED.
+ *
+ * Never averages the two. A weak class ratio blended with a strong location one
+ * produces a number that describes nothing and cannot be traced.
+ */
+export const RATIO_SOURCE = { CLASS: 'CLASS', LOCATION: 'LOCATION', ASSUMED: 'ASSUMED' };
+export const MIN_RATIO_SAMPLE = 3;
+
+export function resolveRatio({ classRatio = null, locationRatio = null, minSample = MIN_RATIO_SAMPLE } = {}) {
+  const min = Math.max(1, Number(minSample) || MIN_RATIO_SAMPLE);
+  const usable = (r) => r && Number(r.n) >= min && Number(r.median) > 0;
+  if (usable(classRatio)) {
+    return { ratio: classRatio.median, source: RATIO_SOURCE.CLASS, n: classRatio.n, spreadPct: classRatio.spreadPct ?? null };
+  }
+  if (usable(locationRatio)) {
+    return { ratio: locationRatio.median, source: RATIO_SOURCE.LOCATION, n: locationRatio.n, spreadPct: locationRatio.spreadPct ?? null };
+  }
+  return { ratio: 1, source: RATIO_SOURCE.ASSUMED, n: (classRatio?.n || 0) + (locationRatio?.n || 0), spreadPct: null };
+}
+
+/**
+ * The location-wide ratio: every class's own listings against the base that was
+ * live for that class, pooled. Callers pass one entry per class so a class with
+ * a thousand listings cannot drown out the rest -- the median is taken over the
+ * per-observation ratios, but each class contributes only what it observed.
+ */
+export function measureLocationRatio(perClass = []) {
+  const values = [];
+  for (const entry of Array.isArray(perClass) ? perClass : []) {
+    const rows = Array.isArray(entry?.selfRows) ? entry.selfRows : [];
+    const base = Number(entry?.base);
+    if (!Number.isFinite(base) || base <= 0) continue;
+    for (const r of rows) {
+      const listed = Number(r?.price ?? r?.listed ?? r?.effectiveDailyPrice);
+      if (!Number.isFinite(listed) || listed <= 0) continue;
+      values.push(listed / base);
+    }
+  }
+  if (!values.length) return { n: 0, median: null, min: null, max: null, spreadPct: null };
+  values.sort((a, b) => a - b);
+  const median = values.length % 2
+    ? values[(values.length - 1) / 2]
+    : (values[values.length / 2 - 1] + values[values.length / 2]) / 2;
+  const lo = values[0];
+  const hi = values[values.length - 1];
+  return {
+    n: values.length,
+    median: Math.round(median * 10000) / 10000,
+    min: Math.round(lo * 10000) / 10000,
+    max: Math.round(hi * 10000) / 10000,
+    spreadPct: lo > 0 ? Math.round(((hi / lo) - 1) * 1000) / 10 : null,
+  };
+}
+
+/**
  * Our position on ONE pickup date, at the highest tier the data supports.
  *
  * @param {object[]} selfRows  our own listings for that date  {supplier, price, observedAt}

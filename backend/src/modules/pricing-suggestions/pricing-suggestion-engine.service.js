@@ -6,7 +6,7 @@ import { vendorKey } from '../market-scraper/market-vendor.js';
 import { competitorAllIn, competitorAllInBasis, baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
 import { getCompetitorExcludeSet } from '../market-scraper/market-scrape-comparison.service.js';
 import { isExcludedVendor } from '../market-scraper/market-vendor.js';
-import { splitSelfAndRivals, measureSelfBaseRatio, latestPerSupplier } from '../market-observations/self-position.js';
+import { splitSelfAndRivals, measureSelfBaseRatio, latestPerSupplier, ratioWindowStart, resolveRatio, RATIO_SOURCE } from '../market-observations/self-position.js';
 import { recommendBaseForTarget, targetSentence } from '../market-observations/window-target.js';
 import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
@@ -298,11 +298,31 @@ async function shadowWindowTarget(rule, obs, { sipp, targetN, paddingPct }) {
       laddersByDate.set(d, latestPerSupplier(rivals.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === d)));
     }
 
-    const ratio = measureSelfBaseRatio(self, Number(rule.rate.daily));
+    // The ratio gets its OWN window: the ladder is 24h because it is today's
+    // market, but our own listing appears far more often over a fortnight --
+    // 979 times over 27 days for CFAR at SJU against 3 in the last day.
+    // Anchored to the last base change, because an old listing over today's
+    // base measures the price change rather than the channel.
+    let ratio = measureSelfBaseRatio(self, Number(rule.rate.daily));
+    try {
+      const since = ratioWindowStart({ baseChangedAt: rule.rate.updatedAt || null });
+      const wide = await prisma.rateOffer.findMany({
+        where: { sipp, observedAt: { gte: since }, effectiveDailyPrice: { not: null },
+                 profile: { locationCode: rule.rate.location.code, tenantId: rule.tenantId } },
+        select: { supplier: true, effectiveDailyPrice: true, observedAt: true },
+      });
+      const mine = wide
+        .filter((r) => r.supplier && isExcludedVendor(r.supplier, excludeSet))
+        .map((r) => ({ supplier: r.supplier, price: Number(r.effectiveDailyPrice), observedAt: r.observedAt }));
+      if (mine.length) ratio = measureSelfBaseRatio(mine, Number(rule.rate.daily));
+    } catch (_) {
+      // Fall back to the 24h measurement rather than losing the shadow.
+    }
+    const resolved = resolveRatio({ classRatio: ratio });
     const rec = recommendBaseForTarget({
       laddersByDate,
       targetN,
-      ratio: ratio.median,
+      ratio: resolved.source === RATIO_SOURCE.ASSUMED ? null : resolved.ratio,
       floor: Number(rule.floorPrice),
       ceiling: Number(rule.ceilingPrice),
       paddingPct,
@@ -311,7 +331,7 @@ async function shadowWindowTarget(rule, obs, { sipp, targetN, paddingPct }) {
       ...rec,
       sipp,
       selfListingsSeen: self.length,
-      ratio,
+      ratio: { ...ratio, used: resolved.ratio, source: resolved.source },
       sentence: targetSentence(rec, { asOf: obs.length ? obs[obs.length - 1].observedAt : null }),
     };
   } catch (e) {
