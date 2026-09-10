@@ -76,6 +76,12 @@ function CitationsInner({ token, me, logout }) {
   const [activeTenantId, setActiveTenantId] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
+  // Branch filter (2026-09-10). A citation has no location of its own, so this
+  // resolves through the matched vehicle's home branch — the same hop the
+  // permission scope uses. Corpusa's list was 175 Los Angeles citations
+  // interleaved with 80 Orlando ones.
+  const [locationFilter, setLocationFilter] = useState('');
+  const [branches, setBranches] = useState(null);
   const [plateFilter, setPlateFilter] = useState('');
   const [reviewOnly, setReviewOnly] = useState(false);
   // LAX #11: 'working' (default, VOID/CLOSED excluded server-side) | 'archive'.
@@ -116,6 +122,7 @@ function CitationsInner({ token, me, logout }) {
       if (statusFilter) params.set('status', statusFilter);
       else if (reviewOnly) params.set('status', 'NEEDS_REVIEW');
       if (sourceFilter) params.set('source', sourceFilter);
+      if (locationFilter) params.set('locationId', locationFilter);
       if (plateFilter.trim()) params.set('plate', plateFilter.trim());
       const out = await api(scoped(`/api/citations?${params.toString()}`), {}, token);
       setData(out);
@@ -127,7 +134,23 @@ function CitationsInner({ token, me, logout }) {
 
   useEffect(() => { loadTenants(); }, [token, isSuper]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [token, statusFilter, sourceFilter, reviewOnly, activeTenantId, isSuper, view]);
+  useEffect(() => { load(); }, [token, statusFilter, sourceFilter, locationFilter, reviewOnly, activeTenantId, isSuper, view]);
+
+  // The counts are what make the choice meaningful: a picker that only lists
+  // branches hides that Orlando has 80 rows waiting.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const out = await api(scoped('/api/citations/location-breakdown'), {}, token);
+        if (!cancelled) setBranches(out);
+      } catch {
+        if (!cancelled) setBranches(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeTenantId, isSuper]);
 
   const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
   const kpis = useMemo(() => {
@@ -312,9 +335,29 @@ function CitationsInner({ token, me, logout }) {
                 <option value="CLOSED">Closed</option>
                 <option value="VOID">Void</option>
               </select>
+              {branches && (branches.locations?.length || branches.unmatched?.count) ? (
+                <select
+                  value={locationFilter}
+                  onChange={(e) => setLocationFilter(e.target.value)}
+                  title="Resolved through the matched vehicle's home branch — a citation carries no branch of its own"
+                >
+                  <option value="">All branches ({branches.total})</option>
+                  {(branches.locations || []).map((b) => (
+                    <option key={b.locationId} value={b.locationId}>
+                      {b.code} ({b.count})
+                    </option>
+                  ))}
+                  {branches.unmatched?.count ? (
+                    <option value="UNMATCHED">No vehicle matched ({branches.unmatched.count})</option>
+                  ) : null}
+                </select>
+              ) : null}
               <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
                 <option value="">All sources</option>
-                <option value="CITATION_PROCESSING_CENTER">CPC (Orlando)</option>
+                {/* CPC is a California parking processor despite the account
+                    being slugged "orlando" — the label said Orlando and the
+                    rows are mostly Long Beach, Beverly Hills and Pasadena. */}
+                <option value="CITATION_PROCESSING_CENTER">Citation Processing Center</option>
                 <option value="T2">T2</option>
                 <option value="OCSO_COMPTROLLER">OCSO</option>
                 <option value="VIOLATIONINFO">Verra</option>
