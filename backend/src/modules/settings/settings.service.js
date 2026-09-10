@@ -100,6 +100,9 @@ const DASHBOARD_SIPP_CODES = [
 ];
 const DASHBOARD_SIPP_MAX = 6;
 
+/** Distinct agencies a market cell needs before a rule may move a live price. */
+const DEFAULT_MIN_SAMPLE_VENDORS = 3;
+
 const DEFAULT_EMAIL_TEMPLATES = {
   requestSignatureSubject: 'Signature Request - Reservation {{reservationNumber}}',
   requestSignatureBody: 'Hello {{customerName}},\n\nPlease sign your rental documents using this secure link:\n{{link}}\n\nThank you.',
@@ -2373,10 +2376,17 @@ export const settingsService = {
   // rule is skipped ('below_min_sample'). Default 1 = exactly the pre-guard
   // behavior (a single offer can still move a price) — Hector picks the real
   // floor later; this ships the mechanism only.
+  // Distinct agencies a market cell must contain before a pricing rule may move
+  // a live price. DEFAULT 3 since 2026-09-10 (Hector) -- it was 1, which is the
+  // same as no guard at all: SJU's FCAR cell held 80 rows that were ONE supplier
+  // quoting ONE Chevrolet Malibu, and LFAR was ten rows from a single agency,
+  // and both were free to move a live online price. Three is the floor
+  // `price-self-check.js` already uses, so the two subsystems now agree on what
+  // counts as a market.
   async getMarketPricingSampleConfig(scope = {}) {
     const cfg = await readJsonSetting(scopedKey('marketPricingConfig', scope), null);
     const n = Number(cfg?.minSampleVendors);
-    return { minSampleVendors: Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1 };
+    return { minSampleVendors: Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MIN_SAMPLE_VENDORS };
   },
 
   async updateMarketPricingSampleConfig(payload = {}, scope = {}) {

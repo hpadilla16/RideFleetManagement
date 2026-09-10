@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 import { settingsService } from '../settings/settings.service.js';
 import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
+import { vendorKey } from '../market-scraper/market-vendor.js';
 import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
@@ -24,15 +25,23 @@ import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js
 
 const SUGGESTION_TTL_MS = 48 * 60 * 60 * 1000; // 48h
 
+/** Distinct agencies a cell must contain before a rule may move a live price. */
+const DEFAULT_MIN_SAMPLE_VENDORS = 3;
+
 /**
  * Minimum-sample guard (2026-09-02, mechanism only). How many DISTINCT
  * agencies (vendors) must be present in the cell — after the adapter's
  * purpose:'pricing' filters/gating — before a rule may act. Config lives in
  * the per-tenant marketPricingConfig AppSetting
- * (settingsService.getMarketPricingSampleConfig). DEFAULT 1 = exactly the
- * pre-guard behavior: one offer can still move a live price until Hector
- * raises the floor. Any config-read failure also falls back to 1, so the
- * engine never goes dark because of a settings hiccup.
+ * (settingsService.getMarketPricingSampleConfig).
+ *
+ * DEFAULT 3 since 2026-09-10 (Hector). It was 1, which is the same as having
+ * no guard: SJU's FCAR cell held 80 rows that were ONE supplier quoting ONE
+ * Chevrolet Malibu, and LFAR was ten rows from a single agency — both passed a
+ * floor of one and both were free to move a live online price. Three distinct
+ * agencies is the same floor `price-self-check.js` already uses, so the two
+ * subsystems now agree on what counts as a market. A config-read failure still
+ * falls back to the default rather than going dark.
  */
 async function resolveMinSampleVendors(tenantId, getMinSampleConfig = null) {
   try {
@@ -42,7 +51,7 @@ async function resolveMinSampleVendors(tenantId, getMinSampleConfig = null) {
     const n = Number(cfg?.minSampleVendors);
     if (Number.isFinite(n) && n >= 1) return Math.floor(n);
   } catch { /* default below */ }
-  return 1;
+  return DEFAULT_MIN_SAMPLE_VENDORS;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,12 +292,21 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
 
   // Compute per-vendor min (one vendor may have multiple pickup-date rows).
+  //
+  // Keyed on the CANONICAL vendor key, not the display name (2026-09-10). The
+  // feed spells one agency several ways — "U-Save" and "U-Save Car Rental" —
+  // and grouping by the raw string counted them as two distinct competitors.
+  // That inflated the ladder and, worse, let a single agency clear the
+  // minimum-sample floor by itself, which is the one thing the floor exists to
+  // prevent. The display name of the cheapest row is kept for the reason
+  // payload, so nothing a human reads changes.
   const perVendor = new Map();
   for (const o of obs) {
-    const v = (o.vendor || '?').trim();
+    const display = (o.vendor || '?').trim();
+    const key = vendorKey(display) || display.toLowerCase();
     const price = priceOf(o);
-    const prev = perVendor.get(v);
-    if (prev == null || price < prev.price) perVendor.set(v, { vendor: v, price, observationId: o.id });
+    const prev = perVendor.get(key);
+    if (prev == null || price < prev.price) perVendor.set(key, { vendor: display, price, observationId: o.id });
   }
   // Minimum-sample guard: perVendor.size is the number of DISTINCT agencies in
   // this cell after every existing filter (24h window, SIPP+location, adapter
