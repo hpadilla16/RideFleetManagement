@@ -62,7 +62,9 @@ const SIPP_LABELS = {
   // "Class FJAR". IRC's Wrangler is FJAR; Corpusa/IRC also run vans, pickups
   // and open-air 4x4s, and a card with no name reads as a bug.
   LFAR: 'Luxury SUV',
-  RFAR: 'Premium SUV',
+  // RFAR is a RECREATIONAL vehicle in ACRISS (R = recreational), not premium --
+  // the scraper maps 'Recreational Vehicle' / 'RV' to it. P is premium (PFAR).
+  RFAR: 'Recreational Vehicle',
   XFAR: 'Special SUV',
   FJAR: 'Open-Air 4x4',
   FVAR: 'Passenger Van',
