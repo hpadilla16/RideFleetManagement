@@ -609,6 +609,9 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
   // Say so, with the date, instead of showing an empty chart under "unranked".
   const noComparables = !!data.noComparables || (vendorCount === 0 && data.median == null);
   const lastSeenDay = fmtDay(data.lastSeenAt);
+  // The last rival price we ever saw, so the card answers "and what were they
+  // charging?" without a trip to the drill-down.
+  const lastOffer = data.lastOffer && data.lastOffer.price != null ? data.lastOffer : null;
 
   // Delta + sparkline span the selected range (the history is fetched with days=rangeDays).
   const yourSeries = useMemo(() => {
@@ -664,6 +667,12 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: '#6e7587', fontSize: 11, textAlign: 'center' }}>
             <span>your price only — nothing to compare it against</span>
             <span style={{ color: '#3a4153' }}>the market has not quoted this class in the last 24h</span>
+            {lastOffer && (
+              <span style={{ marginTop: 6, color: '#94a3b8' }}>
+                last rival seen: <span style={{ color: '#e2e8f5', fontWeight: 600 }}>{fmtMoney(lastOffer.price)}</span>
+                {lastOffer.supplier ? ` · ${lastOffer.supplier}` : ''}
+              </span>
+            )}
           </div>
         ) : history ? (
           <Sparkline history={history} yourPrice={yourPrice} />
@@ -678,7 +687,11 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
         {noComparables ? (
           <>
             <span style={{ color: '#fbbf24', fontWeight: 600 }}>No comparables</span>
-            <span>{lastSeenDay ? `Last seen ${lastSeenDay}` : 'Never seen at this airport'}</span>
+            <span>
+              {lastOffer
+                ? `${lastOffer.supplier || 'Rival'} ${fmtMoney(lastOffer.price)} · ${lastSeenDay}`
+                : (lastSeenDay ? `Last seen ${lastSeenDay}` : 'Never seen at this airport')}
+            </span>
           </>
         ) : (
           <>

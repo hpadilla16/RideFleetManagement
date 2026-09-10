@@ -145,21 +145,43 @@ export async function listMarketProviders({ airport, scope }) {
 }
 
 /**
+ * One rival offer, normalized for a card. Returns null unless BOTH a usable
+ * price and a date survived -- half a data point on a money screen invites a
+ * decision nobody can defend.
+ */
+function lastOffer(row) {
+  if (!row) return null;
+  const at = row.observedAt ? new Date(row.observedAt) : null;
+  if (!at || Number.isNaN(at.getTime())) return null;
+  const raw = row.price;
+  if (raw === null || raw === undefined || raw === '') return null;
+  const price = Number(raw);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  return { price, supplier: row.supplier ? String(row.supplier) : null, observedAt: at };
+}
+
+/**
  * Cards for the classes the tenant PRICES but the market did not quote in the
  * window. Without these the class disappears from the dashboard, which reads
  * as "we do not track this" when the truth is "nobody offered it" -- the two
  * need different actions from a revenue manager. Pure so it can be tested
  * without a database.
  *
+ * The card also carries the LAST rival offer we ever saw for the class, not
+ * just the date: "Routes $90.67 - Aug 5" is a number a revenue manager can act
+ * on, where "Last seen Aug 5" only tells them to go dig. The tenant's own brand
+ * is excluded, so the card can never quote them their own price as a rival.
+ *
  * @param {Map<string, {id,rateCode,daily}>} ownRatesBySipp - the tenant's rate per SIPP
  * @param {Set<string>} quotedSipps - SIPPs the market DID quote (these are skipped)
  * @param {object|null} pricingConfig - gross-up config, when the airport has one
- * @param {Map<string, Date|null>} [lastSeenBySipp] - last time the class was seen at all
+ * @param {Map<string, {observedAt, price, supplier}|null>} [lastOfferBySipp] - the newest
+ *   rival offer ever recorded for the class at this airport, at any age
  */
-export function buildUncomparedCards({ ownRatesBySipp, quotedSipps, pricingConfig = null, lastSeenBySipp = new Map() }) {
+export function buildUncomparedCards({ ownRatesBySipp, quotedSipps, pricingConfig = null, lastOfferBySipp = new Map() }) {
   const own = ownRatesBySipp instanceof Map ? ownRatesBySipp : new Map(Object.entries(ownRatesBySipp || {}));
   const quoted = quotedSipps instanceof Set ? quotedSipps : new Set(quotedSipps || []);
-  const seen = lastSeenBySipp instanceof Map ? lastSeenBySipp : new Map(Object.entries(lastSeenBySipp || {}));
+  const seen = lastOfferBySipp instanceof Map ? lastOfferBySipp : new Map(Object.entries(lastOfferBySipp || {}));
   const out = [];
   for (const [sipp, rate] of own.entries()) {
     if (!sipp || quoted.has(sipp)) continue;
@@ -190,7 +212,10 @@ export function buildUncomparedCards({ ownRatesBySipp, quotedSipps, pricingConfi
       // Distinguishes "watched and nothing seen" from "not watched". The
       // frontend keys its empty state off this flag.
       noComparables: true,
-      lastSeenAt: seen.get(sipp) || null,
+      // A price with no date is a rumour and a date with no price is a chore,
+      // so the card gets both or neither.
+      lastOffer: lastOffer(seen.get(sipp)),
+      lastSeenAt: lastOffer(seen.get(sipp))?.observedAt || null,
     });
   }
   return out;
@@ -399,22 +424,38 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
   // compared" -- two very different problems. See buildUncomparedCards.
   const missingOwn = [...ownRatesBySipp.keys()].filter((s) => !bySipp.has(s));
   if (missingOwn.length) {
-    const lastSeenBySipp = new Map();
+    const lastOfferBySipp = new Map();
     try {
-      const seenRows = await prisma.rateOffer.groupBy({
-        by: ['sipp'],
-        where: { profileId: { in: profileIds }, sipp: { in: missingOwn } },
-        _max: { observedAt: true },
-      });
-      for (const r of seenRows) lastSeenBySipp.set(r.sipp, r._max?.observedAt || null);
+      // The 20 newest rows per class, then the first one that is not the
+      // tenant's own brand: DISTINCT ON would hand back a single row that
+      // could BE the tenant, and the card would quote them themselves.
+      const seenRows = await prisma.$queryRawUnsafe(
+        `select sipp, supplier, "effectiveDailyPrice" as price, "dailyPrice" as teaser, "observedAt"
+           from (
+             select o.sipp, o.supplier, o."effectiveDailyPrice", o."dailyPrice", o."observedAt",
+                    row_number() over (partition by o.sipp order by o."observedAt" desc) as rn
+               from "RateOffer" o
+              where o."profileId" = any($1) and o.sipp = any($2)
+           ) ranked
+          where rn <= 20
+          order by sipp, "observedAt" desc`,
+        profileIds,
+        missingOwn,
+      );
+      for (const r of seenRows) {
+        if (lastOfferBySipp.has(r.sipp)) continue;
+        if (isExcludedVendor(r.supplier, excludeSet)) continue;
+        const price = r.price != null ? r.price : r.teaser;
+        lastOfferBySipp.set(r.sipp, { observedAt: r.observedAt, price, supplier: normalizeVendorName(r.supplier) });
+      }
     } catch (_) {
-      // The card is still worth showing without a last-seen date.
+      // The card is still worth showing without a last-seen offer.
     }
     for (const card of buildUncomparedCards({
       ownRatesBySipp,
       quotedSipps: new Set(bySipp.keys()),
       pricingConfig,
-      lastSeenBySipp,
+      lastOfferBySipp,
     })) sipps.push(card);
   }
 
