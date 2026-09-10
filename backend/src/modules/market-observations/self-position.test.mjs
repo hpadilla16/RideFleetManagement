@@ -13,7 +13,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, latestPerSupplier, TIER } =
+const { splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, latestPerSupplier, TIER,
+  ratioWindowStart, resolveRatio, measureLocationRatio, RATIO_SOURCE, DEFAULT_RATIO_WINDOW_DAYS, MIN_RATIO_SAMPLE } =
   await import('./self-position.js');
 
 // IRC sells as ZezGo; everyone else is a rival.
@@ -164,4 +165,111 @@ test('never throws on junk', () => {
   }
   assert.deepEqual(splitSelfAndRivals(null, null), { self: [], rivals: [] });
   assert.equal(describeSelfCoverage(null).dates, 0);
+});
+
+// ---------------------------------------------------------------------------
+// The ratio window, and the fallback hierarchy (2026-09-10).
+//
+// Four SJU classes read UNCALIBRATED purely because the ratio was measured in
+// the same 24 hours as the ladder: CFAR has 979 of our own listings over 27
+// days and 3 in the last one. But the base MOVED during those 30 days (56
+// suggestions applied), and dividing an old listing by today's base measures
+// the price change, not the channel — which is how CFAR's ratio blew out to
+// 0.702-3.809.
+// ---------------------------------------------------------------------------
+test('THE WINDOW: it looks back, but never past the last base change', () => {
+  const now = new Date('2026-09-10T20:00:00Z');
+  const plain = ratioWindowStart({ now, days: 14 });
+  assert.equal(plain.toISOString().slice(0, 10), '2026-08-27');
+
+  // A base that moved four days ago truncates it: nothing before that is
+  // evidence about THIS base.
+  const truncated = ratioWindowStart({ now, days: 14, baseChangedAt: new Date('2026-09-06T05:00:00Z') });
+  assert.equal(truncated.toISOString(), '2026-09-06T05:00:00.000Z');
+
+  // A base that moved long ago does not extend the window.
+  const old = ratioWindowStart({ now, days: 14, baseChangedAt: new Date('2026-01-01T00:00:00Z') });
+  assert.equal(old.toISOString().slice(0, 10), '2026-08-27');
+});
+
+test('a rate edited an hour ago has nothing to measure — and that is the honest answer', () => {
+  const now = new Date('2026-09-10T20:00:00Z');
+  const start = ratioWindowStart({ now, days: 14, baseChangedAt: new Date('2026-09-10T19:00:00Z') });
+  assert.ok(start > new Date('2026-09-10T18:00:00Z'), 'the window is one hour wide, so almost nothing qualifies');
+});
+
+test('junk dates fall back to the plain window rather than throwing', () => {
+  const now = new Date('2026-09-10T20:00:00Z');
+  for (const bad of [null, undefined, 'nope', new Date('x')]) {
+    assert.equal(ratioWindowStart({ now, days: 14, baseChangedAt: bad }).toISOString().slice(0, 10), '2026-08-27');
+  }
+  assert.equal(ratioWindowStart({}) instanceof Date, true);
+  assert.equal(DEFAULT_RATIO_WINDOW_DAYS, 14);
+});
+
+// ---------------------------------------------------------------------------
+test('THE HIERARCHY: a class with enough of its own listings wins', () => {
+  const r = resolveRatio({
+    classRatio: { n: 7, median: 0.96, spreadPct: 12.9 },
+    locationRatio: { n: 400, median: 0.88 },
+  });
+  assert.deepEqual(r, { ratio: 0.96, source: RATIO_SOURCE.CLASS, n: 7, spreadPct: 12.9 });
+});
+
+test('one or two of its own listings is anecdote, not calibration — the location answers', () => {
+  // ICAR: 7 rows on 2 days. Same channel as every other class at the airport,
+  // so the airport's own evidence is better than the class's scraps.
+  for (const n of [0, 1, 2]) {
+    const r = resolveRatio({ classRatio: { n, median: 1.9 }, locationRatio: { n: 400, median: 0.88 } });
+    assert.equal(r.source, RATIO_SOURCE.LOCATION, );
+    assert.equal(r.ratio, 0.88);
+  }
+  assert.equal(MIN_RATIO_SAMPLE, 3);
+});
+
+test('neither has a sample: assume 1 and SAY it was assumed', () => {
+  const r = resolveRatio({ classRatio: { n: 0, median: null }, locationRatio: { n: 1, median: 2 } });
+  assert.equal(r.source, RATIO_SOURCE.ASSUMED);
+  assert.equal(r.ratio, 1);
+  assert.equal(resolveRatio({}).source, RATIO_SOURCE.ASSUMED);
+  assert.equal(resolveRatio().ratio, 1);
+});
+
+test('a nonsense median is not a ratio, however big its n', () => {
+  for (const median of [0, -1, null, 'abc']) {
+    assert.equal(resolveRatio({ classRatio: { n: 500, median } }).source, RATIO_SOURCE.ASSUMED);
+  }
+});
+
+test('the two are never averaged — a blended ratio describes nothing', () => {
+  const r = resolveRatio({ classRatio: { n: 5, median: 0.5 }, locationRatio: { n: 500, median: 1.5 } });
+  assert.equal(r.ratio, 0.5, 'the class ratio, untouched');
+});
+
+// ---------------------------------------------------------------------------
+test('the location ratio pools every class against ITS OWN base', () => {
+  // CCAR listings against a 4.14 base and CFAR against 8.99 — dividing
+  // both by one number would be meaningless.
+  const r = measureLocationRatio([
+    { base: 14.14, selfRows: [{ price: 13.0 }, { price: 14.67 }] },
+    { base: 18.99, selfRows: [{ price: 13.33 }, { price: 19.0 }] },
+  ]);
+  assert.equal(r.n, 4);
+  assert.ok(r.min > 0.7 && r.max < 1.05, `${r.min}..${r.max}`);
+});
+
+test('a class with no usable base contributes nothing rather than poisoning the pool', () => {
+  const r = measureLocationRatio([
+    { base: 0, selfRows: [{ price: 50 }] },
+    { base: null, selfRows: [{ price: 60 }] },
+    { base: 10, selfRows: [{ price: 10 }] },
+  ]);
+  assert.equal(r.n, 1);
+  assert.equal(r.median, 1);
+});
+
+test('measureLocationRatio never throws on junk', () => {
+  for (const v of [null, undefined, [], [null], [{ base: 5 }], [{ selfRows: [{}] }]]) {
+    assert.equal(typeof measureLocationRatio(v).n, 'number');
+  }
 });
