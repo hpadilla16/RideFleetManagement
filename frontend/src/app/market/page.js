@@ -607,6 +607,22 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
   const vendorCount = data.vendorCount || 0;
   // The class is watched and priced, but nobody quoted it in the last 24h.
   // Say so, with the date, instead of showing an empty chart under "unranked".
+  // The scoped claim: one pickup date, one moment. `verdict` drives the colour
+  // because "cheapest" and "dearest of 4" are not the same news.
+  const claim = data.claim && data.claim.verdict && data.claim.verdict !== 'NO_DATA' && data.claim.verdict !== 'NO_PRICE'
+    ? data.claim
+    : null;
+  const claimColor = claim?.verdict === 'CHEAPEST' ? '#4ade80'
+    : claim?.verdict === 'MOST_EXPENSIVE' ? '#f87171'
+    : '#fbbf24';
+  const claimHeadline = claim
+    ? (claim.verdict === 'CHEAPEST'
+        ? `Cheapest of ${claim.of}`
+        : claim.verdict === 'MOST_EXPENSIVE'
+          ? `Dearest of ${claim.of}`
+          : `#${claim.rank} of ${claim.of}`)
+      + (claim.pickupDate ? ` · ${claim.pickupDate}` : '')
+    : null;
   const noComparables = !!data.noComparables || (vendorCount === 0 && data.median == null);
   const lastSeenDay = fmtDay(data.lastSeenAt);
   // The last rival price we ever saw, so the card answers "and what were they
@@ -684,7 +700,18 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
             )}
           </div>
         ) : history ? (
-          <Sparkline history={history} yourPrice={yourPrice} />
+          <>
+            <Sparkline history={history} yourPrice={yourPrice} />
+            {/* A margin smaller than the class's typical overnight move is not a
+                position — measured at SJU, "cheapest minus $1" is inside the
+                noise for the cheap classes. Say so rather than let the green
+                "Cheapest" imply it will still be true tomorrow. */}
+            {claim?.durability?.durable === false && (
+              <div style={{ fontSize: 10, color: '#fbbf24', marginTop: 2 }} title={claim.durability.label}>
+                margin ${Number(claim.durability.margin).toFixed(2)} is inside the ${Number(claim.durability.overnightMove).toFixed(2)} overnight swing
+              </div>
+            )}
+          </>
         ) : (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3a4153', fontSize: 11 }}>
             loading chart…
@@ -704,13 +731,23 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
           </>
         ) : (
           <>
-            <span>
-              Rank: <span style={{ color: rankColor, fontWeight: 600 }}>
-                {yourRank != null ? `#${yourRank} of ${vendorCount} vendors` : 'unranked'}
+            {/* The claim is a FACT with an hour and a pickup date attached, not a
+                forecast: the 24h window spans fifty pickup dates, so a rank over
+                all of them is not a position anybody can buy. Median/Low stay,
+                labelled as the range they are. */}
+            {claim ? (
+              <span style={{ color: claimColor, fontWeight: 600 }} title={claim.sentence || ''}>
+                {claimHeadline}
               </span>
-            </span>
-            <span>
-              Median {fmtMoney(data.median)} · Low {fmtMoney(data.min)}
+            ) : (
+              <span>
+                Rank: <span style={{ color: rankColor, fontWeight: 600 }}>
+                  {yourRank != null ? `#${yourRank} of ${vendorCount} vendors` : 'unranked'}
+                </span>
+              </span>
+            )}
+            <span title="Across every pickup date observed in the last 24 hours — a range, not a position.">
+              24h {fmtMoney(data.min)}–{fmtMoney(data.median)}
             </span>
           </>
         )}
