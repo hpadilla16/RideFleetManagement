@@ -57,7 +57,22 @@ const SIPP_LABELS = {
   CFAR: 'Compact SUV',
   IFAR: 'Mid-size SUV',
   SFAR: 'Standard SUV',
-  FFAR: 'Full-size SUV'
+  FFAR: 'Full-size SUV',
+  // Beyond the core nine: classes real fleets rent that used to render as
+  // "Class FJAR". IRC's Wrangler is FJAR; Corpusa/IRC also run vans, pickups
+  // and open-air 4x4s, and a card with no name reads as a bug.
+  LFAR: 'Luxury SUV',
+  RFAR: 'Premium SUV',
+  XFAR: 'Special SUV',
+  FJAR: 'Open-Air 4x4',
+  FVAR: 'Passenger Van',
+  MVAR: 'Minivan',
+  SPAR: 'Pickup',
+  STAR: 'Sports Car',
+  SKAR: 'Cargo Van',
+  PCAR: 'Premium',
+  LCAR: 'Luxury',
+  PFAR: 'Premium SUV (4dr)'
 };
 
 // Forward booking window (pickup dates today..today+N). 60 added 2026-07-29
@@ -76,6 +91,14 @@ const RANGE_PILLS = [
 function fmtMoney(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
   return `$${Number(value).toFixed(2)}`;
+}
+
+/** Date only — used for "last seen" on a class with no live comparables. */
+function fmtDay(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleDateString('en-US', { dateStyle: 'medium' });
 }
 
 function fmtTimestamp(iso) {
@@ -580,6 +603,10 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
   const yourPrice = data.yourRate?.daily != null ? Number(data.yourRate.daily) : null;
   const yourRank = data.yourRank;
   const vendorCount = data.vendorCount || 0;
+  // The class is watched and priced, but nobody quoted it in the last 24h.
+  // Say so, with the date, instead of showing an empty chart under "unranked".
+  const noComparables = !!data.noComparables || (vendorCount === 0 && data.median == null);
+  const lastSeenDay = fmtDay(data.lastSeenAt);
 
   // Delta + sparkline span the selected range (the history is fetched with days=rangeDays).
   const yourSeries = useMemo(() => {
@@ -631,7 +658,12 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
       </div>
 
       <div style={{ height: 90, marginTop: 6 }}>
-        {history ? (
+        {noComparables ? (
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: '#6e7587', fontSize: 11, textAlign: 'center' }}>
+            <span>your price only — nothing to compare it against</span>
+            <span style={{ color: '#3a4153' }}>the market has not quoted this class in the last 24h</span>
+          </div>
+        ) : history ? (
           <Sparkline history={history} yourPrice={yourPrice} />
         ) : (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3a4153', fontSize: 11 }}>
@@ -641,14 +673,23 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
       </div>
 
       <div style={footerStyle}>
-        <span>
-          Rank: <span style={{ color: rankColor, fontWeight: 600 }}>
-            {yourRank != null ? `#${yourRank} of ${vendorCount} vendors` : 'unranked'}
-          </span>
-        </span>
-        <span>
-          Median {fmtMoney(data.median)} · Low {fmtMoney(data.min)}
-        </span>
+        {noComparables ? (
+          <>
+            <span style={{ color: '#fbbf24', fontWeight: 600 }}>No comparables</span>
+            <span>{lastSeenDay ? `Last seen ${lastSeenDay}` : 'Never seen at this airport'}</span>
+          </>
+        ) : (
+          <>
+            <span>
+              Rank: <span style={{ color: rankColor, fontWeight: 600 }}>
+                {yourRank != null ? `#${yourRank} of ${vendorCount} vendors` : 'unranked'}
+              </span>
+            </span>
+            <span>
+              Median {fmtMoney(data.median)} · Low {fmtMoney(data.min)}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
