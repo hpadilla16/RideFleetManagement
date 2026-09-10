@@ -145,6 +145,58 @@ export async function listMarketProviders({ airport, scope }) {
 }
 
 /**
+ * Cards for the classes the tenant PRICES but the market did not quote in the
+ * window. Without these the class disappears from the dashboard, which reads
+ * as "we do not track this" when the truth is "nobody offered it" -- the two
+ * need different actions from a revenue manager. Pure so it can be tested
+ * without a database.
+ *
+ * @param {Map<string, {id,rateCode,daily}>} ownRatesBySipp - the tenant's rate per SIPP
+ * @param {Set<string>} quotedSipps - SIPPs the market DID quote (these are skipped)
+ * @param {object|null} pricingConfig - gross-up config, when the airport has one
+ * @param {Map<string, Date|null>} [lastSeenBySipp] - last time the class was seen at all
+ */
+export function buildUncomparedCards({ ownRatesBySipp, quotedSipps, pricingConfig = null, lastSeenBySipp = new Map() }) {
+  const own = ownRatesBySipp instanceof Map ? ownRatesBySipp : new Map(Object.entries(ownRatesBySipp || {}));
+  const quoted = quotedSipps instanceof Set ? quotedSipps : new Set(quotedSipps || []);
+  const seen = lastSeenBySipp instanceof Map ? lastSeenBySipp : new Map(Object.entries(lastSeenBySipp || {}));
+  const out = [];
+  for (const [sipp, rate] of own.entries()) {
+    if (!sipp || quoted.has(sipp)) continue;
+    if (!rate) continue;
+    // Absence before coercion: Number(null) is 0, not NaN, so a finite check
+    // alone would turn an UNSET price into a $0.00 card. An explicit 0 is a
+    // real (and alarming) configured price and must still be shown.
+    const raw = rate.daily;
+    if (raw === null || raw === undefined || raw === '') continue;
+    const base = Number(raw);
+    if (!Number.isFinite(base)) continue;
+    const allIn = pricingConfig ? customerAllInFromBase(base, pricingConfig) : null;
+    out.push({
+      sipp,
+      median: null,
+      min: null,
+      max: null,
+      vendorCount: 0,
+      topVendors: [],
+      yourRate: {
+        id: rate.id,
+        code: rate.rateCode,
+        daily: allIn != null ? allIn : base,
+        base,
+        allIn: allIn != null,
+      },
+      yourRank: null,
+      // Distinguishes "watched and nothing seen" from "not watched". The
+      // frontend keys its empty state off this flag.
+      noComparables: true,
+      lastSeenAt: seen.get(sipp) || null,
+    });
+  }
+  return out;
+}
+
+/**
  * GET /api/market/summary?airport=SJU
  *
  * For every SIPP class observed at the airport in the last 24h, return:
@@ -153,6 +205,10 @@ export async function listMarketProviders({ airport, scope }) {
  *   - your rate row (if a Rate exists matching the airport + SIPP via
  *     MarketScrapeProfile.targetRateId), and your rank in the sorted list
  *   - weekly delta vs the median 7 days ago
+ *
+ * A class the tenant prices but the market did not quote comes back too, with
+ * vendorCount 0 and `noComparables: true` (see buildUncomparedCards) -- it must
+ * not silently vanish from the grid.
  *
  * Used by the Market Intelligence Dashboard (1 card per SIPP class) and the
  * Pricing Intelligence panel ("current market position" card).
@@ -333,6 +389,33 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       yourRate: yourRow,
       yourRank,
     });
+  }
+
+  // A class the tenant PRICES but the market did not quote in the last 24h used
+  // to vanish from the dashboard entirely. That is how IRC's Jeep Wrangler
+  // became invisible: FJAR is priced at SJU ($115, online) but no competitor
+  // there has listed an open-air 4x4 since 2026-08-05, so the card silently
+  // disappeared and the class read as "not configured" instead of "not
+  // compared" -- two very different problems. See buildUncomparedCards.
+  const missingOwn = [...ownRatesBySipp.keys()].filter((s) => !bySipp.has(s));
+  if (missingOwn.length) {
+    const lastSeenBySipp = new Map();
+    try {
+      const seenRows = await prisma.rateOffer.groupBy({
+        by: ['sipp'],
+        where: { profileId: { in: profileIds }, sipp: { in: missingOwn } },
+        _max: { observedAt: true },
+      });
+      for (const r of seenRows) lastSeenBySipp.set(r.sipp, r._max?.observedAt || null);
+    } catch (_) {
+      // The card is still worth showing without a last-seen date.
+    }
+    for (const card of buildUncomparedCards({
+      ownRatesBySipp,
+      quotedSipps: new Set(bySipp.keys()),
+      pricingConfig,
+      lastSeenBySipp,
+    })) sipps.push(card);
   }
 
   // Sort by largest absolute median for now; frontend can resort.
