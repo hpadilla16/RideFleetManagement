@@ -93,7 +93,7 @@ function buildCompetitorBasis(row, taxAware) {
  * }>}
  */
 export async function applyRunSuggestions(runId, opts = {}) {
-  const { scope = {}, force = false, target = null } = opts;
+  const { scope = {}, force = false, target = null, acknowledgeDataQuality = false } = opts;
   const mode = opts.mode || (force ? 'manual' : 'auto');
   if (!runId) badRequest('runId required');
 
@@ -170,6 +170,7 @@ export async function applyRunSuggestions(runId, opts = {}) {
       hasOwnRateItem,
       currentFromFallback,
       mode,
+      acknowledgeDataQuality,
     });
 
     const competitorBasis = buildCompetitorBasis(anchor, taxAware);
