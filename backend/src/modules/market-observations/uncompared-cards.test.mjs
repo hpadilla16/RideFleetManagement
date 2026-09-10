@@ -28,7 +28,7 @@ test('THE ONE THAT MATTERS: a priced class the market ignored still gets a card'
   const out = buildUncomparedCards({
     ownRatesBySipp: new Map([['FJAR', WRANGLER], ['CCAR', COMPACT]]),
     quotedSipps: new Set(['CCAR']),
-    lastSeenBySipp: new Map([['FJAR', new Date('2026-08-05T12:00:00Z')]]),
+    lastOfferBySipp: new Map([['FJAR', { observedAt: new Date('2026-08-05T12:00:00Z'), price: 90.67, supplier: 'Routes Car & Truck Rentals' }]]),
   });
   assert.equal(out.length, 1, 'only the class nobody quoted');
   const [card] = out;
@@ -38,6 +38,8 @@ test('THE ONE THAT MATTERS: a priced class the market ignored still gets a card'
   assert.equal(card.yourRate.daily, 115, 'your own price is still shown');
   assert.equal(card.yourRate.code, 'SJU_FJAR_DAILY');
   assert.equal(card.lastSeenAt.toISOString().slice(0, 10), '2026-08-05');
+  assert.equal(card.lastOffer.price, 90.67, 'the rival price is the point of the card');
+  assert.match(card.lastOffer.supplier, /Routes/);
 });
 
 test('a class the market DID quote is never duplicated', () => {
@@ -66,7 +68,7 @@ test('never seen at all is reported as null, not as a fake date', () => {
   const [card] = buildUncomparedCards({
     ownRatesBySipp: new Map([['FVAR', { id: 'r-fvar', rateCode: 'SJU_FVAR_DAILY', daily: 250 }]]),
     quotedSipps: new Set(),
-    lastSeenBySipp: new Map(),
+    lastOfferBySipp: new Map(),
   });
   assert.equal(card.lastSeenAt, null, 'the card says "never seen", it does not invent today');
 });
@@ -119,11 +121,74 @@ test('a $0 rate IS a card — zero is a real (and alarming) configured price', (
   assert.equal(card.yourRate.base, 0);
 });
 
+// ---------------------------------------------------------------------------
+// The last rival offer (2026-09-10).
+//
+// Hector, after seeing the first version: a date alone still made him go dig.
+// The card now names the rival and the price -- "Routes $90.67 - Aug 5" -- which
+// is what the SJU Wrangler case actually needs: the market vanished from the
+// feed on 2026-08-05 at $90.67 while IRC sits at $168.50 all-in.
+// ---------------------------------------------------------------------------
+test("the tenant's OWN brand is never quoted back to them as a rival", () => {
+  // The newest row for the class may be the tenant's own listing. Showing it
+  // would tell them the market matches their price, which is circular.
+  const out = buildUncomparedCards({
+    ownRatesBySipp: new Map([['FJAR', WRANGLER]]),
+    quotedSipps: new Set(),
+    lastOfferBySipp: new Map([['FJAR', null]]),
+  });
+  assert.equal(out.length, 1, 'the card still renders');
+  assert.equal(out[0].lastOffer, null);
+  assert.equal(out[0].lastSeenAt, null);
+});
+
+test('half a data point is no data point: a price without a date is dropped', () => {
+  const [card] = buildUncomparedCards({
+    ownRatesBySipp: new Map([['FJAR', WRANGLER]]),
+    quotedSipps: new Set(),
+    lastOfferBySipp: new Map([['FJAR', { price: 90.67, supplier: 'Routes' }]]),
+  });
+  assert.equal(card.lastOffer, null, 'a price nobody can date is a rumour');
+});
+
+test('a date without a usable price is dropped too', () => {
+  for (const price of [null, undefined, '', 'abc', 0, -5]) {
+    const [card] = buildUncomparedCards({
+      ownRatesBySipp: new Map([['FJAR', WRANGLER]]),
+      quotedSipps: new Set(),
+      lastOfferBySipp: new Map([['FJAR', { observedAt: new Date('2026-08-05T12:00:00Z'), price, supplier: 'Routes' }]]),
+    });
+    assert.equal(card.lastOffer, null, `price ${JSON.stringify(price)} must not render`);
+    assert.equal(card.lastSeenAt, null, 'and the date goes with it');
+  }
+});
+
+test('a rival with no name still shows its price', () => {
+  // Kayak leaves the supplier blank on some rows. The number is the useful half.
+  const [card] = buildUncomparedCards({
+    ownRatesBySipp: new Map([['FJAR', WRANGLER]]),
+    quotedSipps: new Set(),
+    lastOfferBySipp: new Map([['FJAR', { observedAt: new Date('2026-08-05T12:00:00Z'), price: 87 }]]),
+  });
+  assert.equal(card.lastOffer.price, 87);
+  assert.equal(card.lastOffer.supplier, null);
+});
+
+test('lastSeenAt and lastOffer always agree — they come from one row', () => {
+  const [card] = buildUncomparedCards({
+    ownRatesBySipp: new Map([['FJAR', WRANGLER]]),
+    quotedSipps: new Set(),
+    lastOfferBySipp: new Map([['FJAR', { observedAt: '2026-08-05T14:30:00Z', price: '90.67', supplier: 'Routes' }]]),
+  });
+  assert.equal(card.lastOffer.observedAt.toISOString(), card.lastSeenAt.toISOString());
+  assert.equal(card.lastOffer.price, 90.67, 'a decimal arriving as a string still ranks');
+});
+
 test('plain objects work as well as Maps and Sets', () => {
   const out = buildUncomparedCards({
     ownRatesBySipp: { FJAR: WRANGLER },
     quotedSipps: ['CCAR'],
-    lastSeenBySipp: {},
+    lastOfferBySipp: {},
   });
   assert.equal(out.length, 1);
   assert.equal(out[0].sipp, 'FJAR');

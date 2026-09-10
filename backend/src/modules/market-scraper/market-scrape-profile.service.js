@@ -164,6 +164,55 @@ async function ensureTargetRateBelongsToTenant(targetRateId, tenantId) {
   }
 }
 
+/**
+ * Per-run day coverage (2026-09-10).
+ *
+ * A manual SJU run this afternoon asked Kayak for five pickup dates. One came
+ * back with ZERO offers, another needed a retry after a read timeout, and the
+ * run still recorded status SUCCESS with a healthy-looking observation count.
+ * An empty day is invisible that way: it does not error, it just quietly
+ * thins the sample the pricing engine then treats as the market.
+ *
+ * The scraper lives in another repo, so derive it here instead of waiting on a
+ * new field: a request the scraper called OK that produced no row for any
+ * pickup date produced nothing usable, whatever the HTTP status was.
+ *
+ * @param {{requestsOk?:number, requestsErr?:number}} run
+ * @param {Array<Date|string>} pickupDatesWithOffers - distinct pickup dates that got rows
+ */
+export function describeRunCoverage(run = {}, pickupDatesWithOffers = []) {
+  const requestsOk = Math.max(0, Number(run?.requestsOk) || 0);
+  const requestsErr = Math.max(0, Number(run?.requestsErr) || 0);
+
+  const days = new Set();
+  for (const d of Array.isArray(pickupDatesWithOffers) ? pickupDatesWithOffers : []) {
+    if (!d) continue;
+    if (typeof d === 'string') {
+      // 'not-a-date' is exactly ten characters long, so slicing is not
+      // validating: require the shape AND that it is a real calendar day.
+      const head = d.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(head) && !Number.isNaN(new Date(head + 'T00:00:00Z').getTime())) days.add(head);
+      continue;
+    }
+    const dt = new Date(d);
+    if (!Number.isNaN(dt.getTime())) days.add(dt.toISOString().slice(0, 10));
+  }
+  const daysWithOffers = days.size;
+
+  // Never negative: a day can legitimately carry rows from a retry the counter
+  // did not increment, and "-1 empty days" on a dashboard destroys trust in
+  // the whole number.
+  const emptyDays = Math.max(0, requestsOk - daysWithOffers);
+  return {
+    requestsOk,
+    requestsErr,
+    daysWithOffers,
+    emptyDays,
+    hasEmptyDays: emptyDays > 0,
+    pickupDatesWithOffers: [...days].sort(),
+  };
+}
+
 export const marketScrapeProfileService = {
   async list(scope = {}) {
     return prisma.marketScrapeProfile.findMany({
@@ -302,11 +351,40 @@ export const marketScrapeProfileService = {
     const profile = await this.getById(profileId, scope);
     if (!profile) throw Object.assign(new Error('Profile not found'), { httpStatus: 404 });
 
-    return prisma.marketScrapeRun.findMany({
+    const runs = await prisma.marketScrapeRun.findMany({
       where: { profileId },
       orderBy: { startedAt: 'desc' },
       take: Math.min(Math.max(1, Number(limit) || 50), 500)
     });
+    return this.attachRunCoverage(runs);
+  },
+
+  /**
+   * Fill in `coverage` for a page of runs with ONE query, so a 50-run Activity
+   * Queue does not fan out into 50. A run whose rows cannot be read still comes
+   * back -- with coverage null, which the UI renders as "unknown" rather than
+   * as "no empty days".
+   */
+  async attachRunCoverage(runs = []) {
+    const list = Array.isArray(runs) ? runs : [];
+    if (list.length === 0) return list;
+    const ids = list.map((r) => r.id).filter(Boolean);
+    if (ids.length === 0) return list;
+
+    const byRun = new Map();
+    try {
+      const rows = await prisma.rateOffer.groupBy({
+        by: ['runId', 'pickupDate'],
+        where: { runId: { in: ids } },
+      });
+      for (const r of rows) {
+        if (!byRun.has(r.runId)) byRun.set(r.runId, []);
+        byRun.get(r.runId).push(r.pickupDate);
+      }
+    } catch (_) {
+      return list.map((r) => ({ ...r, coverage: null }));
+    }
+    return list.map((r) => ({ ...r, coverage: describeRunCoverage(r, byRun.get(r.id) || []) }));
   },
 
   async getRun(runId, scope = {}) {
@@ -316,7 +394,8 @@ export const marketScrapeProfileService = {
     });
     if (!run) return null;
     if (scope?.tenantId && run.profile.tenantId !== scope.tenantId) return null;
-    return run;
+    const [withCoverage] = await this.attachRunCoverage([run]);
+    return withCoverage || run;
   },
 
   async listObservations(profileId, scope = {}, { runId, pickupDate, sipp, limit = 500 } = {}) {
