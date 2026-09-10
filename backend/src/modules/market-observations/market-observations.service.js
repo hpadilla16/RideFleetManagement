@@ -2,8 +2,9 @@ import { prisma } from '../../lib/prisma.js';
 import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingConfig } from '../market-scraper/market-scrape-comparison.service.js';
 import { isExcludedVendor, normalizeVendorName, vendorKey } from '../market-scraper/market-vendor.js';
 import { loadCompetitorRows, kayakAllInConfirmed } from '../market-scraper/rate-offer-source.js';
-import { baseFromCustomerAllIn, customerAllInFromBase, competitorAllIn, competitorAllInBasis } from '../market-scraper/pricing-grossup.js';
+import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
 import { buildRankClaim, describeDurability, claimSentence } from './market-claim.js';
+import { splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, TIER } from './self-position.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { renderReportExcel } from '../reports/reports-export.js';
@@ -347,30 +348,42 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
   // Competitor-pool hygiene: drop the tenant's own brand / configured exclusions
   // and normalize vendor spellings so one brand isn't double-counted.
   const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
-  // ALL-IN on BOTH sides (2026-09-10). `yourRate.daily` below is grossed up to
-  // the all-in a customer pays whenever the airport has a tax config, but the
-  // competitor ladder was the raw QUOTE -- and Kayak's quote is a teaser,
-  // measured that day at 0.582x Expedia's all-in. Ranking one against the other
-  // is why SJU read "#4 of 4" while sitting roughly at market: the card was
-  // comparing our price WITH taxes against theirs WITHOUT. Lift theirs the same
-  // way (taxes and flat fees, never our brokerage -- that is our channel cost,
-  // already inside the price they advertise through theirs).
-  const allInBasis = competitorAllInBasis(pricingConfig);
+  // MEASURE, DON'T MODEL (2026-09-10, second pass).
+  //
+  // An earlier version of this lifted the rival ladder into an "all-in" domain
+  // and ranked our grossed-up price against it. Both halves of that were wrong.
+  // The tenant's OWN listing is in the pool -- IRC sells as ZezGo, which is why
+  // `marketExcludedVendors` exists -- so the truth was measurable all along:
+  // their CCAR base is $14.14, the model said the customer therefore sees
+  // $20.72 and ranked them DEAREST of four, and their observed listing was
+  // $13.00-$14.67 against rivals at $15.00-$20.00, i.e. CHEAPEST on six of six
+  // dates. Observed listing / base came to 0.919-1.037, not 1.4652.
+  //
+  // So the ladder is what the OTA SHOWS, unlifted, and our side is our own
+  // observed listing wherever the scrape caught it. See self-position.js.
   const bySipp = new Map();
+  const selfBySipp = new Map();
   for (const o of obs) {
-    if (isExcludedVendor(o.vendor, excludeSet)) continue;
-    if (!bySipp.has(o.sipp)) bySipp.set(o.sipp, []);
     const quoted = priceOf(o);
-    bySipp.get(o.sipp).push({
+    const row = {
       vendor: normalizeVendorName(o.vendor),
-      price: pricingConfig ? competitorAllIn(quoted, pricingConfig) : quoted,
+      supplier: normalizeVendorName(o.vendor),
+      price: quoted,
       quotedPrice: quoted,
       teaserPrice: NUM(o.dailyPrice),
       observedAt: o.observedAt,
       // The claim below is scoped to ONE pickup date. Carrying it here is what
       // makes that possible: the 24h window at SJU spans fifty of them.
       pickupDate: o.pickupDate,
-    });
+    };
+    if (isExcludedVendor(o.vendor, excludeSet)) {
+      // OUR OWN listing: no longer merely discarded.
+      if (!selfBySipp.has(o.sipp)) selfBySipp.set(o.sipp, []);
+      selfBySipp.get(o.sipp).push(row);
+      continue;
+    }
+    if (!bySipp.has(o.sipp)) bySipp.set(o.sipp, []);
+    bySipp.get(o.sipp).push(row);
   }
 
   // Scope: how many agencies quote each class AT ALL, so a claim can admit what
@@ -409,10 +422,9 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
         profileIds,
       );
       for (const m of moves) {
-        // The move is measured on QUOTES, so lift it into the same domain the
-        // gaps live in, or a $1 quoted move would be compared to an all-in gap.
-        const lifted = pricingConfig ? competitorAllIn(m.move, pricingConfig) - competitorAllIn(0, pricingConfig) : m.move;
-        overnightMoveBySipp.set(m.sipp, lifted);
+        // Same domain as the ladder: both are what the OTA shows. The lift that
+        // used to be applied here went with the one on the ladder itself.
+        overnightMoveBySipp.set(m.sipp, m.move);
       }
     } catch (_) {
       // Both are decoration on a claim that stands without them.
@@ -476,12 +488,40 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       .filter(Boolean)
       .sort((a, b) => new Date(a) - new Date(b))[0] || null;
     const nearestKey = nearest ? new Date(nearest).toISOString().slice(0, 10) : null;
+    // Our own listings for this class, and the ratio between what the OTA lists
+    // for us and the base we uploaded. The ratio is only used when the scrape
+    // did NOT catch our listing for the date in question.
+    const selfRows = selfBySipp.get(sipp) || [];
+    const ownBase = yourRow ? yourRow.base : null;
+    const selfRatio = measureSelfBaseRatio(selfRows, ownBase);
+
+    // Position per pickup date, at the highest tier the data supports.
+    const positionByDate = new Map();
+    for (const d of [...new Set(rows.map((r) => (r.pickupDate ? new Date(r.pickupDate).toISOString().slice(0, 10) : null)).filter(Boolean))].sort()) {
+      const onDate = (list) => list.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === d);
+      positionByDate.set(d, buildPositionForDate({
+        selfRows: onDate(selfRows),
+        rivalRows: onDate(rows),
+        base: ownBase,
+        ratio: selfRatio.median,
+        pickupDate: d,
+      }));
+    }
+    const nearestPosition = nearestKey ? positionByDate.get(nearestKey) : null;
+
+    // The claim is stated against what the OTA actually shows for us: the
+    // observed listing when we have it, the base times the measured ratio when
+    // we do not. Never the grossed-up counter total, which is a different
+    // number answering a different question.
+    const ourListedForClaim = nearestPosition && nearestPosition.ourListed != null
+      ? nearestPosition.ourListed
+      : (ownBase != null && selfRatio.median ? ownBase * selfRatio.median : ownBase);
     const claim = buildRankClaim({
       rows: nearestKey
         ? rows.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === nearestKey)
             .map((r) => ({ supplier: r.vendor, price: r.price, observedAt: r.observedAt }))
         : [],
-      yourAllIn: yourRow ? yourRow.daily : null,
+      yourAllIn: ourListedForClaim,
       pickupDate: nearestKey,
       suppliersKnown: suppliersKnownBySipp.get(sipp) ?? null,
     });
@@ -497,12 +537,21 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       median,
       min,
       max,
-      claim: { ...claim, sentence: claimSentence(claim), durability },
-      // How the competitor ladder was lifted: MEASURED | TAXES_ONLY | QUOTED.
-      // QUOTED means no tax config for this airport, so the ranking is
-      // quote-vs-base and the screen must not claim otherwise.
-      priceBasis: allInBasis.basis,
-      competitorFactor: allInBasis.factor,
+      claim: {
+        ...claim,
+        sentence: claimSentence(claim),
+        durability,
+        // Which tier the answer came from, so no screen can present an estimate
+        // as a fact: OBSERVED (our listing was in the pool) / ESTIMATED (base x
+        // measured ratio) / UNKNOWN (no rivals for that date).
+        tier: nearestPosition ? nearestPosition.tier : TIER.UNKNOWN,
+        ourListed: nearestPosition ? nearestPosition.ourListed : null,
+        ratio: selfRatio,
+        selfCoverage: describeSelfCoverage(positionByDate),
+      },
+      // The ladder is unlifted -- it is what the OTA shows. claim.tier above
+      // says whether OUR side of the comparison was observed or estimated.
+      priceBasis: 'AS_LISTED',
       vendorCount: ordered.length,
       topVendors: ordered.slice(0, 5),
       yourRate: yourRow,
