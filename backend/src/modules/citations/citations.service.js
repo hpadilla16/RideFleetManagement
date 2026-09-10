@@ -10,7 +10,7 @@ import { uploadObject, getSignedUrl, safePath } from '../../lib/storage/index.js
 import { isStorageEnabled } from '../rental-agreements/inspection-photos.js';
 import { resolveRate } from '../fees/fee-engine.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
-import { scopeAllowedLocationIds } from '../../lib/tenant-scope.js';
+import { scopeAllowedLocationIds, effectiveLocationIds } from '../../lib/tenant-scope.js';
 
 // ── Fase D (MONEY) — bill a matched citation to the renter's agreement ────────
 // Mirrors the issue-center claim-charge path: create reservationCharge rows
@@ -143,6 +143,48 @@ function toMoney(value) {
  */
 export function citationLocationWhere(scope = {}) {
   const ids = scopeAllowedLocationIds(scope);
+  if (!ids) return {};
+  return { vehicle: { is: { homeLocationId: { in: ids } } } };
+}
+
+/**
+ * The branch clause for ONE request — permission and the caller's chosen branch
+ * resolved together (2026-09-10).
+ *
+ * Hector, seeing Corpusa's list: "separa los que son de LAX y los que son de
+ * Orlando. No deberian estar viendo los de Orlando y LAX junto." That day it was
+ * 175 Los Angeles citations interleaved with 80 Orlando ones.
+ *
+ * `citationLocationWhere` above answers only the permission half and returns {}
+ * for an admin, which is why a tenant admin gets every branch at once. This adds
+ * the CHOSEN branch — and does it through `effectiveLocationIds`, the shared
+ * helper, rather than composing two separate clauses.
+ *
+ * That choice is the security one. `effectiveLocationIds` already owns the rule
+ * that a `?locationId` the caller may not see is IGNORED and falls back to their
+ * own locations — it never widens. Hand-rolling a second clause and spreading it
+ * next to the scope is exactly the "paste in each service" that helper was
+ * hoisted into lib to prevent, and a spread lets the later key win.
+ *
+ * A Citation has no location of its own — `Citation.location` is free text from
+ * the issuing agency — so the branch is still resolved through the matched
+ * vehicle's home branch, the same hop the permission scope uses.
+ *
+ * UNMATCHED is a first-class choice: the citations with no vehicle are the ones
+ * nobody can attribute, and they are invisible in every branch view unless they
+ * can be asked for. For a location-restricted caller it stays fail-closed — no
+ * vehicle AND a vehicle at my branch is unsatisfiable — which is the same answer
+ * the existing scope tests already pin for unmatched rows.
+ */
+export const CITATION_LOCATION_UNMATCHED = 'UNMATCHED';
+
+export function citationLocationWhereFor(query = {}, scope = {}) {
+  const asked = String(query?.locationId || '').trim();
+  if (asked.toUpperCase() === CITATION_LOCATION_UNMATCHED) {
+    // Both clauses ride: the scope's (if any) keeps a restricted caller out.
+    return { vehicleId: null, ...citationLocationWhere(scope) };
+  }
+  const ids = effectiveLocationIds(asked ? { locationId: asked } : {}, scope);
   if (!ids) return {};
   return { vehicle: { is: { homeLocationId: { in: ids } } } };
 }
@@ -455,7 +497,10 @@ export const citationsService = {
   },
 
   async list(filters = {}, scope = {}) {
-    const where = { tenantId: scope.tenantId, ...citationLocationWhere(scope) };
+    // Permission scope first, then the caller's chosen branch. Both express the
+    // same vehicle hop, so a scoped user asking for another branch gets an
+    // empty list rather than a leak.
+    const where = { tenantId: scope.tenantId, ...citationLocationWhereFor(filters, scope) };
     if (filters.plate) where.plateNormalized = normalizePlate(filters.plate);
     if (filters.plateState) where.plateState = String(filters.plateState).toUpperCase();
     if (filters.source && VALID_SOURCES.has(filters.source)) where.source = filters.source;
@@ -556,6 +601,68 @@ export const citationsService = {
     if (idx <= 0) return { url: null };
     const url = await getSignedUrl({ bucket: ref.slice(0, idx), path: ref.slice(idx + 1), expiresIn: 3600 });
     return { url };
+  },
+
+  /**
+   * How many citations each branch carries, for the list screen's branch picker
+   * (2026-09-10).
+   *
+   * Deliberately NOT folded into dashboardSummary: that tile answers "what does
+   * this tenant owe" and must stay whole. This answers "which branch am I about
+   * to look at", and the counts are what make the choice meaningful — a picker
+   * that just lists branches hides that Orlando has 80 rows waiting.
+   *
+   * Counts the WORKING list only (archive statuses excluded), because that is
+   * what the screen opens on; an archived citation is not work.
+   */
+  async locationBreakdown(scope = {}) {
+    const where = {
+      tenantId: scope.tenantId,
+      ...citationLocationWhere(scope),
+      status: { notIn: [...ARCHIVED_CITATION_STATUSES] },
+    };
+    const rows = await prisma.citation.findMany({
+      where,
+      select: { id: true, amount: true, fee: true, vehicle: { select: { homeLocationId: true } } },
+    });
+
+    const byLocation = new Map();
+    let unmatched = 0;
+    let unmatchedAmount = 0;
+    for (const c of rows) {
+      const money = Number(c.amount || 0) + Number(c.fee || 0);
+      const locId = c.vehicle?.homeLocationId || null;
+      if (!locId) { unmatched += 1; unmatchedAmount += money; continue; }
+      const cur = byLocation.get(locId) || { count: 0, amount: 0 };
+      cur.count += 1;
+      cur.amount += money;
+      byLocation.set(locId, cur);
+    }
+
+    const locations = byLocation.size
+      ? await prisma.location.findMany({
+        where: { id: { in: [...byLocation.keys()] } },
+        select: { id: true, code: true, name: true },
+      })
+      : [];
+    const nameById = new Map(locations.map((l) => [l.id, l]));
+
+    const round = (n) => Math.round(n * 100) / 100;
+    return {
+      total: rows.length,
+      locations: [...byLocation.entries()]
+        .map(([id, v]) => ({
+          locationId: id,
+          code: nameById.get(id)?.code || '(unknown)',
+          name: nameById.get(id)?.name || null,
+          count: v.count,
+          amount: round(v.amount),
+        }))
+        .sort((a, b) => b.count - a.count),
+      // Its own row rather than a footnote: these are the ones nobody can
+      // attribute, and they vanish from every branch view.
+      unmatched: { count: unmatched, amount: round(unmatchedAmount) },
+    };
   },
 
   // Lightweight summary for the dashboard Citations tile.

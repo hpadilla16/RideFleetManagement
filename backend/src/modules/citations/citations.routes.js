@@ -52,6 +52,19 @@ function attachmentScope(req) {
 }
 
 // ── Authed routes ──────────────────────────────────────────────────────────
+
+// How many citations sit at each branch, so the list screen can offer the
+// choice with the numbers attached. `GET /` already accepts `locationId`
+// through req.query — this is what makes that filter discoverable rather than
+// something you have to know exists.
+citationsRouter.get('/location-breakdown', async (req, res) => {
+  try {
+    res.json(await citationsService.locationBreakdown(scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
 citationsRouter.get('/', async (req, res) => {
   try {
     res.json(await citationsService.list(req.query || {}, scopeFor(req)));
