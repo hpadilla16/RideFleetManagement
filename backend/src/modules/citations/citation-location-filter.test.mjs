@@ -88,28 +88,42 @@ test('a made-up id is equally ignored for a restricted caller', () => {
 // ---------------------------------------------------------------------------
 // UNMATCHED — the citations nobody can attribute
 // ---------------------------------------------------------------------------
-test('UNMATCHED is a real choice, not an omission', () => {
-  // Without it these are invisible in every branch view and quietly stop being
-  // anybody's job. Corpusa had 10 on the day this shipped.
-  assert.deepEqual(
-    citationLocationWhereFor({ locationId: CITATION_LOCATION_UNMATCHED }, ADMIN),
-    { vehicleId: null },
-  );
+test('UNMATCHED covers BOTH ways a citation loses its branch', () => {
+  // The bug this pins, found against production: the picker counted a citation
+  // as unattributable when its VEHICLE had no home branch, but the filter only
+  // matched citations with no vehicle at all. Corpusa had 8 of the first shape
+  // and 2 of the second, so the option said 10 and the view showed 8 — and two
+  // Orlando citations were reachable from no view whatsoever.
+  const out = citationLocationWhereFor({ locationId: CITATION_LOCATION_UNMATCHED }, ADMIN);
+  assert.deepEqual(out, {
+    OR: [{ vehicleId: null }, { vehicle: { is: { homeLocationId: null } } }],
+  });
   assert.deepEqual(
     citationLocationWhereFor({ locationId: 'unmatched' }, ADMIN),
-    { vehicleId: null },
+    out,
     'case-insensitive',
   );
 });
 
+test("the UNMATCHED clause matches the breakdown's own definition", () => {
+  // locationBreakdown buckets by `vehicle?.homeLocationId || null`. Any filter
+  // narrower than that leaves rows counted but unreachable, which is how the
+  // two Orlando citations disappeared. Both arms must be present.
+  const { OR } = citationLocationWhereFor({ locationId: 'UNMATCHED' }, ADMIN);
+  assert.equal(OR.length, 2, 'a single-armed clause is the regression');
+  assert.ok(OR.some((c) => c.vehicleId === null), 'no vehicle at all');
+  assert.ok(OR.some((c) => c.vehicle?.is?.homeLocationId === null), 'vehicle without a home branch');
+});
+
 test('UNMATCHED stays fail-closed for a restricted caller', () => {
-  // No vehicle AND a vehicle at my branch is unsatisfiable — the same answer the
-  // existing scope tests pin for unmatched rows, which only a tenant admin
-  // triages.
+  // The OR and the scope's `vehicle` clause are different keys, so both survive
+  // into the query and contradict: unattributable AND at my branch returns
+  // nothing. Same answer the existing scope tests pin for unmatched rows, which
+  // only a tenant admin triages.
   const out = citationLocationWhereFor({ locationId: 'UNMATCHED' }, LAX_ONLY);
-  assert.equal(out.vehicleId, null);
+  assert.ok(Array.isArray(out.OR));
   assert.deepEqual(out.vehicle, { is: { homeLocationId: { in: ['loc-lax'] } } },
-    'the permission clause is still there, so the two contradict and nothing returns');
+    'the permission clause is still there');
 });
 
 test('never throws on junk', () => {

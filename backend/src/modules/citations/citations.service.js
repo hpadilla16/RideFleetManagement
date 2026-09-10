@@ -181,8 +181,19 @@ export const CITATION_LOCATION_UNMATCHED = 'UNMATCHED';
 export function citationLocationWhereFor(query = {}, scope = {}) {
   const asked = String(query?.locationId || '').trim();
   if (asked.toUpperCase() === CITATION_LOCATION_UNMATCHED) {
-    // Both clauses ride: the scope's (if any) keeps a restricted caller out.
-    return { vehicleId: null, ...citationLocationWhere(scope) };
+    // "Cannot be attributed to a branch" is BOTH shapes: no vehicle at all, and
+    // a vehicle carrying no home branch. Corpusa had 8 of the first and 2 of the
+    // second, and the first version of this filter only matched the first — so
+    // the picker offered 10 and the view returned 8, leaving two Orlando
+    // citations reachable from no view whatsoever. Exactly the disappearance
+    // this option exists to prevent.
+    //
+    // The scope clause still rides alongside, so a restricted caller stays
+    // fail-closed.
+    return {
+      OR: [{ vehicleId: null }, { vehicle: { is: { homeLocationId: null } } }],
+      ...citationLocationWhere(scope),
+    };
   }
   const ids = effectiveLocationIds(asked ? { locationId: asked } : {}, scope);
   if (!ids) return {};
