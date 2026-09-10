@@ -3,6 +3,7 @@ import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingC
 import { isExcludedVendor, normalizeVendorName, vendorKey } from '../market-scraper/market-vendor.js';
 import { loadCompetitorRows, kayakAllInConfirmed } from '../market-scraper/rate-offer-source.js';
 import { baseFromCustomerAllIn, customerAllInFromBase, competitorAllIn, competitorAllInBasis } from '../market-scraper/pricing-grossup.js';
+import { buildRankClaim, describeDurability, claimSentence } from './market-claim.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { renderReportExcel } from '../reports/reports-export.js';
@@ -366,7 +367,56 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       quotedPrice: quoted,
       teaserPrice: NUM(o.dailyPrice),
       observedAt: o.observedAt,
+      // The claim below is scoped to ONE pickup date. Carrying it here is what
+      // makes that possible: the 24h window at SJU spans fifty of them.
+      pickupDate: o.pickupDate,
     });
+  }
+
+  // Scope: how many agencies quote each class AT ALL, so a claim can admit what
+  // it did not see -- at SJU a single day shows 28-56% of a class's known
+  // suppliers, and "cheapest of 3" reads very differently next to "of 21".
+  const suppliersKnownBySipp = new Map();
+  // Noise: the class's typical overnight movement, which is what decides
+  // whether a margin is a position or a rounding error. Slow-moving, so it is
+  // the one piece that legitimately looks backwards (14 days).
+  const overnightMoveBySipp = new Map();
+  if (profileIds.length) {
+    try {
+      const known = await prisma.rateOffer.groupBy({
+        by: ['sipp', 'supplier'],
+        where: { profileId: { in: profileIds }, observedAt: { gte: new Date(Date.now() - 60 * 24 * 3600 * 1000) } },
+      });
+      for (const k of known) {
+        if (!k.supplier || !String(k.supplier).trim()) continue;
+        suppliersKnownBySipp.set(k.sipp, (suppliersKnownBySipp.get(k.sipp) || 0) + 1);
+      }
+      const moves = await prisma.$queryRawUnsafe(
+        `select sipp, (percentile_cont(0.5) within group (order by delta))::float as move
+           from (
+             select sipp, abs(cheapest - lag(cheapest) over (partition by sipp order by d)) as delta
+               from (
+                 select o.sipp, date_trunc('day', o."observedAt") as d, min(o."effectiveDailyPrice") as cheapest
+                   from "RateOffer" o
+                  where o."profileId" = any($1)
+                    and o."observedAt" >= now() - interval '14 days'
+                    and o."effectiveDailyPrice" > 0
+                  group by 1, 2
+               ) daily
+           ) diffs
+          where delta is not null
+          group by sipp`,
+        profileIds,
+      );
+      for (const m of moves) {
+        // The move is measured on QUOTES, so lift it into the same domain the
+        // gaps live in, or a $1 quoted move would be compared to an all-in gap.
+        const lifted = pricingConfig ? competitorAllIn(m.move, pricingConfig) - competitorAllIn(0, pricingConfig) : m.move;
+        overnightMoveBySipp.set(m.sipp, lifted);
+      }
+    } catch (_) {
+      // Both are decoration on a claim that stands without them.
+    }
   }
 
   const sipps = [];
@@ -415,11 +465,39 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       yourRank = idx === -1 ? ordered.length + 1 : idx + 1;
     }
 
+    // THE CLAIM (2026-09-10). Everything above is a 24-hour RANGE across every
+    // pickup date in the window -- useful as context, useless as a position,
+    // because the cheapest rival for one class ranged $15.86 to $135.82 across
+    // the fifty pickup dates in that window. The claim is a fact about one
+    // pickup date at one moment: "for Sep 11, as of 04:21, you are the
+    // cheapest of the three agencies that quoted it".
+    const nearest = rows
+      .map((r) => r.pickupDate)
+      .filter(Boolean)
+      .sort((a, b) => new Date(a) - new Date(b))[0] || null;
+    const nearestKey = nearest ? new Date(nearest).toISOString().slice(0, 10) : null;
+    const claim = buildRankClaim({
+      rows: nearestKey
+        ? rows.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === nearestKey)
+            .map((r) => ({ supplier: r.vendor, price: r.price, observedAt: r.observedAt }))
+        : [],
+      yourAllIn: yourRow ? yourRow.daily : null,
+      pickupDate: nearestKey,
+      suppliersKnown: suppliersKnownBySipp.get(sipp) ?? null,
+    });
+    const durability = describeDurability({
+      gapToNext: claim.gapToNext,
+      gapToBeat: claim.gapToBeat,
+      overnightMove: overnightMoveBySipp.get(sipp) ?? null,
+      verdict: claim.verdict,
+    });
+
     sipps.push({
       sipp,
       median,
       min,
       max,
+      claim: { ...claim, sentence: claimSentence(claim), durability },
       // How the competitor ladder was lifted: MEASURED | TAXES_ONLY | QUOTED.
       // QUOTED means no tax config for this airport, so the ranking is
       // quote-vs-base and the screen must not claim otherwise.
