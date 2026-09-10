@@ -4,6 +4,10 @@ import { settingsService } from '../settings/settings.service.js';
 import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
 import { vendorKey } from '../market-scraper/market-vendor.js';
 import { competitorAllIn, competitorAllInBasis, baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
+import { getCompetitorExcludeSet } from '../market-scraper/market-scrape-comparison.service.js';
+import { isExcludedVendor } from '../market-scraper/market-vendor.js';
+import { splitSelfAndRivals, measureSelfBaseRatio, latestPerSupplier } from '../market-observations/self-position.js';
+import { recommendBaseForTarget, targetSentence } from '../market-observations/window-target.js';
 import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
@@ -262,6 +266,62 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
 }
 
 /**
+ * SHADOW MODE (2026-09-10). Computes what the window-target engine WOULD
+ * recommend, and returns it for the audit payload. It changes nothing: the
+ * number this rule writes is still the one the live path computed.
+ *
+ * It exists because the live path was measured this day to deliver the tenant's
+ * configured target on 0 of 14 classes, and the only responsible way to replace
+ * a money path that has been wrong for weeks is to run the replacement beside
+ * it first, on real pools, where both answers can be compared before either
+ * moves a price.
+ *
+ * Two differences from the live path, and they are the whole point:
+ *   - the ladder is per PICKUP DATE (the 24h window at SJU spans fifty of them,
+ *     and collapsing them with a MIN prices for the cheapest day in the window)
+ *   - the base is derived with the ratio MEASURED from the tenant's own listing
+ *     on the OTA, not with the tax gross-up
+ */
+async function shadowWindowTarget(rule, obs, { sipp, targetN, paddingPct }) {
+  try {
+    const excludeSet = await getCompetitorExcludeSet(rule.tenantId);
+    const rows = obs.map((o) => ({
+      supplier: o.vendor,
+      price: o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice),
+      observedAt: o.observedAt,
+      pickupDate: o.pickupDate,
+    }));
+    const { self, rivals } = splitSelfAndRivals(rows, (s) => isExcludedVendor(s, excludeSet));
+
+    const laddersByDate = new Map();
+    for (const d of [...new Set(rivals.map((r) => (r.pickupDate ? new Date(r.pickupDate).toISOString().slice(0, 10) : null)).filter(Boolean))].sort()) {
+      laddersByDate.set(d, latestPerSupplier(rivals.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === d)));
+    }
+
+    const ratio = measureSelfBaseRatio(self, Number(rule.rate.daily));
+    const rec = recommendBaseForTarget({
+      laddersByDate,
+      targetN,
+      ratio: ratio.median,
+      floor: Number(rule.floorPrice),
+      ceiling: Number(rule.ceilingPrice),
+      paddingPct,
+    });
+    return {
+      ...rec,
+      sipp,
+      selfListingsSeen: self.length,
+      ratio,
+      sentence: targetSentence(rec, { asOf: obs.length ? obs[obs.length - 1].observedAt : null }),
+    };
+  } catch (e) {
+    // A shadow computation must never affect the live one, including by
+    // throwing. Its absence is visible in the payload; a 500 would not be.
+    return { error: e.message };
+  }
+}
+
+/**
  * Evaluate a single rule. Returns:
  *   { skipped: true, reason }  — no observations / MANUAL strategy / etc
  *   { skipped: false, autoApplied: true|false, suggestionId, ... }
@@ -468,6 +528,12 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     paddingPct: padPct,
     marketMin,
     marketMedian,
+    // What the per-pickup-date engine would have said. Recorded, never applied.
+    shadow: await shadowWindowTarget(rule, obs, {
+      sipp,
+      targetN: rule.strategy === 'NTH_CHEAPEST' ? Math.max(1, Math.min(10, rule.targetN || 1)) : 1,
+      paddingPct: padPct,
+    }),
     // The money trail for the two-domain math: what the rivals were QUOTED at,
     // what their customer pays, the all-in we aimed for, and the all-in our own
     // recommendation implies. `basis` says how the lift was computed.
