@@ -242,6 +242,57 @@ test('registration: a far date is OK and shows the plain date', () => {
   assert.equal(r.iso, '2027-06-30');
 });
 
+// ---------------------------------------------------------------------------
+// The stored value is a DATE, not an instant (2026-09-10).
+//
+// Loading Rent & Go's 92 marbetes off their TSD License Expiration Report
+// turned this up: all 128 registration rows in production sit at MIDNIGHT UTC,
+// and Puerto Rico is UTC-4. Localizing that instant landed on the previous
+// day, so every countdown was one day short while the printed date was right
+// — a plate expiring today read "Expired 1d ago". Every test above passes
+// tz='UTC', which is precisely where the bug cannot show.
+// ---------------------------------------------------------------------------
+const PR = 'America/Puerto_Rico';
+
+test('registration: midnight UTC is that DAY in Puerto Rico, not the day before', () => {
+  // 2026-10-31T00:00 UTC is 2026-10-30 20:00 in PR. The plate is valid through
+  // the 31st, and the report used to say 50 days when the answer is 51.
+  const r = registrationState(new Date('2026-10-31T00:00:00.000Z'), AS_OF, PR);
+  assert.equal(r.iso, '2026-10-31');
+  assert.equal(r.days, 52, 'whole days from 2026-09-09 to 2026-10-31');
+  assert.equal(r.state, 'OK');
+});
+
+test('registration: the label and the countdown can never disagree', () => {
+  // The shape of the old bug: the date printed 2026-10-31 while the countdown
+  // was measured from 2026-10-30. Whatever day `iso` names is the day the
+  // count must be measured to, in every timezone.
+  for (const tz of ['UTC', PR, 'America/New_York', 'America/Los_Angeles', 'Europe/London']) {
+    for (const stored of ['2026-10-31T00:00:00.000Z', '2026-10-31T12:00:00.000Z', '2026-10-31T23:59:00.000Z']) {
+      const r = registrationState(new Date(stored), AS_OF, tz);
+      assert.equal(r.iso, '2026-10-31', `${tz} ${stored}`);
+      assert.equal(r.days, 52, `${tz} ${stored} — same day, same count`);
+    }
+  }
+});
+
+test('registration: a plate expiring TODAY in PR is expired, not a day gone', () => {
+  const r = registrationState(new Date('2026-09-09T00:00:00.000Z'), AS_OF, PR);
+  assert.equal(r.days, 0);
+  assert.equal(r.label, 'Expires today', 'used to read "Expired 1d ago"');
+});
+
+test('registration: yesterday is still one day ago in PR', () => {
+  const r = registrationState(new Date('2026-09-08T00:00:00.000Z'), AS_OF, PR);
+  assert.equal(r.days, -1);
+  assert.match(r.label, /Expired 1d ago/);
+});
+
+test('registration: the SOON edge holds in PR, not just in UTC', () => {
+  assert.equal(registrationState(new Date('2026-10-09T00:00:00.000Z'), AS_OF, PR).state, 'SOON', '30 days out');
+  assert.equal(registrationState(new Date('2026-10-10T00:00:00.000Z'), AS_OF, PR).state, 'OK', '31 days out');
+});
+
 test('registration: MISSING is its own state — never quietly "OK"', () => {
   // Most of the fleet has no date recorded. Rendering that as valid would be
   // the report telling somebody a car is legal when nobody has checked.

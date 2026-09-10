@@ -53,6 +53,13 @@ function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
  * Compared on whole days in the tenant's timezone, not on the raw instant: a
  * registration that expires today is expired for the whole of today, and
  * comparing timestamps would call it valid until the exact hour it was issued.
+ *
+ * The stored value is a DATE wearing a timestamp: all 128 rows in production
+ * sit at midnight UTC. Localizing that instant for a tenant west of UTC lands
+ * on the PREVIOUS day, so the countdown came out one day short while the
+ * printed date stayed right -- a plate expiring today read "Expired 1d ago".
+ * Take the value's own calendar day and start THAT day in the tenant zone.
+ * (Every existing test passed tz="UTC", which is exactly where this hides.)
  */
 const REGISTRATION_SOON_DAYS = 30;
 
@@ -60,7 +67,7 @@ function registrationState(expiresAt, asOf, tz = DEFAULT_TENANT_TIMEZONE) {
   if (!expiresAt) return { state: 'UNKNOWN', label: 'Not recorded', days: null, iso: null };
   const exp = new Date(expiresAt);
   if (Number.isNaN(exp.getTime())) return { state: 'UNKNOWN', label: 'Not recorded', days: null, iso: null };
-  const expDay = startOfDayInTz(exp, tz);
+  const expDay = startOfDayInTz(exp.toISOString().slice(0, 10), tz);
   const today = startOfDayInTz(asOf, tz);
   const days = Math.round((expDay.getTime() - today.getTime()) / 86400000);
   const iso = exp.toISOString().slice(0, 10);
