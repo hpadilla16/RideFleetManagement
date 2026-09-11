@@ -104,23 +104,77 @@ export function utilizationLookupWindow(now = new Date()) {
   };
 }
 
+/**
+ * Find the MarketPricingConfig for a branch, under EITHER of the two codes
+ * this system uses for the same place.
+ *
+ * There are genuinely two. `MarketScrapeProfile.locationCode` is an IATA
+ * AIRPORT code — 'SJU', 'LAX' — because that is what a market is. `Location.code`
+ * is the tenant's own branch code, and the two coincide only by luck:
+ * International's branch happens to BE 'SJU', so its ladder has always
+ * resolved; Corpusa's is 'LAXA01', so a lookup by branch code found nothing and
+ * the tenant's utilisation ladder was silently inert. Not an error, not a log
+ * line — just a lift that never lifted.
+ *
+ * The fallback is deliberately narrow. It does not parse the branch code or
+ * assume a three-letter prefix in the abstract: it asks which airports this
+ * tenant ACTUALLY SCRAPES, and accepts one only if the branch code starts with
+ * it. So 'LAXA01' resolves through the tenant's own 'LAX' profile, and a branch
+ * code matching nothing the tenant scrapes still resolves to nothing — which is
+ * the honest answer.
+ *
+ * Exported for tests, and because the day someone adds a real branch->airport
+ * mapping this is the one place to change.
+ */
+export async function findPricingConfigForBranch(prismaClient, tenantId, branchCode) {
+  if (!tenantId || !branchCode) return { config: null, matchedCode: null };
+
+  const exact = await prismaClient.marketPricingConfig.findUnique({
+    where: { tenantId_locationCode: { tenantId, locationCode: branchCode } },
+    select: { utilizationRules: true },
+  }).catch(() => null);
+  if (exact) return { config: exact, matchedCode: branchCode };
+
+  const profiles = await prismaClient.marketScrapeProfile.findMany({
+    where: { tenantId },
+    select: { locationCode: true },
+  }).catch(() => []);
+
+  const branch = String(branchCode).toUpperCase();
+  const codes = [...new Set(profiles.map((p) => String(p.locationCode || '').toUpperCase()).filter(Boolean))]
+    // Longest first, so a tenant scraping both 'LAX' and a hypothetical
+    // 'LAXB' cannot have the shorter one swallow the longer one's branches.
+    .sort((a, b) => b.length - a.length);
+
+  for (const code of codes) {
+    if (!branch.startsWith(code)) continue;
+    const config = await prismaClient.marketPricingConfig.findUnique({
+      where: { tenantId_locationCode: { tenantId, locationCode: code } },
+      select: { utilizationRules: true },
+    }).catch(() => null);
+    if (config) return { config, matchedCode: code };
+  }
+  return { config: null, matchedCode: null };
+}
+
 function createUtilizationContext() {
   const entries = new Map();
   const { todayISO, toISO: tomorrowISO } = utilizationLookupWindow();
   return {
-    async utilizationFor(tenantId, locationCode, sipp) {
-      if (!tenantId || !locationCode) return { utilization: null, rules: [] };
-      const key = `${tenantId}|${locationCode}`;
+    async utilizationFor(tenantId, branchCode, sipp) {
+      if (!tenantId || !branchCode) return { utilization: null, rules: [] };
+      const key = `${tenantId}|${branchCode}`;
       if (!entries.has(key)) {
         entries.set(key, (async () => {
-          const config = await prisma.marketPricingConfig.findUnique({
-            where: { tenantId_locationCode: { tenantId, locationCode } },
-            select: { utilizationRules: true },
-          }).catch(() => null);
+          const { config } = await findPricingConfigForBranch(prisma, tenantId, branchCode);
           const rules = Array.isArray(config?.utilizationRules) ? config.utilizationRules : [];
           if (!rules.length) return { rules, lookup: null };
+          // The LOOKUP still keys on the branch code, not on whatever code the
+          // config was found under: it counts this branch's cars, and an
+          // airport code would resolve to no Location at all. Two keys, two
+          // jobs — conflating them is what broke this in the first place.
           const lookup = await buildUtilizationLookup({
-            tenantId, locationCode, fromISO: todayISO, toISO: tomorrowISO,
+            tenantId, locationCode: branchCode, fromISO: todayISO, toISO: tomorrowISO,
           });
           return { rules, lookup };
         })());
