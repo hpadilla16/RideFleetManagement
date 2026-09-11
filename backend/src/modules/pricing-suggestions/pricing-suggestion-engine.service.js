@@ -42,7 +42,11 @@ async function resolveMinSampleVendors(tenantId, getMinSampleConfig = null) {
     const n = Number(cfg?.minSampleVendors);
     if (Number.isFinite(n) && n >= 1) return Math.floor(n);
   } catch { /* default below */ }
-  return 1;
+  // Must match settings.service.js's DEFAULT_MIN_SAMPLE_VENDORS. This branch is
+  // the SETTINGS-FAILED path, and it is the one that matters most: a config
+  // read that throws would otherwise drop the guard to 1 exactly when nobody
+  // is watching, and a rule would move a live price off a single quote.
+  return 3;
 }
 
 // ---------------------------------------------------------------------------

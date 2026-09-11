@@ -44,7 +44,7 @@
  *   Display reads ('display') include every source — a chart/table can label
  *   a teaser; an AUTO price write cannot.
  */
-import { vendorKey } from './market-vendor.js';
+import { vendorKey, excludeSetFor, isExcludedVendor } from './market-vendor.js';
 
 /**
  * True once Hector has confirmed (with the scraper team) that Kayak's
@@ -154,6 +154,28 @@ function baseWhere(filters) {
  * @returns {Promise<{rows: Array<object>, totals: {anonymousOffers: number}}>}
  *   rows sorted by (pickupDate, sipp, dailyPrice) for stable output.
  */
+/**
+ * The tenant's own brands, as canonical vendor keys.
+ *
+ * Read here rather than imported from market-scrape-comparison.service.js,
+ * which already imports THIS module — taking its helper would close a cycle.
+ * A read failure yields an empty set: no exclusion is the old behaviour, and
+ * going dark over a settings hiccup would be worse than pricing against
+ * ourselves for one night.
+ */
+async function ownBrandSet(prismaClient, tenantId) {
+  if (!tenantId) return excludeSetFor([]);
+  try {
+    const t = await prismaClient.tenant.findUnique({
+      where: { id: tenantId },
+      select: { marketExcludedVendors: true },
+    });
+    return excludeSetFor(Array.isArray(t?.marketExcludedVendors) ? t.marketExcludedVendors : []);
+  } catch {
+    return excludeSetFor([]);
+  }
+}
+
 export async function loadCompetitorRows(prismaClient, filters = {}, opts = {}) {
   // FAIL-CLOSED default (Innovation review 2026-07-02): a caller that forgets
   // opts.purpose gets 'pricing' — i.e. Kayak teaser rows EXCLUDED. Defaulting
@@ -235,6 +257,43 @@ export async function loadCompetitorRows(prismaClient, filters = {}, opts = {}) 
     rows = rows.filter((r) => sourceAllInConfirmed(r.source));
   }
 
+  // OWN-BRAND EXCLUSION (2026-09-11) — pricing only.
+  //
+  // The tenant lists on these OTAs too: IRC sells as ZezGo, Corpusa as
+  // MEXRENTACAR / ZezGo / Economy Rent a Car, and those listings land in
+  // RateOffer like anyone else's. Left in, "be 2nd cheapest" can mean "be 2nd
+  // cheapest behind YOURSELF" — the rule chases the tenant down instead of
+  // chasing the market, and every step down makes the next step steeper.
+  //
+  // Measured at SJU the day this was added: our own listing sat in the ladder
+  // for 5 of 15 classes and moved the target in 1 of them, by $0.34. Small
+  // today precisely BECAUSE the rates were pinned above the market by their
+  // floors. With those floors opened to $7 the same day, our listings move
+  // toward the cheap end of the ladder — so the distortion grows exactly as
+  // the rules start working.
+  //
+  // Matching goes through isExcludedVendor, which compares canonical vendor
+  // KEYS ("ZezGo" -> "ZEZGO"). Comparing a lowercased supplier against those
+  // keys matches nothing and fails silently — that exact mistake cost a day
+  // earlier in this project.
+  //
+  // Display reads are untouched: seeing your own listing on the market chart
+  // is useful; pricing against it is not.
+  let ownBrandRows = 0;
+  if (purpose === 'pricing') {
+    const ownSet = await ownBrandSet(prismaClient, filters?.profile?.tenantId || filters?.tenantId);
+    if (ownSet.size > 0) {
+      const before = rows.length;
+      // `vendor`, NOT `supplier`. By this point both tables have been mapped
+      // into the observation shape, where the agency lives on `vendor` —
+      // offerToObservationRow renames it. Reading `supplier` here yields
+      // undefined for every row and the filter quietly does nothing, which is
+      // precisely how the same mistake hid for a day in the visibility SQL.
+      rows = rows.filter((r) => !isExcludedVendor(r.vendor, ownSet));
+      ownBrandRows = before - rows.length;
+    }
+  }
+
   rows.sort((a, b) => {
     const da = dateISO(a.pickupDate); const db = dateISO(b.pickupDate);
     if (da !== db) return da < db ? -1 : 1;
@@ -242,7 +301,9 @@ export async function loadCompetitorRows(prismaClient, filters = {}, opts = {}) 
     return (Number(a.dailyPrice ?? a.effectiveDailyPrice) || 0) - (Number(b.dailyPrice ?? b.effectiveDailyPrice) || 0);
   });
 
-  return { rows, totals: { anonymousOffers } };
+  // Counted, not just dropped: a class whose pool is mostly our own listings
+  // is worth knowing about before a rule acts on what little is left.
+  return { rows, totals: { anonymousOffers, ownBrandRows } };
 }
 
 export const rateOfferSource = { offerToObservationRow, loadCompetitorRows, kayakAllInConfirmed, sourceAllInConfirmed };
