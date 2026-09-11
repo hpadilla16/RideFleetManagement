@@ -148,13 +148,7 @@ marketScraperRouter.post('/runs/:runId/apply', async (req, res, next) => {
     // warning (allowed on explicit human intent) rather than a hard HOLD. The
     // cron path never passes force. See market-scrape-correction.service.js.
     const force = req.body?.force === true || req.query?.force === 'true';
-    // SEPARATE from force (2026-09-10): force means 'a human pressed Apply now',
-    // which every click carries. This one says 'I know this suggestion is far
-    // from the live base and I mean it' -- the seed-the-base operation -- so it
-    // must be asked for on purpose. Without it an absurd suggestion HOLDs.
-    const acknowledgeDataQuality = req.body?.acknowledgeDataQuality === true
-      || req.query?.acknowledgeDataQuality === 'true';
-    const out = await applyRunSuggestions(req.params.runId, { scope: scopeFor(req), force, mode: 'manual', acknowledgeDataQuality });
+    const out = await applyRunSuggestions(req.params.runId, { scope: scopeFor(req), force, mode: 'manual' });
     res.json(out);
   } catch (e) { handle(e, res, next); }
 });

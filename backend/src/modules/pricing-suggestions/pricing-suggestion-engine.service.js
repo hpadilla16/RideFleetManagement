@@ -2,12 +2,6 @@ import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 import { settingsService } from '../settings/settings.service.js';
 import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
-import { vendorKey } from '../market-scraper/market-vendor.js';
-import { competitorAllIn, competitorAllInBasis, baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
-import { getCompetitorExcludeSet } from '../market-scraper/market-scrape-comparison.service.js';
-import { isExcludedVendor } from '../market-scraper/market-vendor.js';
-import { splitSelfAndRivals, measureSelfBaseRatio, latestPerSupplier, ratioWindowStart, resolveRatio, RATIO_SOURCE } from '../market-observations/self-position.js';
-import { recommendBaseForTarget, targetSentence } from '../market-observations/window-target.js';
 import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
@@ -30,57 +24,15 @@ import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js
 
 const SUGGESTION_TTL_MS = 48 * 60 * 60 * 1000; // 48h
 
-function round2(n) {
-  const v = Number(n);
-  return Number.isFinite(v) ? Math.round((v + Number.EPSILON) * 100) / 100 : null;
-}
-
-/**
- * The location's tax/fee config, used for BOTH halves of the comparison: to
- * lift competitor quotes to the all-in their customer pays, and to back-solve
- * the base this tenant must upload to land on a chosen all-in.
- *
- * Keyed on the Rate's location CODE, which is how every other MI read is keyed.
- * That is also the known IATA-vs-Location.code trap (Corpusa's branch is
- * LAXA01 while its config and profile are LAX): the lookup misses, the config
- * is null, the gross-up degrades to the identity, and the engine behaves
- * exactly as it did before any of this. Wrong, but never silently wrong in the
- * expensive direction -- and it cannot bite Corpusa today, which has no
- * PricingRule rows at all.
- */
-async function resolvePricingConfig(rule, getPricingConfig = null) {
-  // ALWAYS an object, never null: a default parameter only fires on
-  // undefined, so passing an explicit null downstream would make
-  // taxesFraction(null) throw on .taxes -- the same trap as Number(null).
-  try {
-    if (getPricingConfig) return (await getPricingConfig(rule)) || {};
-    const row = await prisma.marketPricingConfig.findFirst({
-      where: { tenantId: rule.tenantId, locationCode: rule.rate.location.code },
-    });
-    return row || {};
-  } catch {
-    // No config = identity gross-up = today's behavior. Never go dark.
-    return {};
-  }
-}
-
-/** Distinct agencies a cell must contain before a rule may move a live price. */
-const DEFAULT_MIN_SAMPLE_VENDORS = 3;
-
 /**
  * Minimum-sample guard (2026-09-02, mechanism only). How many DISTINCT
  * agencies (vendors) must be present in the cell — after the adapter's
  * purpose:'pricing' filters/gating — before a rule may act. Config lives in
  * the per-tenant marketPricingConfig AppSetting
- * (settingsService.getMarketPricingSampleConfig).
- *
- * DEFAULT 3 since 2026-09-10 (Hector). It was 1, which is the same as having
- * no guard: SJU's FCAR cell held 80 rows that were ONE supplier quoting ONE
- * Chevrolet Malibu, and LFAR was ten rows from a single agency — both passed a
- * floor of one and both were free to move a live online price. Three distinct
- * agencies is the same floor `price-self-check.js` already uses, so the two
- * subsystems now agree on what counts as a market. A config-read failure still
- * falls back to the default rather than going dark.
+ * (settingsService.getMarketPricingSampleConfig). DEFAULT 1 = exactly the
+ * pre-guard behavior: one offer can still move a live price until Hector
+ * raises the floor. Any config-read failure also falls back to 1, so the
+ * engine never goes dark because of a settings hiccup.
  */
 async function resolveMinSampleVendors(tenantId, getMinSampleConfig = null) {
   try {
@@ -90,7 +42,7 @@ async function resolveMinSampleVendors(tenantId, getMinSampleConfig = null) {
     const n = Number(cfg?.minSampleVendors);
     if (Number.isFinite(n) && n >= 1) return Math.floor(n);
   } catch { /* default below */ }
-  return DEFAULT_MIN_SAMPLE_VENDORS;
+  return 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,82 +218,6 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
 }
 
 /**
- * SHADOW MODE (2026-09-10). Computes what the window-target engine WOULD
- * recommend, and returns it for the audit payload. It changes nothing: the
- * number this rule writes is still the one the live path computed.
- *
- * It exists because the live path was measured this day to deliver the tenant's
- * configured target on 0 of 14 classes, and the only responsible way to replace
- * a money path that has been wrong for weeks is to run the replacement beside
- * it first, on real pools, where both answers can be compared before either
- * moves a price.
- *
- * Two differences from the live path, and they are the whole point:
- *   - the ladder is per PICKUP DATE (the 24h window at SJU spans fifty of them,
- *     and collapsing them with a MIN prices for the cheapest day in the window)
- *   - the base is derived with the ratio MEASURED from the tenant's own listing
- *     on the OTA, not with the tax gross-up
- */
-async function shadowWindowTarget(rule, obs, { sipp, targetN, paddingPct }) {
-  try {
-    const excludeSet = await getCompetitorExcludeSet(rule.tenantId);
-    const rows = obs.map((o) => ({
-      supplier: o.vendor,
-      price: o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice),
-      observedAt: o.observedAt,
-      pickupDate: o.pickupDate,
-    }));
-    const { self, rivals } = splitSelfAndRivals(rows, (s) => isExcludedVendor(s, excludeSet));
-
-    const laddersByDate = new Map();
-    for (const d of [...new Set(rivals.map((r) => (r.pickupDate ? new Date(r.pickupDate).toISOString().slice(0, 10) : null)).filter(Boolean))].sort()) {
-      laddersByDate.set(d, latestPerSupplier(rivals.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === d)));
-    }
-
-    // The ratio gets its OWN window: the ladder is 24h because it is today's
-    // market, but our own listing appears far more often over a fortnight --
-    // 979 times over 27 days for CFAR at SJU against 3 in the last day.
-    // Anchored to the last base change, because an old listing over today's
-    // base measures the price change rather than the channel.
-    let ratio = measureSelfBaseRatio(self, Number(rule.rate.daily));
-    try {
-      const since = ratioWindowStart({ baseChangedAt: rule.rate.updatedAt || null });
-      const wide = await prisma.rateOffer.findMany({
-        where: { sipp, observedAt: { gte: since }, effectiveDailyPrice: { not: null },
-                 profile: { locationCode: rule.rate.location.code, tenantId: rule.tenantId } },
-        select: { supplier: true, effectiveDailyPrice: true, observedAt: true },
-      });
-      const mine = wide
-        .filter((r) => r.supplier && isExcludedVendor(r.supplier, excludeSet))
-        .map((r) => ({ supplier: r.supplier, price: Number(r.effectiveDailyPrice), observedAt: r.observedAt }));
-      if (mine.length) ratio = measureSelfBaseRatio(mine, Number(rule.rate.daily));
-    } catch (_) {
-      // Fall back to the 24h measurement rather than losing the shadow.
-    }
-    const resolved = resolveRatio({ classRatio: ratio });
-    const rec = recommendBaseForTarget({
-      laddersByDate,
-      targetN,
-      ratio: resolved.source === RATIO_SOURCE.ASSUMED ? null : resolved.ratio,
-      floor: Number(rule.floorPrice),
-      ceiling: Number(rule.ceilingPrice),
-      paddingPct,
-    });
-    return {
-      ...rec,
-      sipp,
-      selfListingsSeen: self.length,
-      ratio: { ...ratio, used: resolved.ratio, source: resolved.source },
-      sentence: targetSentence(rec, { asOf: obs.length ? obs[obs.length - 1].observedAt : null }),
-    };
-  } catch (e) {
-    // A shadow computation must never affect the live one, including by
-    // throwing. Its absence is visible in the payload; a 500 would not be.
-    return { error: e.message };
-  }
-}
-
-/**
  * Evaluate a single rule. Returns:
  *   { skipped: true, reason }  — no observations / MANUAL strategy / etc
  *   { skipped: false, autoApplied: true|false, suggestionId, ... }
@@ -349,7 +225,7 @@ async function shadowWindowTarget(rule, obs, { sipp, targetN, paddingPct }) {
  * Pure logic + a single PricingSuggestion write (+ optional Rate.daily
  * update for AUTO mode). Safe to retry.
  */
-export async function evaluateRule(rule, { utilizationContext = null, getMinSampleConfig = null, getPricingConfig = null } = {}) {
+export async function evaluateRule(rule, { utilizationContext = null, getMinSampleConfig = null } = {}) {
   if (rule.strategy === 'MANUAL') {
     return { skipped: true, reason: 'manual_rule_no_op' };
   }
@@ -407,21 +283,12 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
 
   // Compute per-vendor min (one vendor may have multiple pickup-date rows).
-  //
-  // Keyed on the CANONICAL vendor key, not the display name (2026-09-10). The
-  // feed spells one agency several ways — "U-Save" and "U-Save Car Rental" —
-  // and grouping by the raw string counted them as two distinct competitors.
-  // That inflated the ladder and, worse, let a single agency clear the
-  // minimum-sample floor by itself, which is the one thing the floor exists to
-  // prevent. The display name of the cheapest row is kept for the reason
-  // payload, so nothing a human reads changes.
   const perVendor = new Map();
   for (const o of obs) {
-    const display = (o.vendor || '?').trim();
-    const key = vendorKey(display) || display.toLowerCase();
+    const v = (o.vendor || '?').trim();
     const price = priceOf(o);
-    const prev = perVendor.get(key);
-    if (prev == null || price < prev.price) perVendor.set(key, { vendor: display, price, observationId: o.id });
+    const prev = perVendor.get(v);
+    if (prev == null || price < prev.price) perVendor.set(v, { vendor: v, price, observationId: o.id });
   }
   // Minimum-sample guard: perVendor.size is the number of DISTINCT agencies in
   // this cell after every existing filter (24h window, SIPP+location, adapter
@@ -434,20 +301,7 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     return { skipped: true, reason: 'below_min_sample' };
   }
 
-  // ALL-IN vs ALL-IN, then recommend the BASE (2026-09-10, Hector: "que veamos
-  // la competencia pero todavia recomienda el precio que ellos tienen que poner
-  // en sus integraciones para reflejar ese precio que ve el cliente").
-  //
-  // The competitor rows are QUOTES -- Kayak's number is a teaser, measured that
-  // day at 0.582x Expedia's all-in. Lift them to what their customer actually
-  // pays, choose a position on THAT ladder, and back-solve the base to upload.
-  // Without a tax layer configured the lift is the identity and everything
-  // below behaves exactly as it did before.
-  const pricingConfig = await resolvePricingConfig(rule, getPricingConfig);
-  const allInBasis = competitorAllInBasis(pricingConfig);
-  const ordered = Array.from(perVendor.values())
-    .map((r) => ({ ...r, quoted: r.price, price: competitorAllIn(r.price, pricingConfig) }))
-    .sort((a, b) => a.price - b.price);
+  const ordered = Array.from(perVendor.values()).sort((a, b) => a.price - b.price);
   const prices = ordered.map((r) => r.price);
   const marketMin = prices[0];
   const marketMedian = prices[Math.floor(prices.length / 2)];
@@ -513,14 +367,6 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     priced = utilizationInfo.price;
   }
 
-  // Everything above is the ALL-IN the customer should see. What the tenant
-  // types into the integration is the BASE that grosses up to it, so back-solve
-  // before the bounds: rule.floorPrice / rule.ceilingPrice are BASE bounds (a
-  // $69.66 floor against a $115 base), and clamping an all-in number against
-  // them would compare two different currencies.
-  const targetAllIn = priced;
-  priced = baseFromCustomerAllIn(priced, pricingConfig);
-
   // Clamp to floor/ceiling.
   const floor = Number(rule.floorPrice);
   const ceiling = Number(rule.ceilingPrice);
@@ -548,21 +394,6 @@ export async function evaluateRule(rule, { utilizationContext = null, getMinSamp
     paddingPct: padPct,
     marketMin,
     marketMedian,
-    // What the per-pickup-date engine would have said. Recorded, never applied.
-    shadow: await shadowWindowTarget(rule, obs, {
-      sipp,
-      targetN: rule.strategy === 'NTH_CHEAPEST' ? Math.max(1, Math.min(10, rule.targetN || 1)) : 1,
-      paddingPct: padPct,
-    }),
-    // The money trail for the two-domain math: what the rivals were QUOTED at,
-    // what their customer pays, the all-in we aimed for, and the all-in our own
-    // recommendation implies. `basis` says how the lift was computed.
-    priceBasis: allInBasis.basis,
-    competitorFactor: allInBasis.factor,
-    competitorFlatPerDay: allInBasis.flat,
-    marketMinQuoted: ordered.length ? ordered[0].quoted : null,
-    targetAllIn: round2(targetAllIn),
-    suggestedAllIn: round2(customerAllInFromBase(suggestedPrice, pricingConfig)),
     marketVendorCount: ordered.length,
     yourRankAfter: yourRank,
     guardrailsHit,

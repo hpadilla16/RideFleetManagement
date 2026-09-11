@@ -91,16 +91,16 @@ describe('marketPricingConfig.minSampleVendors setting', () => {
   beforeEach(() => { mock = installMock(); });
   afterEach(() => { mock.restore(); });
 
-  it('defaults to 3 when no AppSetting row exists (raised from 1 on 2026-09-10)', async () => {
+  it('defaults to 1 when no AppSetting row exists (= pre-guard behavior)', async () => {
     const cfg = await settingsService.getMarketPricingSampleConfig({ tenantId: 'tenant-1' });
-    assert.deepEqual(cfg, { minSampleVendors: 3 }, 'one supplier is not a market');
+    assert.deepEqual(cfg, { minSampleVendors: 1 });
   });
 
-  it('defaults to 3 on junk values (0, negative, NaN, strings)', async () => {
+  it('defaults to 1 on junk values (0, negative, NaN, strings)', async () => {
     for (const junk of [0, -3, 'nope', null, {}]) {
       mock.state.appSettings.set('tenant:tenant-1:marketPricingConfig', JSON.stringify({ minSampleVendors: junk }));
       const cfg = await settingsService.getMarketPricingSampleConfig({ tenantId: 'tenant-1' });
-      assert.equal(cfg.minSampleVendors, 3, `junk ${JSON.stringify(junk)} must fall back to the default`);
+      assert.equal(cfg.minSampleVendors, 1, `junk ${JSON.stringify(junk)} must fall back to 1`);
     }
   });
 
@@ -112,7 +112,7 @@ describe('marketPricingConfig.minSampleVendors setting', () => {
     assert.equal(cfg.minSampleVendors, 3);
     // Another tenant is untouched.
     const other = await settingsService.getMarketPricingSampleConfig({ tenantId: 'tenant-2' });
-    assert.equal(other.minSampleVendors, 3, 'another tenant keeps the default');
+    assert.equal(other.minSampleVendors, 1);
   });
 
   it('update ignores invalid input and preserves unrelated keys in the JSON', async () => {
@@ -131,25 +131,8 @@ describe('evaluateRule — minimum-sample guard', () => {
   beforeEach(() => { mock = installMock(); });
   afterEach(() => { mock.restore(); });
 
-  it('DEFAULT floor 3: a single offer is SKIPPED, not turned into a price', async () => {
-    // This asserted the opposite until 2026-09-10, when the default went
-    // 1 -> 3. One agency quoting one car is the state that produced SJU's
-    // FCAR cell (80 rows, ONE supplier, ONE Chevrolet Malibu) and LFAR (ten
-    // rows, one agency, an Infiniti against a $213 base) -- both free to move
-    // a live online price.
+  it('DEFAULT floor 1: one single offer still produces a suggestion (today\'s behavior, config absent)', async () => {
     mock.state.offers = [makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 })];
-    const result = await evaluateRule(makeRule());
-    assert.equal(result.skipped, true);
-    assert.equal(result.reason, 'below_min_sample');
-    assert.equal(mock.state.suggestionCreates.length, 0, 'nothing is written');
-  });
-
-  it('DEFAULT floor 3: three distinct agencies DO produce a suggestion', async () => {
-    mock.state.offers = [
-      makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 }),
-      makeOffer({ supplier: 'Avis', effectiveDailyPrice: 44 }),
-      makeOffer({ supplier: 'Sixt', effectiveDailyPrice: 48 }),
-    ];
     const result = await evaluateRule(makeRule());
     assert.equal(result.skipped, false);
     assert.equal(result.suggestedPrice, 40);
@@ -204,29 +187,13 @@ describe('evaluateRule — minimum-sample guard', () => {
     assert.deepEqual(result, { skipped: true, reason: 'below_min_sample' });
   });
 
-  it('a failing config read falls back to the DEFAULT floor — the engine never goes dark on a settings hiccup', async () => {
-    // Three suppliers, so the DEFAULT floor is met and the engine still runs.
-    // Before 2026-09-10 this passed with ONE supplier because the fallback was 1;
-    // now a settings hiccup falls back to the same floor everyone else gets,
-    // which is the point -- degrade to the rule, not to no rule.
-    mock.state.offers = [
-      makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 }),
-      makeOffer({ supplier: 'Avis', effectiveDailyPrice: 44 }),
-      makeOffer({ supplier: 'Sixt', effectiveDailyPrice: 48 }),
-    ];
+  it('a failing config read falls back to floor 1 — the engine never goes dark on a settings hiccup', async () => {
+    mock.state.offers = [makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 })];
     const result = await evaluateRule(makeRule(), {
       getMinSampleConfig: async () => { throw new Error('settings unavailable'); },
     });
-    assert.equal(result.skipped, false, 'a settings failure must not go dark');
+    assert.equal(result.skipped, false);
     assert.equal(result.suggestedPrice, 40);
-
-    // And with only ONE supplier it now skips rather than acting on nothing.
-    mock.state.offers = [makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 })];
-    const thin = await evaluateRule(makeRule(), {
-      getMinSampleConfig: async () => { throw new Error('settings unavailable'); },
-    });
-    assert.equal(thin.skipped, true);
-    assert.equal(thin.reason, 'below_min_sample');
   });
 });
 

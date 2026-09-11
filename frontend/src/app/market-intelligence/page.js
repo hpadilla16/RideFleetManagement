@@ -367,23 +367,7 @@ function Inner({ token, me, logout }) {
                       <td style={{ padding: 6 }}>{fmtDate(r.startedAt)}</td>
                       <td style={{ padding: 6 }}><StatusPill status={r.status} /></td>
                       <td style={{ padding: 6, textAlign: 'right' }}>{r.requestsOk}/{r.requestsErr}</td>
-                      <td style={{ padding: 6, textAlign: 'right' }}>
-                        {r.observationsCount}
-                        {/* An empty day does not error and does not stop the run
-                            being SUCCESS — it just thins the sample the pricing
-                            engine then treats as the market. Say it out loud. */}
-                        {r.coverage?.hasEmptyDays && (
-                          <span
-                            title={`${r.coverage.emptyDays} of ${r.coverage.requestsOk} requested pickup date(s) came back with no offers. Days with offers: ${(r.coverage.pickupDatesWithOffers || []).join(', ') || 'none'}`}
-                            style={{
-                              marginLeft: 6, padding: '1px 6px', borderRadius: 4, fontSize: 11, fontWeight: 600,
-                              background: 'rgba(251,191,36,0.15)', color: '#b45309', whiteSpace: 'nowrap', cursor: 'help'
-                            }}
-                          >
-                            {r.coverage.emptyDays} empty {r.coverage.emptyDays === 1 ? 'day' : 'days'}
-                          </span>
-                        )}
-                      </td>
+                      <td style={{ padding: 6, textAlign: 'right' }}>{r.observationsCount}</td>
                       <td style={{ padding: 6, textAlign: 'right' }}>{r.pricesApplied}</td>
                       <td style={{ padding: 6, textAlign: 'right' }}>{r.durationSec ? `${r.durationSec}s` : '-'}</td>
                     </tr>

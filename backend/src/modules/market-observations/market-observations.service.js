@@ -3,12 +3,6 @@ import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingC
 import { isExcludedVendor, normalizeVendorName, vendorKey } from '../market-scraper/market-vendor.js';
 import { loadCompetitorRows, kayakAllInConfirmed } from '../market-scraper/rate-offer-source.js';
 import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
-import { buildRankClaim, describeDurability, claimSentence } from './market-claim.js';
-import {
-  splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, TIER,
-  ratioWindowStart, resolveRatio, measureLocationRatio, RATIO_SOURCE,
-  describeChannelVisibility, VISIBILITY,
-} from './self-position.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { renderReportExcel } from '../reports/reports-export.js';
@@ -151,43 +145,21 @@ export async function listMarketProviders({ airport, scope }) {
 }
 
 /**
- * One rival offer, normalized for a card. Returns null unless BOTH a usable
- * price and a date survived -- half a data point on a money screen invites a
- * decision nobody can defend.
- */
-function lastOffer(row) {
-  if (!row) return null;
-  const at = row.observedAt ? new Date(row.observedAt) : null;
-  if (!at || Number.isNaN(at.getTime())) return null;
-  const raw = row.price;
-  if (raw === null || raw === undefined || raw === '') return null;
-  const price = Number(raw);
-  if (!Number.isFinite(price) || price <= 0) return null;
-  return { price, supplier: row.supplier ? String(row.supplier) : null, observedAt: at };
-}
-
-/**
  * Cards for the classes the tenant PRICES but the market did not quote in the
  * window. Without these the class disappears from the dashboard, which reads
  * as "we do not track this" when the truth is "nobody offered it" -- the two
  * need different actions from a revenue manager. Pure so it can be tested
  * without a database.
  *
- * The card also carries the LAST rival offer we ever saw for the class, not
- * just the date: "Routes $90.67 - Aug 5" is a number a revenue manager can act
- * on, where "Last seen Aug 5" only tells them to go dig. The tenant's own brand
- * is excluded, so the card can never quote them their own price as a rival.
- *
  * @param {Map<string, {id,rateCode,daily}>} ownRatesBySipp - the tenant's rate per SIPP
  * @param {Set<string>} quotedSipps - SIPPs the market DID quote (these are skipped)
  * @param {object|null} pricingConfig - gross-up config, when the airport has one
- * @param {Map<string, {observedAt, price, supplier}|null>} [lastOfferBySipp] - the newest
- *   rival offer ever recorded for the class at this airport, at any age
+ * @param {Map<string, Date|null>} [lastSeenBySipp] - last time the class was seen at all
  */
-export function buildUncomparedCards({ ownRatesBySipp, quotedSipps, pricingConfig = null, lastOfferBySipp = new Map() }) {
+export function buildUncomparedCards({ ownRatesBySipp, quotedSipps, pricingConfig = null, lastSeenBySipp = new Map() }) {
   const own = ownRatesBySipp instanceof Map ? ownRatesBySipp : new Map(Object.entries(ownRatesBySipp || {}));
   const quoted = quotedSipps instanceof Set ? quotedSipps : new Set(quotedSipps || []);
-  const seen = lastOfferBySipp instanceof Map ? lastOfferBySipp : new Map(Object.entries(lastOfferBySipp || {}));
+  const seen = lastSeenBySipp instanceof Map ? lastSeenBySipp : new Map(Object.entries(lastSeenBySipp || {}));
   const out = [];
   for (const [sipp, rate] of own.entries()) {
     if (!sipp || quoted.has(sipp)) continue;
@@ -218,10 +190,7 @@ export function buildUncomparedCards({ ownRatesBySipp, quotedSipps, pricingConfi
       // Distinguishes "watched and nothing seen" from "not watched". The
       // frontend keys its empty state off this flag.
       noComparables: true,
-      // A price with no date is a rumour and a date with no price is a chore,
-      // so the card gets both or neither.
-      lastOffer: lastOffer(seen.get(sipp)),
-      lastSeenAt: lastOffer(seen.get(sipp))?.observedAt || null,
+      lastSeenAt: seen.get(sipp) || null,
     });
   }
   return out;
@@ -328,9 +297,7 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       },
       select: {
         sipp: true,
-        // updatedAt anchors the ratio window: evidence from before the base
-        // moved is evidence about a different base.
-        rate: { select: { id: true, rateCode: true, daily: true, name: true, updatedAt: true } },
+        rate: { select: { id: true, rateCode: true, daily: true, name: true } },
       },
     });
     for (const r of rules) {
@@ -354,170 +321,16 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
   // Competitor-pool hygiene: drop the tenant's own brand / configured exclusions
   // and normalize vendor spellings so one brand isn't double-counted.
   const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
-  // MEASURE, DON'T MODEL (2026-09-10, second pass).
-  //
-  // An earlier version of this lifted the rival ladder into an "all-in" domain
-  // and ranked our grossed-up price against it. Both halves of that were wrong.
-  // The tenant's OWN listing is in the pool -- IRC sells as ZezGo, which is why
-  // `marketExcludedVendors` exists -- so the truth was measurable all along:
-  // their CCAR base is $14.14, the model said the customer therefore sees
-  // $20.72 and ranked them DEAREST of four, and their observed listing was
-  // $13.00-$14.67 against rivals at $15.00-$20.00, i.e. CHEAPEST on six of six
-  // dates. Observed listing / base came to 0.919-1.037, not 1.4652.
-  //
-  // So the ladder is what the OTA SHOWS, unlifted, and our side is our own
-  // observed listing wherever the scrape caught it. See self-position.js.
   const bySipp = new Map();
-  const selfBySipp = new Map();
   for (const o of obs) {
-    const quoted = priceOf(o);
-    const row = {
+    if (isExcludedVendor(o.vendor, excludeSet)) continue;
+    if (!bySipp.has(o.sipp)) bySipp.set(o.sipp, []);
+    bySipp.get(o.sipp).push({
       vendor: normalizeVendorName(o.vendor),
-      supplier: normalizeVendorName(o.vendor),
-      price: quoted,
-      quotedPrice: quoted,
+      price: priceOf(o),
       teaserPrice: NUM(o.dailyPrice),
       observedAt: o.observedAt,
-      // The claim below is scoped to ONE pickup date. Carrying it here is what
-      // makes that possible: the 24h window at SJU spans fifty of them.
-      pickupDate: o.pickupDate,
-    };
-    if (isExcludedVendor(o.vendor, excludeSet)) {
-      // OUR OWN listing: no longer merely discarded.
-      if (!selfBySipp.has(o.sipp)) selfBySipp.set(o.sipp, []);
-      selfBySipp.get(o.sipp).push(row);
-      continue;
-    }
-    if (!bySipp.has(o.sipp)) bySipp.set(o.sipp, []);
-    bySipp.get(o.sipp).push(row);
-  }
-
-  // Scope: how many agencies quote each class AT ALL, so a claim can admit what
-  // it did not see -- at SJU a single day shows 28-56% of a class's known
-  // suppliers, and "cheapest of 3" reads very differently next to "of 21".
-  const suppliersKnownBySipp = new Map();
-  // Noise: the class's typical overnight movement, which is what decides
-  // whether a margin is a position or a rounding error. Slow-moving, so it is
-  // the one piece that legitimately looks backwards (14 days).
-  const overnightMoveBySipp = new Map();
-  if (profileIds.length) {
-    try {
-      const known = await prisma.rateOffer.groupBy({
-        by: ['sipp', 'supplier'],
-        where: { profileId: { in: profileIds }, observedAt: { gte: new Date(Date.now() - 60 * 24 * 3600 * 1000) } },
-      });
-      for (const k of known) {
-        if (!k.supplier || !String(k.supplier).trim()) continue;
-        suppliersKnownBySipp.set(k.sipp, (suppliersKnownBySipp.get(k.sipp) || 0) + 1);
-      }
-      const moves = await prisma.$queryRawUnsafe(
-        `select sipp, (percentile_cont(0.5) within group (order by delta))::float as move
-           from (
-             select sipp, abs(cheapest - lag(cheapest) over (partition by sipp order by d)) as delta
-               from (
-                 select o.sipp, date_trunc('day', o."observedAt") as d, min(o."effectiveDailyPrice") as cheapest
-                   from "RateOffer" o
-                  where o."profileId" = any($1)
-                    and o."observedAt" >= now() - interval '14 days'
-                    and o."effectiveDailyPrice" > 0
-                  group by 1, 2
-               ) daily
-           ) diffs
-          where delta is not null
-          group by sipp`,
-        profileIds,
-      );
-      for (const m of moves) {
-        // Same domain as the ladder: both are what the OTA shows. The lift that
-        // used to be applied here went with the one on the ladder itself.
-        overnightMoveBySipp.set(m.sipp, m.move);
-      }
-    } catch (_) {
-      // Both are decoration on a claim that stands without them.
-    }
-  }
-
-  // OUR OWN LISTINGS, over the ratio's own window (2026-09-10).
-  //
-  // The ladder above is 24 hours old because it is today's market. The ratio is
-  // a slow property of the channel, and measuring it in the same 24 hours threw
-  // away nearly all the evidence: at SJU our own listing appears 979 times over
-  // 27 days for CFAR and 3 times in the last day, so four classes read
-  // UNCALIBRATED for no reason but the window.
-  //
-  // Anchored per rate to the last time its base moved -- an old listing divided
-  // by today's base measures the price change, not the channel.
-  const selfWindowBySipp = new Map();
-  const locationRatioInput = [];
-  if (profileIds.length && ownRatesBySipp.size) {
-    for (const [sipp, rate] of ownRatesBySipp.entries()) {
-      try {
-        const since = ratioWindowStart({ baseChangedAt: rate.updatedAt || null });
-        const rows = await prisma.rateOffer.findMany({
-          where: { profileId: { in: profileIds }, sipp, observedAt: { gte: since }, effectiveDailyPrice: { not: null } },
-          select: { supplier: true, effectiveDailyPrice: true, observedAt: true },
-        });
-        const mine = rows
-          .filter((r) => r.supplier && isExcludedVendor(r.supplier, excludeSet))
-          .map((r) => ({ supplier: r.supplier, price: Number(r.effectiveDailyPrice), observedAt: r.observedAt }));
-        selfWindowBySipp.set(sipp, { rows: mine, since });
-        locationRatioInput.push({ base: Number(rate.daily), selfRows: mine });
-      } catch (_) {
-        // A class without its window simply falls back down the hierarchy.
-      }
-    }
-  }
-  // Every class at one airport goes through the same channel, so one class's
-  // listings are real evidence about another's base.
-  const locationRatio = measureLocationRatio(locationRatioInput);
-
-  // ARE WE ON THE SHELF? A class we price, whose rivals the scraper sees every
-  // day, where our listing never appears, is a business fact -- not a data gap
-  // -- and estimating a rank for it is a fiction. Measured over 30 days so a
-  // quiet fortnight cannot masquerade as absence.
-  const visibilityBySipp = new Map();
-  if (profileIds.length) {
-    try {
-      // The own-brand test is `isExcludedVendor`, which compares canonical
-      // vendorKeys ("ZezGo" -> "ZEZGO"). An earlier version of this compared
-      // lower(supplier) against those keys in SQL, matched nothing, and read
-      // every class as never-seen -- including the two the same request had
-      // just proven were OBSERVED today. So group in SQL, decide in JS, with
-      // the one matcher everything else uses.
-      const stats = await prisma.$queryRawUnsafe(
-        `select o.sipp, o.supplier, to_char(o."observedAt",'YYYY-MM-DD') as day, max(o."observedAt") as last_seen
-           from "RateOffer" o
-          where o."profileId" = any($1) and o."observedAt" >= now() - interval '30 days'
-            and coalesce(trim(o.supplier), '') <> ''
-          group by 1, 2, 3`,
-        profileIds,
-      );
-      const acc = new Map();
-      for (const r of stats) {
-        if (!acc.has(r.sipp)) {
-          acc.set(r.sipp, { rivalDays: new Set(), rivalSuppliers: new Set(), selfDays: new Set(), selfLast: null });
-        }
-        const a = acc.get(r.sipp);
-        if (isExcludedVendor(r.supplier, excludeSet)) {
-          a.selfDays.add(r.day);
-          if (!a.selfLast || r.last_seen > a.selfLast) a.selfLast = r.last_seen;
-        } else {
-          a.rivalDays.add(r.day);
-          a.rivalSuppliers.add(vendorKey(r.supplier) || String(r.supplier).toLowerCase());
-        }
-      }
-      for (const [sipp, a] of acc) {
-        visibilityBySipp.set(sipp, describeChannelVisibility({
-          rivalDays: a.rivalDays.size,
-          rivalSuppliers: a.rivalSuppliers.size,
-          selfDays: a.selfDays.size,
-          selfLastSeenAt: a.selfLast,
-        }));
-      }
-    } catch (_) {
-      // Without it every class simply carries no visibility verdict, which is
-      // the same as saying nothing -- the correct failure.
-    }
+    });
   }
 
   const sipps = [];
@@ -529,10 +342,10 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
     for (const r of rows) {
       const key = (r.vendor || '?').trim();
       const prev = perVendor.get(key);
-      if (prev == null || r.price < prev.price) perVendor.set(key, { price: r.price, quoted: r.quotedPrice });
+      if (prev == null || r.price < prev) perVendor.set(key, r.price);
     }
     const ordered = Array.from(perVendor.entries())
-      .map(([vendor, v]) => ({ vendor, price: v.price, quoted: v.quoted }))
+      .map(([vendor, price]) => ({ vendor, price }))
       .sort((a, b) => a.price - b.price);
 
     const prices = ordered.map((v) => v.price);
@@ -566,113 +379,11 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       yourRank = idx === -1 ? ordered.length + 1 : idx + 1;
     }
 
-    // Withdraw the position only when we are demonstrably absent AND today's
-    // scrape did not see us.
-    const visibilityHere = visibilityBySipp.get(sipp) || null;
-
-    // THE CLAIM (2026-09-10). Everything above is a 24-hour RANGE across every
-    // pickup date in the window -- useful as context, useless as a position,
-    // because the cheapest rival for one class ranged $15.86 to $135.82 across
-    // the fifty pickup dates in that window. The claim is a fact about one
-    // pickup date at one moment: "for Sep 11, as of 04:21, you are the
-    // cheapest of the three agencies that quoted it".
-    const nearest = rows
-      .map((r) => r.pickupDate)
-      .filter(Boolean)
-      .sort((a, b) => new Date(a) - new Date(b))[0] || null;
-    const nearestKey = nearest ? new Date(nearest).toISOString().slice(0, 10) : null;
-    // Our own listings for this class, and the ratio between what the OTA lists
-    // for us and the base we uploaded. The ratio is only used when the scrape
-    // did NOT catch our listing for the date in question.
-    const selfRows = selfBySipp.get(sipp) || [];
-    const ownBase = yourRow ? yourRow.base : null;
-    // The class's own ratio, measured over the ratio window rather than the
-    // ladder's 24 hours; then the hierarchy: class -> location -> assume 1.
-    const windowRows = selfWindowBySipp.get(sipp)?.rows || selfRows;
-    const classRatio = measureSelfBaseRatio(windowRows, ownBase);
-    const resolved = resolveRatio({ classRatio, locationRatio });
-    const selfRatio = {
-      ...classRatio,
-      // What was actually used, and where it came from -- the card renders
-      // ASSUMED as UNCALIBRATED.
-      used: resolved.ratio,
-      source: resolved.source,
-      usedN: resolved.n,
-      windowFrom: selfWindowBySipp.get(sipp)?.since || null,
-      location: locationRatio,
-    };
-
-    // Position per pickup date, at the highest tier the data supports.
-    const positionByDate = new Map();
-    for (const d of [...new Set(rows.map((r) => (r.pickupDate ? new Date(r.pickupDate).toISOString().slice(0, 10) : null)).filter(Boolean))].sort()) {
-      const onDate = (list) => list.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === d);
-      positionByDate.set(d, buildPositionForDate({
-        selfRows: onDate(selfRows),
-        rivalRows: onDate(rows),
-        base: ownBase,
-        ratio: resolved.source === RATIO_SOURCE.ASSUMED ? null : resolved.ratio,
-        pickupDate: d,
-      }));
-    }
-    const nearestPosition = nearestKey ? positionByDate.get(nearestKey) : null;
-
-    // The claim is stated against what the OTA actually shows for us: the
-    // observed listing when we have it, the base times the measured ratio when
-    // we do not. Never the grossed-up counter total, which is a different
-    // number answering a different question.
-    const ourListedForClaim = nearestPosition && nearestPosition.ourListed != null
-      ? nearestPosition.ourListed
-      : (ownBase != null ? ownBase * resolved.ratio : null);
-    const claim = buildRankClaim({
-      rows: nearestKey
-        ? rows.filter((r) => r.pickupDate && new Date(r.pickupDate).toISOString().slice(0, 10) === nearestKey)
-            .map((r) => ({ supplier: r.vendor, price: r.price, observedAt: r.observedAt }))
-        : [],
-      yourAllIn: ourListedForClaim,
-      pickupDate: nearestKey,
-      suppliersKnown: suppliersKnownBySipp.get(sipp) ?? null,
-    });
-    const withdrawPosition = visibilityHere?.state === VISIBILITY.NOT_VISIBLE
-      && nearestPosition?.tier !== TIER.OBSERVED;
-
-    const durability = describeDurability({
-      gapToNext: claim.gapToNext,
-      gapToBeat: claim.gapToBeat,
-      overnightMove: overnightMoveBySipp.get(sipp) ?? null,
-      verdict: claim.verdict,
-    });
-
     sipps.push({
       sipp,
       median,
       min,
       max,
-      // When we are demonstrably not in the channel, the position is withdrawn
-      // rather than estimated: "Dearest of 4" for a listing that does not exist
-      // is a confident answer to a question nobody can ask.
-      visibility: visibilityBySipp.get(sipp) || null,
-      claim: {
-        ...claim,
-        // An OBSERVED position always wins: if our listing is in today's scrape
-        // we are on the shelf, whatever the thirty-day history says. `claim`
-        // does not carry the tier yet -- it is attached below -- so this reads
-        // `nearestPosition`, which is where the tier actually comes from. The
-        // first version read `claim.tier`, found undefined, and overwrote the
-        // two classes it had just measured as cheapest.
-        ...(withdrawPosition ? { verdict: 'NOT_VISIBLE', rank: null } : {}),
-        sentence: withdrawPosition ? visibilityBySipp.get(sipp).label : claimSentence(claim),
-        durability,
-        // Which tier the answer came from, so no screen can present an estimate
-        // as a fact: OBSERVED (our listing was in the pool) / ESTIMATED (base x
-        // measured ratio) / UNKNOWN (no rivals for that date).
-        tier: nearestPosition ? nearestPosition.tier : TIER.UNKNOWN,
-        ourListed: nearestPosition ? nearestPosition.ourListed : null,
-        ratio: selfRatio,
-        selfCoverage: describeSelfCoverage(positionByDate),
-      },
-      // The ladder is unlifted -- it is what the OTA shows. claim.tier above
-      // says whether OUR side of the comparison was observed or estimated.
-      priceBasis: 'AS_LISTED',
       vendorCount: ordered.length,
       topVendors: ordered.slice(0, 5),
       yourRate: yourRow,
@@ -688,38 +399,22 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
   // compared" -- two very different problems. See buildUncomparedCards.
   const missingOwn = [...ownRatesBySipp.keys()].filter((s) => !bySipp.has(s));
   if (missingOwn.length) {
-    const lastOfferBySipp = new Map();
+    const lastSeenBySipp = new Map();
     try {
-      // The 20 newest rows per class, then the first one that is not the
-      // tenant's own brand: DISTINCT ON would hand back a single row that
-      // could BE the tenant, and the card would quote them themselves.
-      const seenRows = await prisma.$queryRawUnsafe(
-        `select sipp, supplier, "effectiveDailyPrice" as price, "dailyPrice" as teaser, "observedAt"
-           from (
-             select o.sipp, o.supplier, o."effectiveDailyPrice", o."dailyPrice", o."observedAt",
-                    row_number() over (partition by o.sipp order by o."observedAt" desc) as rn
-               from "RateOffer" o
-              where o."profileId" = any($1) and o.sipp = any($2)
-           ) ranked
-          where rn <= 20
-          order by sipp, "observedAt" desc`,
-        profileIds,
-        missingOwn,
-      );
-      for (const r of seenRows) {
-        if (lastOfferBySipp.has(r.sipp)) continue;
-        if (isExcludedVendor(r.supplier, excludeSet)) continue;
-        const price = r.price != null ? r.price : r.teaser;
-        lastOfferBySipp.set(r.sipp, { observedAt: r.observedAt, price, supplier: normalizeVendorName(r.supplier) });
-      }
+      const seenRows = await prisma.rateOffer.groupBy({
+        by: ['sipp'],
+        where: { profileId: { in: profileIds }, sipp: { in: missingOwn } },
+        _max: { observedAt: true },
+      });
+      for (const r of seenRows) lastSeenBySipp.set(r.sipp, r._max?.observedAt || null);
     } catch (_) {
-      // The card is still worth showing without a last-seen offer.
+      // The card is still worth showing without a last-seen date.
     }
     for (const card of buildUncomparedCards({
       ownRatesBySipp,
       quotedSipps: new Set(bySipp.keys()),
       pricingConfig,
-      lastOfferBySipp,
+      lastSeenBySipp,
     })) sipps.push(card);
   }
 

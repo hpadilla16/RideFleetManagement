@@ -62,9 +62,7 @@ const SIPP_LABELS = {
   // "Class FJAR". IRC's Wrangler is FJAR; Corpusa/IRC also run vans, pickups
   // and open-air 4x4s, and a card with no name reads as a bug.
   LFAR: 'Luxury SUV',
-  // RFAR is a RECREATIONAL vehicle in ACRISS (R = recreational), not premium --
-  // the scraper maps 'Recreational Vehicle' / 'RV' to it. P is premium (PFAR).
-  RFAR: 'Recreational Vehicle',
+  RFAR: 'Premium SUV',
   XFAR: 'Special SUV',
   FJAR: 'Open-Air 4x4',
   FVAR: 'Passenger Van',
@@ -607,38 +605,8 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
   const vendorCount = data.vendorCount || 0;
   // The class is watched and priced, but nobody quoted it in the last 24h.
   // Say so, with the date, instead of showing an empty chart under "unranked".
-  // The scoped claim: one pickup date, one moment. `verdict` drives the colour
-  // because "cheapest" and "dearest of 4" are not the same news.
-  const claim = data.claim && data.claim.verdict && data.claim.verdict !== 'NO_DATA' && data.claim.verdict !== 'NO_PRICE'
-    ? data.claim
-    : null;
-  const claimColor = claim?.verdict === 'CHEAPEST' ? '#4ade80'
-    : claim?.verdict === 'MOST_EXPENSIVE' ? '#f87171'
-    : '#fbbf24';
-  // OBSERVED means our own listing was in the same scrape as the rivals', so
-  // the position is a fact and needs no model. ESTIMATED means we inferred our
-  // listed price from our base with the measured ratio.
-  const tier = data.claim?.tier || null;
-  const listedPrice = data.claim?.ourListed ?? null;
-  const ratio = data.claim?.ratio || null;
-  // Not a data gap: a class we price, whose rivals are quoted daily, where our
-  // own listing never appears. The position is withdrawn rather than estimated.
-  const visibility = data.visibility || null;
-  const notVisible = visibility?.state === 'NOT_VISIBLE' && tier !== 'OBSERVED';
-  const fading = visibility?.state === 'FADING';
-  const claimHeadline = claim
-    ? (claim.verdict === 'CHEAPEST'
-        ? `Cheapest of ${claim.of}`
-        : claim.verdict === 'MOST_EXPENSIVE'
-          ? `Dearest of ${claim.of}`
-          : `#${claim.rank} of ${claim.of}`)
-      + (claim.pickupDate ? ` · ${claim.pickupDate}` : '')
-    : null;
   const noComparables = !!data.noComparables || (vendorCount === 0 && data.median == null);
   const lastSeenDay = fmtDay(data.lastSeenAt);
-  // The last rival price we ever saw, so the card answers "and what were they
-  // charging?" without a trip to the drill-down.
-  const lastOffer = data.lastOffer && data.lastOffer.price != null ? data.lastOffer : null;
 
   // Delta + sparkline span the selected range (the history is fetched with days=rangeDays).
   const yourSeries = useMemo(() => {
@@ -681,26 +649,9 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
           <div style={sippLabelStyle}>{label}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          {/* The headline is what the OTA LISTS for us, because that is the
-              number a renter compares. The grossed-up counter total is a real
-              number answering a different question, so it moves below. */}
-          <div style={priceStyle}>{fmtMoney(listedPrice ?? yourPrice)}</div>
-          {listedPrice != null && data.yourRate?.base != null && (
-            <div style={{ fontSize: 10, color: '#6e7587' }}>
-              {tier === 'OBSERVED' ? 'as listed' : 'estimated'} · base {fmtMoney(Number(data.yourRate.base))}
-            </div>
-          )}
-          {listedPrice == null && data.yourRate?.allIn && data.yourRate?.base != null && (
+          <div style={priceStyle}>{fmtMoney(yourPrice)}</div>
+          {data.yourRate?.allIn && data.yourRate?.base != null && (
             <div style={{ fontSize: 10, color: '#6e7587' }}>all-in · base {fmtMoney(Number(data.yourRate.base))}</div>
-          )}
-          {/* Say what the ladder is measured in. QUOTED means this airport has
-              no tax config, so the rank compares our all-in against raw quotes
-              and is not a like-for-like number. */}
-          {data.priceBasis === 'QUOTED' && vendorCount > 0 && (
-            <div
-              title="No tax/fee config for this airport, so competitor prices are raw quotes and your rank is not like-for-like."
-              style={{ fontSize: 10, color: '#fbbf24', cursor: 'help' }}
-            >rank vs raw quotes</div>
           )}
           {cheapestDeltaPct != null && <DeltaBadge pct={cheapestDeltaPct} days={rangeDays} />}
         </div>
@@ -711,29 +662,9 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: '#6e7587', fontSize: 11, textAlign: 'center' }}>
             <span>your price only — nothing to compare it against</span>
             <span style={{ color: '#3a4153' }}>the market has not quoted this class in the last 24h</span>
-            {notVisible && (
-              <span style={{ marginTop: 6, color: '#f87171' }}>{visibility.label}</span>
-            )}
-            {lastOffer && (
-              <span style={{ marginTop: 6, color: '#94a3b8' }}>
-                last rival seen: <span style={{ color: '#e2e8f5', fontWeight: 600 }}>{fmtMoney(lastOffer.price)}</span>
-                {lastOffer.supplier ? ` · ${lastOffer.supplier}` : ''}
-              </span>
-            )}
           </div>
         ) : history ? (
-          <>
-            <Sparkline history={history} yourPrice={yourPrice} />
-            {/* A margin smaller than the class's typical overnight move is not a
-                position — measured at SJU, "cheapest minus $1" is inside the
-                noise for the cheap classes. Say so rather than let the green
-                "Cheapest" imply it will still be true tomorrow. */}
-            {claim?.durability?.durable === false && (
-              <div style={{ fontSize: 10, color: '#fbbf24', marginTop: 2 }} title={claim.durability.label}>
-                margin ${Number(claim.durability.margin).toFixed(2)} is inside the ${Number(claim.durability.overnightMove).toFixed(2)} overnight swing
-              </div>
-            )}
-          </>
+          <Sparkline history={history} yourPrice={yourPrice} />
         ) : (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3a4153', fontSize: 11 }}>
             loading chart…
@@ -745,55 +676,17 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
         {noComparables ? (
           <>
             <span style={{ color: '#fbbf24', fontWeight: 600 }}>No comparables</span>
-            <span>
-              {lastOffer
-                ? `${lastOffer.supplier || 'Rival'} ${fmtMoney(lastOffer.price)} · ${lastSeenDay}`
-                : (lastSeenDay ? `Last seen ${lastSeenDay}` : 'Never seen at this airport')}
-            </span>
+            <span>{lastSeenDay ? `Last seen ${lastSeenDay}` : 'Never seen at this airport'}</span>
           </>
         ) : (
           <>
-            {/* The claim is a FACT with an hour and a pickup date attached, not a
-                forecast: the 24h window spans fifty pickup dates, so a rank over
-                all of them is not a position anybody can buy. Median/Low stay,
-                labelled as the range they are. */}
-            {notVisible ? (
-              <span style={{ color: '#f87171', fontWeight: 600 }} title={visibility.label}>
-                NOT ON THE OTA
+            <span>
+              Rank: <span style={{ color: rankColor, fontWeight: 600 }}>
+                {yourRank != null ? `#${yourRank} of ${vendorCount} vendors` : 'unranked'}
               </span>
-            ) : claim ? (
-              <span style={{ color: claimColor, fontWeight: 600 }} title={claim.sentence || ''}>
-                {claimHeadline}
-                {tier === 'OBSERVED' && (
-                  <span
-                    title="Your own listing and your rivals' came from the same scrape of the same page — this position is measured, not modelled."
-                    style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: '#4ade80', cursor: 'help' }}
-                  >MEASURED</span>
-                )}
-                {fading && (
-              <span
-                title={visibility.label}
-                style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: '#fb923c', cursor: 'help' }}
-              >DROPPED OUT {visibility.daysSinceSeen}d</span>
-            )}
-            {tier === 'ESTIMATED' && !notVisible && (
-                  <span
-                    title={ratio?.n
-                      ? `Your listing was not in this scrape. Estimated from your base using the ratio measured from ${ratio.n} of your own past listings (${ratio.min}–${ratio.max}).`
-                      : 'Your listing was not in this scrape and no ratio has been measured yet, so this assumes the OTA lists your base unchanged.'}
-                    style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: '#fbbf24', cursor: 'help' }}
-                  >{ratio?.n ? 'ESTIMATED' : 'UNCALIBRATED'}</span>
-                )}
-              </span>
-            ) : (
-              <span>
-                Rank: <span style={{ color: rankColor, fontWeight: 600 }}>
-                  {yourRank != null ? `#${yourRank} of ${vendorCount} vendors` : 'unranked'}
-                </span>
-              </span>
-            )}
-            <span title="Across every pickup date observed in the last 24 hours — a range, not a position.">
-              24h {fmtMoney(data.min)}–{fmtMoney(data.median)}
+            </span>
+            <span>
+              Median {fmtMoney(data.median)} · Low {fmtMoney(data.min)}
             </span>
           </>
         )}

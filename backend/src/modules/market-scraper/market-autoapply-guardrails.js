@@ -31,35 +31,7 @@ export const HOLD_REASONS = {
   FALLBACK_CLASS: 'no class-specific rate (fallback)',
   NO_BASELINE: 'no baseline price',
   MAX_DELTA: 'maxDeltaPct breach',
-  DATA_QUALITY: 'suggestion too far from the live base to be a market signal',
 };
-
-/**
- * Data-quality reject band (2026-09-10).
- *
- * A `maxDeltaPct` breach says "that is a big move". This says something else:
- * "that is not the same product". Measured at SJU the same day: LFAR carried
- * ten offers from ONE supplier and the cars were Infiniti QX50/QX60 at $46-66
- * while the tenant's LFAR base is $213. "Cheapest minus a dollar" then says
- * $45 — arithmetically perfect, a different vehicle. No competitive strategy
- * asks for a price a fifth of the current one; a sample that suggests it is
- * telling you about the sample, not about the market.
- *
- * So this HOLDS IN BOTH MODES, unlike the delta band, which a human may
- * knowingly bypass. Explicit intent is a reason to widen a band, never to
- * switch off the check that the two things being compared are comparable.
- */
-export const DATA_QUALITY_FACTOR = 2;
-
-/**
- * The band holds in AUTO unconditionally. On a MANUAL apply it still holds
- * unless the caller passes `acknowledgeDataQuality: true` — a flag deliberately
- * SEPARATE from `force`, because `force` already means "a human pressed Apply
- * now" (`market-scrape-correction.service.js:97`) and every click would
- * otherwise carry the acknowledgement silently. The escape exists because
- * seeding a base that legitimately starts far from the market — the LAX
- * bootstrap — is a real operation; it just has to be said out loud.
- */
 
 function num(v) {
   if (v == null || v === '') return null;
@@ -118,7 +90,6 @@ export function evaluateWrite(p) {
   const {
     suggestedBase, currentBase, config,
     hasOwnRateItem, currentFromFallback = false, mode,
-    acknowledgeDataQuality = false,
   } = p;
   const warnings = [];
 
@@ -161,31 +132,6 @@ export function evaluateWrite(p) {
 
   const base = num(currentBase);
 
-  // (2b) Data-quality band — BOTH modes, and checked before the delta band
-  // because it is the stronger statement: a suggestion this far from the live
-  // base is evidence about the sample, not about the market. See
-  // DATA_QUALITY_FACTOR.
-  const dqFactor = (() => {
-    const c = num(config?.dataQualityFactor);
-    return c != null && c > 1 ? c : DATA_QUALITY_FACTOR;
-  })();
-  if (base != null && base > 0) {
-    const ratio = suggested / base;
-    if (ratio > dqFactor || ratio < 1 / dqFactor) {
-      const detail = `${round2(ratio)}x the live base (limit ${dqFactor}x)`;
-      if (!(mode === 'manual' && acknowledgeDataQuality === true)) {
-        return {
-          outcome: 'held',
-          finalDaily: null,
-          deltaPct: round2((suggested - base) / base * 100),
-          reason: `${HOLD_REASONS.DATA_QUALITY}: ${detail}`,
-          warnings,
-        };
-      }
-      warnings.push(`data-quality band acknowledged: ${detail}`);
-    }
-  }
-
   // (3) maxDeltaPct band — computed vs the current live BASE.
   let deltaPct = null;
   if (base != null && base !== 0) {
@@ -205,9 +151,7 @@ export function evaluateWrite(p) {
         // HOLD — never clamp a maxDelta breach (per money-safety invariant).
         return { outcome: 'held', finalDaily: null, deltaPct, reason: HOLD_REASONS.MAX_DELTA, warnings };
       }
-      // Manual: explicit human intent → warn but allow. Unchanged: this is the
-      // bypass the "Apply now" route documents, and the one the LAX bootstrap
-      // depends on to seed a base that starts far from the market.
+      // Manual: explicit human intent → warn but allow.
       warnings.push(`delta ${deltaPct}% exceeds maxDeltaPct ${maxDelta}% (allowed on manual)`);
     }
   }
@@ -239,5 +183,4 @@ export const marketAutoApplyGuardrails = {
   evaluateWrite,
   isMarketAutoApplyEnabled,
   HOLD_REASONS,
-  DATA_QUALITY_FACTOR,
 };

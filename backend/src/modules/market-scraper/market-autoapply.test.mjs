@@ -241,11 +241,8 @@ describe('INVARIANT: never write above ceiling (clamp)', () => {
     await withMaster('true', async () => {
       mock.state.run = makeRun();
       mock.state.pricingConfig = { ...CFG, maxDeltaPct: 100000 };
-      // 500 against a live 190 is 2.6x, which the data-quality band HOLDs
-      // since 2026-09-10 (see market-autoapply-guardrails.test.mjs). 240 keeps
-      // this test on its own subject: the ceiling clamp.
       mock.state.rateItems = [{ vehicleTypeId: 'vt-ecar', daily: 190 }];
-      mock.state.observations = [obs(240)];
+      mock.state.observations = [obs(500)];
       const res = await applyRunSuggestions('run-1', { scope: { tenantId: 'tenant-1' }, mode: 'auto' });
       assert.equal(res.clampedCount, 1);
       assert.equal(Number(mock.state.rateItemWrites[0].data.daily), 200);
