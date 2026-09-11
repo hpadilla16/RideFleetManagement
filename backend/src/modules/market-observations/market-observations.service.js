@@ -478,25 +478,40 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
   const visibilityBySipp = new Map();
   if (profileIds.length) {
     try {
-      const ownKeys = [...excludeSet];
+      // The own-brand test is `isExcludedVendor`, which compares canonical
+      // vendorKeys ("ZezGo" -> "ZEZGO"). An earlier version of this compared
+      // lower(supplier) against those keys in SQL, matched nothing, and read
+      // every class as never-seen -- including the two the same request had
+      // just proven were OBSERVED today. So group in SQL, decide in JS, with
+      // the one matcher everything else uses.
       const stats = await prisma.$queryRawUnsafe(
-        `select o.sipp,
-                count(distinct to_char(o."observedAt",'YYYY-MM-DD')) filter (where not (lower(coalesce(o.supplier,'')) = any($2)))::int as rival_days,
-                count(distinct o.supplier) filter (where not (lower(coalesce(o.supplier,'')) = any($2)))::int as rival_suppliers,
-                count(distinct to_char(o."observedAt",'YYYY-MM-DD')) filter (where lower(coalesce(o.supplier,'')) = any($2))::int as self_days,
-                max(o."observedAt") filter (where lower(coalesce(o.supplier,'')) = any($2)) as self_last
+        `select o.sipp, o.supplier, to_char(o."observedAt",'YYYY-MM-DD') as day, max(o."observedAt") as last_seen
            from "RateOffer" o
           where o."profileId" = any($1) and o."observedAt" >= now() - interval '30 days'
-          group by 1`,
+            and coalesce(trim(o.supplier), '') <> ''
+          group by 1, 2, 3`,
         profileIds,
-        ownKeys.length ? ownKeys : ['\u0000never'],
       );
+      const acc = new Map();
       for (const r of stats) {
-        visibilityBySipp.set(r.sipp, describeChannelVisibility({
-          rivalDays: r.rival_days,
-          rivalSuppliers: r.rival_suppliers,
-          selfDays: r.self_days,
-          selfLastSeenAt: r.self_last,
+        if (!acc.has(r.sipp)) {
+          acc.set(r.sipp, { rivalDays: new Set(), rivalSuppliers: new Set(), selfDays: new Set(), selfLast: null });
+        }
+        const a = acc.get(r.sipp);
+        if (isExcludedVendor(r.supplier, excludeSet)) {
+          a.selfDays.add(r.day);
+          if (!a.selfLast || r.last_seen > a.selfLast) a.selfLast = r.last_seen;
+        } else {
+          a.rivalDays.add(r.day);
+          a.rivalSuppliers.add(vendorKey(r.supplier) || String(r.supplier).toLowerCase());
+        }
+      }
+      for (const [sipp, a] of acc) {
+        visibilityBySipp.set(sipp, describeChannelVisibility({
+          rivalDays: a.rivalDays.size,
+          rivalSuppliers: a.rivalSuppliers.size,
+          selfDays: a.selfDays.size,
+          selfLastSeenAt: a.selfLast,
         }));
       }
     } catch (_) {
@@ -550,6 +565,10 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       const idx = ordered.findIndex((v) => v.price >= yourRow.daily);
       yourRank = idx === -1 ? ordered.length + 1 : idx + 1;
     }
+
+    // Withdraw the position only when we are demonstrably absent AND today's
+    // scrape did not see us.
+    const visibilityHere = visibilityBySipp.get(sipp) || null;
 
     // THE CLAIM (2026-09-10). Everything above is a 24-hour RANGE across every
     // pickup date in the window -- useful as context, useless as a position,
@@ -613,6 +632,9 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       pickupDate: nearestKey,
       suppliersKnown: suppliersKnownBySipp.get(sipp) ?? null,
     });
+    const withdrawPosition = visibilityHere?.state === VISIBILITY.NOT_VISIBLE
+      && nearestPosition?.tier !== TIER.OBSERVED;
+
     const durability = describeDurability({
       gapToNext: claim.gapToNext,
       gapToBeat: claim.gapToBeat,
@@ -631,12 +653,14 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       visibility: visibilityBySipp.get(sipp) || null,
       claim: {
         ...claim,
-        ...(visibilityBySipp.get(sipp)?.state === VISIBILITY.NOT_VISIBLE && claim.tier !== TIER.OBSERVED
-          ? { verdict: 'NOT_VISIBLE', rank: null, sentence: visibilityBySipp.get(sipp).label }
-          : {}),
-        sentence: visibilityBySipp.get(sipp)?.state === VISIBILITY.NOT_VISIBLE && claim.tier !== TIER.OBSERVED
-          ? visibilityBySipp.get(sipp).label
-          : claimSentence(claim),
+        // An OBSERVED position always wins: if our listing is in today's scrape
+        // we are on the shelf, whatever the thirty-day history says. `claim`
+        // does not carry the tier yet -- it is attached below -- so this reads
+        // `nearestPosition`, which is where the tier actually comes from. The
+        // first version read `claim.tier`, found undefined, and overwrote the
+        // two classes it had just measured as cheapest.
+        ...(withdrawPosition ? { verdict: 'NOT_VISIBLE', rank: null } : {}),
+        sentence: withdrawPosition ? visibilityBySipp.get(sipp).label : claimSentence(claim),
         durability,
         // Which tier the answer came from, so no screen can present an estimate
         // as a fact: OBSERVED (our listing was in the pool) / ESTIMATED (base x
