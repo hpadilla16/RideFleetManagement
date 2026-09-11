@@ -39,3 +39,7 @@ import './airport-lawa.report.js';
 // department consumed this from their previous software; the GL journal at
 // the end is the half they actually post.
 import './daily-business.report.js';
+// 2026-09-11 — what each vehicle type earns. Shares sales.report.js's revenue
+// definition so the two reconcile, and leads on revenue PER UNIT, since total
+// revenue per type is mostly a headcount of what you happen to own.
+import './revenue-by-vehicle-type.report.js';

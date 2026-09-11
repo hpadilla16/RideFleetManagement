@@ -98,6 +98,14 @@ const REPORT_REGISTRY = [
     status: 'AVAILABLE',
   },
   {
+    slug: 'revenue-by-vehicle-type',
+    title: 'Revenue by Vehicle Type',
+    category: 'FLEET',
+    icon: 'coin',
+    description: 'What each class earns · per rental, per day, per unit owned',
+    status: 'AVAILABLE',
+  },
+  {
     slug: 'toll-per-vehicle',
     title: 'Toll Report — per Vehicle',
     category: 'FLEET',
