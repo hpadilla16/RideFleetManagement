@@ -106,7 +106,16 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   // it must: "show me the XC40s" cannot include a rental whose car is unknown.
   const vehicleFilter = {};
   if (makeFilter) vehicleFilter.make = { contains: makeFilter, mode: 'insensitive' };
-  if (modelFilter) vehicleFilter.model = { contains: modelFilter, mode: 'insensitive' };
+  if (modelFilter) {
+    // `model` on its own searches BOTH fields. The screen gives one box, and
+    // someone typing "Volvo" into a box labelled Model means "the Volvos" —
+    // matching only the model column would hand them an empty report and no
+    // hint why. Passing `make` as well narrows in the obvious way.
+    vehicleFilter.OR = [
+      { model: { contains: modelFilter, mode: 'insensitive' } },
+      { make: { contains: modelFilter, mode: 'insensitive' } },
+    ];
+  }
   if (makeFilter || modelFilter) rentalAgreement.vehicle = { is: vehicleFilter };
 
   const charges = await prisma.rentalAgreementCharge.findMany({
@@ -138,7 +147,12 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const vehicleWhere = { tenantId, status: { not: 'SOLD' } };
   if (locationId) vehicleWhere.homeLocationId = locationId;
   if (makeFilter) vehicleWhere.make = { contains: makeFilter, mode: 'insensitive' };
-  if (modelFilter) vehicleWhere.model = { contains: modelFilter, mode: 'insensitive' };
+  if (modelFilter) {
+    vehicleWhere.OR = [
+      { model: { contains: modelFilter, mode: 'insensitive' } },
+      { make: { contains: modelFilter, mode: 'insensitive' } },
+    ];
+  }
 
   let fleetCounts;
   if (groupByModel) {
