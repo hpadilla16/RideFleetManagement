@@ -7,6 +7,7 @@ import { buildRankClaim, describeDurability, claimSentence } from './market-clai
 import {
   splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, TIER,
   ratioWindowStart, resolveRatio, measureLocationRatio, RATIO_SOURCE,
+  describeChannelVisibility, VISIBILITY,
 } from './self-position.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
@@ -470,6 +471,40 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
   // listings are real evidence about another's base.
   const locationRatio = measureLocationRatio(locationRatioInput);
 
+  // ARE WE ON THE SHELF? A class we price, whose rivals the scraper sees every
+  // day, where our listing never appears, is a business fact -- not a data gap
+  // -- and estimating a rank for it is a fiction. Measured over 30 days so a
+  // quiet fortnight cannot masquerade as absence.
+  const visibilityBySipp = new Map();
+  if (profileIds.length) {
+    try {
+      const ownKeys = [...excludeSet];
+      const stats = await prisma.$queryRawUnsafe(
+        `select o.sipp,
+                count(distinct to_char(o."observedAt",'YYYY-MM-DD')) filter (where not (lower(coalesce(o.supplier,'')) = any($2)))::int as rival_days,
+                count(distinct o.supplier) filter (where not (lower(coalesce(o.supplier,'')) = any($2)))::int as rival_suppliers,
+                count(distinct to_char(o."observedAt",'YYYY-MM-DD')) filter (where lower(coalesce(o.supplier,'')) = any($2))::int as self_days,
+                max(o."observedAt") filter (where lower(coalesce(o.supplier,'')) = any($2)) as self_last
+           from "RateOffer" o
+          where o."profileId" = any($1) and o."observedAt" >= now() - interval '30 days'
+          group by 1`,
+        profileIds,
+        ownKeys.length ? ownKeys : ['\u0000never'],
+      );
+      for (const r of stats) {
+        visibilityBySipp.set(r.sipp, describeChannelVisibility({
+          rivalDays: r.rival_days,
+          rivalSuppliers: r.rival_suppliers,
+          selfDays: r.self_days,
+          selfLastSeenAt: r.self_last,
+        }));
+      }
+    } catch (_) {
+      // Without it every class simply carries no visibility verdict, which is
+      // the same as saying nothing -- the correct failure.
+    }
+  }
+
   const sipps = [];
   for (const [sipp, rows] of bySipp.entries()) {
     if (rows.length === 0) continue;
@@ -590,9 +625,18 @@ export async function getMarketSummary({ airport, scope, providers = null }) {
       median,
       min,
       max,
+      // When we are demonstrably not in the channel, the position is withdrawn
+      // rather than estimated: "Dearest of 4" for a listing that does not exist
+      // is a confident answer to a question nobody can ask.
+      visibility: visibilityBySipp.get(sipp) || null,
       claim: {
         ...claim,
-        sentence: claimSentence(claim),
+        ...(visibilityBySipp.get(sipp)?.state === VISIBILITY.NOT_VISIBLE && claim.tier !== TIER.OBSERVED
+          ? { verdict: 'NOT_VISIBLE', rank: null, sentence: visibilityBySipp.get(sipp).label }
+          : {}),
+        sentence: visibilityBySipp.get(sipp)?.state === VISIBILITY.NOT_VISIBLE && claim.tier !== TIER.OBSERVED
+          ? visibilityBySipp.get(sipp).label
+          : claimSentence(claim),
         durability,
         // Which tier the answer came from, so no screen can present an estimate
         // as a fact: OBSERVED (our listing was in the pool) / ESTIMATED (base x

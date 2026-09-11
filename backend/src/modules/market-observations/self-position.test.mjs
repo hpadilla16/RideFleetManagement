@@ -14,7 +14,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const { splitSelfAndRivals, measureSelfBaseRatio, buildPositionForDate, describeSelfCoverage, latestPerSupplier, TIER,
-  ratioWindowStart, resolveRatio, measureLocationRatio, RATIO_SOURCE, DEFAULT_RATIO_WINDOW_DAYS, MIN_RATIO_SAMPLE } =
+  ratioWindowStart, resolveRatio, measureLocationRatio, RATIO_SOURCE, DEFAULT_RATIO_WINDOW_DAYS, MIN_RATIO_SAMPLE,
+  describeChannelVisibility, VISIBILITY } =
   await import('./self-position.js');
 
 // IRC sells as ZezGo; everyone else is a rival.
@@ -271,5 +272,75 @@ test('a class with no usable base contributes nothing rather than poisoning the 
 test('measureLocationRatio never throws on junk', () => {
   for (const v of [null, undefined, [], [null], [{ base: 5 }], [{ selfRows: [{}] }]]) {
     assert.equal(typeof measureLocationRatio(v).n, 'number');
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Are we even on the shelf? (2026-09-10)
+//
+// Three real SJU shapes, three different statements, and the whole point is
+// that they must not be collapsed into one:
+//   IFAR  rivals on 30 days from 11 agencies, ours on 0 — conclusive
+//   ICAR  rivals on 30 days from 12 agencies, ours on 2, last 11 days ago
+//   LFAR  rivals on 3 days from 1 agency, ours on 0 — permits no conclusion
+// ---------------------------------------------------------------------------
+const NOW = new Date('2026-09-10T20:00:00Z');
+
+test('THE IFAR CASE: watched every day by eleven agencies, and we never appear', () => {
+  const v = describeChannelVisibility({ rivalDays: 30, rivalSuppliers: 11, selfDays: 0, now: NOW });
+  assert.equal(v.state, VISIBILITY.NOT_VISIBLE);
+  assert.match(v.label, /not appearing on the OTA/);
+  assert.match(v.label, /11 agencies/);
+  assert.match(v.label, /30 days/);
+});
+
+test('THE LFAR CASE: three days and one agency proves nothing, so it says nothing', () => {
+  // Calling this "not visible" would be exactly the overconfidence the rest of
+  // this module refuses.
+  const v = describeChannelVisibility({ rivalDays: 3, rivalSuppliers: 1, selfDays: 0, now: NOW });
+  assert.equal(v.state, VISIBILITY.INSUFFICIENT);
+  assert.equal(v.watched, false);
+  assert.match(v.label, /not enough to tell/);
+});
+
+test('THE ICAR CASE: we used to be there and stopped — a different alarm', () => {
+  const v = describeChannelVisibility({
+    rivalDays: 30, rivalSuppliers: 12, selfDays: 2,
+    selfLastSeenAt: new Date('2026-08-30T04:00:00Z'), now: NOW,
+  });
+  assert.equal(v.state, VISIBILITY.FADING);
+  assert.equal(v.daysSinceSeen, 11);
+  assert.match(v.label, /dropped out of the channel/);
+});
+
+test('appearing recently is simply VISIBLE', () => {
+  const v = describeChannelVisibility({
+    rivalDays: 30, rivalSuppliers: 20, selfDays: 24,
+    selfLastSeenAt: new Date('2026-09-10T04:00:00Z'), now: NOW,
+  });
+  assert.equal(v.state, VISIBILITY.VISIBLE);
+  assert.equal(v.daysSinceSeen, 0);
+  assert.match(v.label, /seen on 24 of 30 days/);
+});
+
+test('both thresholds must be met before absence means anything', () => {
+  // Many days but one agency, or many agencies on two days: neither is a
+  // market being watched.
+  assert.equal(describeChannelVisibility({ rivalDays: 30, rivalSuppliers: 2, selfDays: 0 }).state, VISIBILITY.INSUFFICIENT);
+  assert.equal(describeChannelVisibility({ rivalDays: 2, rivalSuppliers: 20, selfDays: 0 }).state, VISIBILITY.INSUFFICIENT);
+  assert.equal(describeChannelVisibility({ rivalDays: 10, rivalSuppliers: 3, selfDays: 0 }).state, VISIBILITY.NOT_VISIBLE);
+});
+
+test('a listing with no date cannot be stale, only present', () => {
+  const v = describeChannelVisibility({ rivalDays: 30, rivalSuppliers: 10, selfDays: 4, selfLastSeenAt: null, now: NOW });
+  assert.equal(v.state, VISIBILITY.VISIBLE);
+  assert.equal(v.daysSinceSeen, null);
+});
+
+test('never throws on junk', () => {
+  for (const args of [undefined, {}, { rivalDays: 'x', selfDays: null }, { selfLastSeenAt: 'nope', rivalDays: 30, rivalSuppliers: 5, selfDays: 1 }]) {
+    const v = describeChannelVisibility(args);
+    assert.ok(Object.values(VISIBILITY).includes(v.state));
+    assert.equal(typeof v.label, 'string');
   }
 });
