@@ -12,7 +12,7 @@
  * not what the endpoint is for. Replacing those with real wording is the one
  * edit to make here by hand, and it survives the next regeneration.
  *
- * Last generated: 2026-09-09
+ * Last generated: 2026-09-11
  */
 export const EXTRA_ROUTES = [
   // ── Admin ─────────────────────────────────────────────────────────────────
@@ -231,6 +231,7 @@ export const EXTRA_ROUTES = [
   ['POST', '/api/citations/documents', 'Citations', 'Upload citation notice document'],
   ['GET', '/api/citations/documents/{id}/download', 'Citations', 'Get documents download'], // TODO(describe)
   ['POST', '/api/citations/documents/{id}/retry', 'Citations', 'Retry citation document OCR'],
+  ['GET', '/api/citations/location-breakdown', 'Citations', 'Citation counts per branch, for the location filter'],
   ['POST', '/api/citations/manual-import', 'Citations', 'Manual citation import'],
   ['GET', '/api/citations/summary', 'Citations', 'Citation dashboard summary'],
   ['GET', '/api/citations/vehicle/{vehicleId}', 'Citations', 'Citation history for vehicle'],
@@ -508,6 +509,8 @@ export const EXTRA_ROUTES = [
   ['POST', '/api/knowledge-base/seed', 'Knowledge Base', 'Seed default articles'],
 
   // ── Locations ─────────────────────────────────────────────────────────────
+  ['GET', '/api/locations/{id}/clauses', 'Locations', 'This branch\'s rental-agreement clause overrides'],
+  ['PUT', '/api/locations/{id}/clauses', 'Locations', 'Replace this branch\'s clause overrides (audited, ADMIN only)'],
   ['GET', '/api/locations/{id}/documents', 'Locations', 'Get documents'], // TODO(describe)
   ['POST', '/api/locations/{id}/documents', 'Locations', 'Create or run documents'], // TODO(describe)
   ['GET', '/api/locations/{id}/hours', 'Locations', 'Get hours'], // TODO(describe)
@@ -672,6 +675,7 @@ export const EXTRA_ROUTES = [
   ['POST', '/api/public/booking/account/delete-confirm/{token}', 'Public', 'Create or run booking account delete confirm'], // TODO(describe)
   ['POST', '/api/public/booking/account/delete-request', 'Public', 'Create or run booking account delete request'], // TODO(describe)
   ['GET', '/api/public/booking/additional-services', 'Public', 'Get booking additional services'], // TODO(describe)
+  ['POST', '/api/public/booking/ai-search/intent', 'Public', 'Extract search intent from a natural-language query'],
   ['GET', '/api/public/booking/bootstrap', 'Public', 'Get booking bootstrap'], // TODO(describe)
   ['POST', '/api/public/booking/cancel', 'Public', 'Create or run booking cancel'], // TODO(describe)
   ['POST', '/api/public/booking/car-sharing-search', 'Public', 'Create or run booking car sharing search'], // TODO(describe)
@@ -688,12 +692,29 @@ export const EXTRA_ROUTES = [
   ['GET', '/api/public/booking/insurance-plans', 'Public', 'Get booking insurance plans'], // TODO(describe)
   ['POST', '/api/public/booking/issues', 'Public', 'Create or run booking issues'], // TODO(describe)
   ['POST', '/api/public/booking/lookup', 'Public', 'Create or run booking lookup'], // TODO(describe)
+  ['POST', '/api/public/booking/messages/{id}/messages', 'Public', 'Send a guest message'],
+  ['POST', '/api/public/booking/messages/{id}/read', 'Public', 'Mark a guest conversation read'],
+  ['POST', '/api/public/booking/messages/conversation', 'Public', 'Start a guest conversation'],
+  ['POST', '/api/public/booking/messages/list', 'Public', 'List the guest\'s conversations'],
   ['GET', '/api/public/booking/partners/{slug}', 'Public', 'Get booking partners'], // TODO(describe)
   ['POST', '/api/public/booking/payment-gateway/payarc/webhook', 'Public', 'Create or run booking payment gateway payarc webhook'], // TODO(describe)
   ['GET', '/api/public/booking/policies', 'Public', 'Get booking policies'], // TODO(describe)
   ['GET', '/api/public/booking/rental-agreements/{token}', 'Public', 'Get booking rental agreements'], // TODO(describe)
   ['POST', '/api/public/booking/rental-agreements/{token}/signature', 'Public', 'Create or run booking rental agreements signature'], // TODO(describe)
   ['POST', '/api/public/booking/rental-search', 'Public', 'Create or run booking rental search'], // TODO(describe)
+  ['GET', '/api/public/booking/trip-chat/{token}', 'Public', 'Open a trip chat room by token'],
+  ['POST', '/api/public/booking/trip-chat/{token}/action', 'Public', 'Hot action button - arrived, running late, and the like'],
+  ['POST', '/api/public/booking/trip-chat/{token}/block', 'Public', 'Block or mute the other party'],
+  ['POST', '/api/public/booking/trip-chat/{token}/image', 'Public', 'Send an image or file in the trip chat'],
+  ['POST', '/api/public/booking/trip-chat/{token}/messages', 'Public', 'Send a trip-chat message'],
+  ['POST', '/api/public/booking/trip-chat/{token}/notify', 'Public', 'Email the other party about unread messages'],
+  ['PATCH', '/api/public/booking/trip-chat/{token}/pickup', 'Public', 'Update pickup details (host token only)'],
+  ['POST', '/api/public/booking/trip-chat/{token}/read', 'Public', 'Mark the trip chat read'],
+  ['POST', '/api/public/booking/trip-chat/{token}/report-issue', 'Public', 'Report a trip-chat issue with transcript (host only)'],
+  ['GET', '/api/public/booking/trip-chat/{token}/stream', 'Public', 'Server-sent event stream of trip-chat updates'],
+  ['POST', '/api/public/booking/trip-chat/{token}/template', 'Public', 'Send a templated host message'],
+  ['GET', '/api/public/booking/trip-chat/{token}/templates', 'Public', 'Host message templates'],
+  ['POST', '/api/public/booking/trip-chat/{token}/typing', 'Public', 'Typing indicator'],
   ['POST', '/api/public/booking/trips/{tripCode}/cancel', 'Public', 'Create or run booking trips cancel'], // TODO(describe)
   ['GET', '/api/public/booking/trips/{tripCode}/documents', 'Public', 'Get booking trips documents'], // TODO(describe)
   ['POST', '/api/public/booking/trips/{tripCode}/documents', 'Public', 'Create or run booking trips documents'], // TODO(describe)
@@ -1102,6 +1123,19 @@ export const EXTRA_ROUTES = [
   ['POST', '/api/tenants/{id}/billing/enroll-link', 'Tenants', 'Create or run billing enroll link'], // TODO(describe)
   ['POST', '/api/tenants/{id}/impersonate', 'Tenants', 'Create or run impersonate'], // TODO(describe)
   ['POST', '/api/tenants/{id}/reset-demo', 'Tenants', 'Create or run reset demo'], // TODO(describe)
+  ['GET', '/api/tenants/billing/{tenantId}', 'Tenants', 'Billing detail for one tenant'],
+  ['POST', '/api/tenants/billing/{tenantId}/apply-plan', 'Tenants', 'Apply the plan to the tenant entitlements (super-admin)'],
+  ['POST', '/api/tenants/billing/{tenantId}/restore', 'Tenants', 'Restore suspended tenant access (super-admin)'],
+  ['POST', '/api/tenants/billing/{tenantId}/suspend', 'Tenants', 'Suspend tenant access (super-admin)'],
+  ['GET', '/api/tenants/billing/health', 'Tenants', 'Billing health checks'],
+  ['GET', '/api/tenants/billing/overview', 'Tenants', 'Billing overview across every tenant'],
+  ['POST', '/api/tenants/billing/subscriptions/{subscriptionId}/cancel', 'Tenants', 'Cancel a tenant\'s subscription (super-admin)'],
+  ['POST', '/api/tenants/billing/subscriptions/{subscriptionId}/plan-change', 'Tenants', 'Apply a plan change (super-admin)'],
+  ['POST', '/api/tenants/billing/subscriptions/{subscriptionId}/plan-change/cancel', 'Tenants', 'Cancel a pending plan change (super-admin)'],
+  ['POST', '/api/tenants/billing/subscriptions/{subscriptionId}/plan-change/preview', 'Tenants', 'Preview a plan change and its proration (super-admin)'],
+  ['POST', '/api/tenants/billing/subscriptions/{subscriptionId}/refresh', 'Tenants', 'Re-read subscription state from Authorize.Net - a read, never a charge (super-admin)'],
+  ['POST', '/api/tenants/billing/subscriptions/{subscriptionId}/revoke-invites', 'Tenants', 'Revoke outstanding enrollment invites (super-admin)'],
+  ['POST', '/api/tenants/billing/subscriptions/{subscriptionId}/update-link', 'Tenants', 'Issue a payment-method update link (super-admin)'],
   ['GET', '/api/tenants/plan-catalog', 'Tenants', 'Get tenant plan catalog'],
   ['PUT', '/api/tenants/plan-catalog', 'Tenants', 'Save tenant plan catalog'],
 
