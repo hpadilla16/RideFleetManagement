@@ -58,6 +58,7 @@ import {
   EXCLUDED_AGREEMENT_STATUSES,
   aggregate,
   aggregateByModel,
+  aggregateByVehicle,
   modelKey,
   num,
 } from './revenue-by-vehicle-type.math.js';
@@ -73,6 +74,52 @@ async function resolveDefaultPrisma() {
   return _defaultPrisma;
 }
 
+/**
+ * Narrow to specific metal.
+ *
+ * BOTH given (what the dropdown sends, from an option that already knows its
+ * own make and model): match both. Exact and unambiguous — no fuzzy match can
+ * drag in a second model that happens to share a word.
+ *
+ * ONLY `model` given (a hand-built URL, or an older client): match it against
+ * EITHER column, because someone passing `model=Volvo` means "the Volvos" and
+ * matching the model column alone would return an empty report with no hint
+ * why.
+ */
+/** "  FORD   TRANSIT " and "Ford Transit" are the same car to a reader. */
+export function modelLabel(make, model) {
+  return `${String(make || '').trim()} ${String(model || '').trim()}`.replace(/\s+/g, ' ').trim();
+}
+const labelKey = (make, model) => modelLabel(make, model).toLowerCase();
+
+/**
+ * Turn a model selection into the set of vehicles it means.
+ *
+ * Neither `contains` nor `equals` can do this job on this data.
+ *
+ *   `contains` over-matches: this fleet holds "FORD TRANSIT" AND "Ford Transit
+ *   Connect", so filtering on TRANSIT folds the three Connects into the one
+ *   Transit and every per-unit figure with them.
+ *
+ *   `equals` under-matches: the stored model is literally "FORD TRANSIT " with
+ *   a trailing space, so an exact match on the trimmed label the picker shows
+ *   returns ZERO cars. Measured, not imagined — it returned 0 on the first try.
+ *
+ * So the label is normalised on BOTH sides and compared in memory, and the
+ * result is a list of vehicle ids. Every downstream filter then keys on those
+ * ids, which no amount of stray whitespace or mixed case can distort.
+ */
+async function resolveVehicleIds(prisma, { tenantId, locationId, label }) {
+  const where = { tenantId, status: { not: 'SOLD' } };
+  if (locationId) where.homeLocationId = locationId;
+  const cars = await prisma.vehicle.findMany({
+    where,
+    select: { id: true, make: true, model: true },
+  });
+  const wanted = String(label || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return cars.filter((v) => labelKey(v.make, v.model) === wanted).map((v) => v.id);
+}
+
 async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
@@ -84,9 +131,14 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   // Narrow to specific metal. `model=XC40` on its own is enough -- nobody
   // types the make when they already know the model -- and both are a
   // case-insensitive contains so "xc40", "XC40" and "XC40 Recharge" all land.
-  const makeFilter = (query?.make || '').trim();
-  const modelFilter = (query?.model || '').trim();
-  const groupByModel = String(query?.groupBy || '').toLowerCase() === 'model';
+  // One label identifies the metal — "Volvo XC40" — because make and model
+  // sent separately cannot survive this data's whitespace (see
+  // resolveVehicleIds). `make`/`model` stay accepted for hand-built URLs.
+  const modelLabelFilter = (query?.vehicleModel || '').trim()
+    || modelLabel(query?.make, query?.model);
+  const groupBy = String(query?.groupBy || '').toLowerCase();
+  const groupByModel = groupBy === 'model';
+  const groupByVehicle = groupBy === 'vehicle';
 
   const startOfDay = (d) => startOfDayInTz(d, tenantTz);
   const fromDate = from ? startOfDay(from) : startOfMonthInTz(now, tenantTz);
@@ -104,19 +156,14 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   // The make/model filter is applied to the VEHICLE on the agreement, which
   // also means an agreement with no vehicle drops out of a filtered run -- as
   // it must: "show me the XC40s" cannot include a rental whose car is unknown.
-  const vehicleFilter = {};
-  if (makeFilter) vehicleFilter.make = { contains: makeFilter, mode: 'insensitive' };
-  if (modelFilter) {
-    // `model` on its own searches BOTH fields. The screen gives one box, and
-    // someone typing "Volvo" into a box labelled Model means "the Volvos" —
-    // matching only the model column would hand them an empty report and no
-    // hint why. Passing `make` as well narrows in the obvious way.
-    vehicleFilter.OR = [
-      { model: { contains: modelFilter, mode: 'insensitive' } },
-      { make: { contains: modelFilter, mode: 'insensitive' } },
-    ];
+  let filteredVehicleIds = null;
+  if (modelLabelFilter) {
+    filteredVehicleIds = await resolveVehicleIds(prisma, { tenantId, locationId, label: modelLabelFilter });
+    // An empty list must stay an EMPTY filter, never no filter: `in: []` is
+    // what "this model, of which you own none here" has to mean. Dropping the
+    // clause would silently show the whole fleet instead.
+    rentalAgreement.vehicleId = { in: filteredVehicleIds };
   }
-  if (makeFilter || modelFilter) rentalAgreement.vehicle = { is: vehicleFilter };
 
   const charges = await prisma.rentalAgreementCharge.findMany({
     where: { selected: true, rentalAgreement },
@@ -133,6 +180,14 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
               id: true,
               make: true,
               model: true,
+              // Only the per-vehicle view reads these, but selecting them
+              // always keeps ONE query serving all three groupings — three
+              // near-identical queries would be three places to forget a
+              // filter.
+              internalNumber: true,
+              plate: true,
+              vin: true,
+              year: true,
               vehicleType: { select: { id: true, code: true, name: true } },
             },
           },
@@ -146,12 +201,52 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   // denominator counting cars the numerator excluded is worse than no ratio.
   const vehicleWhere = { tenantId, status: { not: 'SOLD' } };
   if (locationId) vehicleWhere.homeLocationId = locationId;
-  if (makeFilter) vehicleWhere.make = { contains: makeFilter, mode: 'insensitive' };
-  if (modelFilter) {
-    vehicleWhere.OR = [
-      { model: { contains: modelFilter, mode: 'insensitive' } },
-      { make: { contains: modelFilter, mode: 'insensitive' } },
-    ];
+  // The same ids on the fleet side: a denominator counting cars the numerator
+  // excluded is worse than no ratio at all.
+  if (filteredVehicleIds) vehicleWhere.id = { in: filteredVehicleIds };
+
+  // THE PICKER'S OPTIONS — what this tenant actually owns.
+  //
+  // Hector: "ponlo como un dropdown para que ellos seleccionen los vehicle
+  // models basado de lo que tienen en el sistema." A free-text box asks the
+  // user to guess at spelling and offers no clue when a miss returns nothing;
+  // a list built from the fleet can only contain answers.
+  //
+  // Deliberately does NOT apply the make/model filter — it applies the branch
+  // filter and nothing else. Narrowing the options by the current selection
+  // would collapse the list to the one model already chosen, and there would
+  // be no way back to the others without clearing the filter first.
+  const modelOptions = [];
+  const seenOptions = new Map();
+  try {
+    const optionWhere = { tenantId, status: { not: 'SOLD' } };
+    if (locationId) optionWhere.homeLocationId = locationId;
+    const grouped = await prisma.vehicle.groupBy({
+      by: ['make', 'model'],
+      where: optionWhere,
+      _count: { _all: true },
+    });
+    for (const g of grouped) {
+      const make = (g.make || '').trim();
+      const model = (g.model || '').trim();
+      // A car with neither make nor model on file cannot be offered as a
+      // choice — there is nothing to put on the option. It still reaches the
+      // table through the "Unspecified make/model" bucket.
+      if (!make && !model) continue;
+      // Collapsed by normalised label, so "FORD TRANSIT " and "Ford Transit"
+      // are ONE option with the units added together rather than two rows the
+      // reader has to reconcile.
+      const label = modelLabel(make, model);
+      const key = label.toLowerCase();
+      const prior = seenOptions.get(key);
+      if (prior) { prior.units += g._count._all; continue; }
+      const opt = { label, units: g._count._all };
+      seenOptions.set(key, opt);
+      modelOptions.push(opt);
+    }
+    modelOptions.sort((a, b) => a.label.localeCompare(b.label));
+  } catch {
+    // An empty list degrades the picker to "All models", never to a broken page.
   }
 
   let fleetCounts;
@@ -176,6 +271,24 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     fleetCounts = new Map(fleet.map((f) => [f.vehicleTypeId, f._count._all]));
   }
 
+  if (groupByVehicle) {
+    const byVehicle = aggregateByVehicle(charges);
+    return {
+      range: {
+        from: fromDate.toISOString(),
+        to: addDaysInTz(windowEnd, -1, tenantTz).toISOString(),
+        label: `${dayLabelInTz(fromDate, tenantTz)} – ${dayLabelInTz(addDaysInTz(windowEnd, -1, tenantTz), tenantTz)}`,
+      },
+      groupBy: 'vehicle',
+      totals: byVehicle.totals,
+      rows: byVehicle.rows,
+      unassigned: null,
+      idleTypes: [],
+      modelOptions,
+      filters: { locationId, vehicleModel: modelLabelFilter || null, timezone: tenantTz },
+    };
+  }
+
   if (groupByModel) {
     const byModel = aggregateByModel(charges, fleetCounts);
     return {
@@ -189,7 +302,8 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       rows: byModel.rows,
       unassigned: null,
       idleTypes: [],
-      filters: { locationId, make: makeFilter || null, model: modelFilter || null, timezone: tenantTz },
+      modelOptions,
+      filters: { locationId, vehicleModel: modelLabelFilter || null, timezone: tenantTz },
     };
   }
 
@@ -220,8 +334,9 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     rows: agg.rows,
     unassigned: agg.unassigned,
     idleTypes,
+    modelOptions,
     groupBy: 'type',
-    filters: { locationId, make: makeFilter || null, model: modelFilter || null, timezone: tenantTz },
+    filters: { locationId, vehicleModel: modelLabelFilter || null, timezone: tenantTz },
   };
 }
 
@@ -239,6 +354,43 @@ const dollars = (v) => (v == null ? '—' : `$${num(v).toLocaleString(undefined,
 function renderHtml(data) {
   const rows = data?.rows || [];
   const t = data?.totals || {};
+
+  // The per-vehicle view is a different table, not the same one with extra
+  // columns: its unit of account is one car, so there is no fleet count to
+  // divide by and no per-unit column to print.
+  if (data?.groupBy === 'vehicle') {
+    const body = rows.map((r) => `
+      <tr>
+        <td>${esc(r.unit || '')}</td>
+        <td>${esc(r.plate || '—')}</td>
+        <td>${esc(r.vin || '—')}</td>
+        <td>${esc([r.make, r.model].filter(Boolean).join(' ') || '—')}</td>
+        <td class="num">${r.year || '—'}</td>
+        <td>${esc(r.typeCode || '—')}</td>
+        <td class="num">${dollars(r.revenue)}</td>
+        <td class="num">${r.sharePct == null ? '—' : `${r.sharePct}%`}</td>
+        <td class="num">${r.rentals}</td>
+        <td class="num">${r.days}</td>
+        <td class="num">${dollars(r.revenuePerDay)}</td>
+      </tr>`).join('');
+    return `
+      <p class="muted">One row per vehicle. Revenue excludes tax (${dollars(t.taxAmount)}) and
+      security deposits (${dollars(t.depositAmount)}). Rentals with no vehicle on the agreement
+      cannot be attributed to a car and are not shown here.</p>
+      <table>
+        <thead><tr>
+          <th>Unit</th><th>Plate</th><th>VIN</th><th>Vehicle</th><th class="num">Year</th><th>Class</th>
+          <th class="num">Revenue</th><th class="num">Share</th><th class="num">Rentals</th>
+          <th class="num">Days</th><th class="num">Per day</th>
+        </tr></thead>
+        <tbody>${body || '<tr><td colspan="11">No revenue in this range.</td></tr>'}</tbody>
+        <tfoot><tr>
+          <th colspan="6">Total — ${t.vehicleCount || 0} vehicle(s)</th>
+          <th class="num">${dollars(t.revenue)}</th><th></th>
+          <th class="num">${t.rentals || 0}</th><th class="num">${t.days || 0}</th><th></th>
+        </tr></tfoot>
+      </table>`;
+  }
 
   const body = rows.map((r) => `
     <tr>
@@ -294,6 +446,42 @@ function renderHtml(data) {
 // ---------------------------------------------------------------------------
 
 function buildExcelSpec(data) {
+  if (data?.groupBy === 'vehicle') {
+    const t = data?.totals || {};
+    return {
+      title: 'Revenue by Vehicle',
+      subtitle: data?.range?.label || '',
+      sheets: [{
+        name: 'Revenue by vehicle',
+        bannerRows: [
+          ['Revenue by Vehicle'],
+          [data?.range?.label || ''],
+          [`Excludes tax ${dollars(t.taxAmount)} and deposits ${dollars(t.depositAmount)}`],
+        ],
+        columns: [
+          { header: 'Unit',          key: 'unit',    width: 12 },
+          { header: 'Plate',         key: 'plate',   width: 12 },
+          { header: 'VIN',           key: 'vin',     width: 22 },
+          { header: 'Make',          key: 'make',    width: 16 },
+          { header: 'Model',         key: 'model',   width: 20 },
+          { header: 'Year',          key: 'year',    width: 8,  type: 'integer' },
+          { header: 'Class',         key: 'cls',     width: 10 },
+          { header: 'Revenue',       key: 'revenue', width: 16, type: 'currency' },
+          { header: 'Share %',       key: 'share',   width: 10 },
+          { header: 'Rentals',       key: 'rentals', width: 10, type: 'integer' },
+          { header: 'Rental days',   key: 'days',    width: 12, type: 'integer' },
+          { header: 'Revenue / day', key: 'perDay',  width: 14, type: 'currency' },
+        ],
+        rows: (data?.rows || []).map((r) => ({
+          unit: r.unit || '', plate: r.plate || '', vin: r.vin || '',
+          make: r.make || '', model: r.model || '', year: r.year || '',
+          cls: r.typeCode || '', revenue: r.revenue, share: r.sharePct ?? '',
+          rentals: r.rentals, days: r.days, perDay: r.revenuePerDay ?? '',
+        })),
+      }],
+    };
+  }
+
   const title = 'Revenue by Vehicle Type';
   const subtitle = data?.range?.label || '';
   const t = data?.totals || {};

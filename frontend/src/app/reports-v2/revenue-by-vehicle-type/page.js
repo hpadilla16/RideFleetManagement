@@ -15,10 +15,14 @@
  * the opposite of the truth, so per-unit is the emphasised column and the
  * server sorts on it.
  *
- * The make/model box and the "group by model" switch are the same question at
+ * The model DROPDOWN and the "group by model" switch are the same question at
  * two depths: filter to the XC40s, or break every class into the models inside
- * it. Both flow into the PDF/Excel export through extraExportParams, so a
- * filtered view never exports unfiltered data (the LAWA lesson).
+ * it. The dropdown is built from the tenant's own fleet rather than being a
+ * text box, so a selection can never miss and nobody has to guess at spelling;
+ * each option carries its unit count, because a per-unit figure computed from
+ * three cars deserves to be read as such. Both controls flow into the
+ * PDF/Excel export through extraExportParams, so a filtered view never exports
+ * unfiltered data (the LAWA lesson).
  */
 
 import { useEffect, useState } from 'react';
@@ -52,10 +56,14 @@ function RevenueByVehicleType({ token, me, logout }) {
   const [locationId, setLocationId] = useState('');
   const [locations, setLocations] = useState([]);
   const [modelQuery, setModelQuery] = useState('');
-  // Typing filters on every keystroke would fire a request per letter, so the
-  // box holds a draft and only a submit (or clear) becomes a query.
-  const [modelDraft, setModelDraft] = useState('');
-  const [byModel, setByModel] = useState(false);
+  // The options come back WITH the report (scoped by branch, never by the
+  // current model selection), so the list cannot drift from what the table is
+  // showing and cannot collapse to the one model already picked. Held
+  // separately from `data` so it survives a filtered response.
+  const [modelOptions, setModelOptions] = useState([]);
+  // One control, three depths: the class, the model inside it, the individual
+  // car. A checkbox could only ever express two of them.
+  const [view, setView] = useState('type');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -84,14 +92,25 @@ function RevenueByVehicleType({ token, me, logout }) {
     params.set('from', range.from);
     params.set('to', range.to);
     if (locationId) params.set('locationId', locationId);
-    // One box, matched against make AND model server-side, because nobody
-    // types "Volvo" when they already know it is the XC40 they want.
-    if (modelQuery) params.set('model', modelQuery);
-    if (byModel) params.set('groupBy', 'model');
+    // The option carries make and model separately, so they go over as
+    // separate params rather than as the joined label: the server matches each
+    // with `contains`, and "Volvo XC40" as one string is contained in neither
+    // the make nor the model. Sending both is also exact — no fuzzy match can
+    // pull in a second model that happens to share a word.
+    // The whole label goes over as ONE param. Make and model sent separately
+    // cannot survive this data: the fleet stores "FORD TRANSIT " with a
+    // trailing space, so an exact match on the trimmed label the picker shows
+    // returned zero cars. The server normalises both sides and resolves the
+    // selection to vehicle ids, which no stray whitespace can distort.
+    if (modelQuery) params.set('vehicleModel', modelQuery);
+    if (view !== 'type') params.set('groupBy', view);
     (async () => {
       try {
         const out = await api(`/api/reports/revenue-by-vehicle-type?${params.toString()}`, { bypassCache: true }, token);
-        if (!cancelled) setData(out);
+        if (!cancelled) {
+          setData(out);
+          if (Array.isArray(out?.modelOptions)) setModelOptions(out.modelOptions);
+        }
       } catch (err) {
         if (!cancelled) setError(err?.message || 'Failed to load report');
       } finally {
@@ -99,7 +118,10 @@ function RevenueByVehicleType({ token, me, logout }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, range.from, range.to, locationId, modelQuery, byModel]);
+    // modelOptions is in the deps because the first render has none: the list
+    // arrives WITH the report, so a selection restored before it loads would
+    // otherwise silently fetch unfiltered.
+  }, [token, range.from, range.to, locationId, modelQuery, view]);
 
   const filters = (
     <>
@@ -116,31 +138,33 @@ function RevenueByVehicleType({ token, me, logout }) {
       </select>
 
       <span style={{ fontSize: 13, color: '#6f668f', marginLeft: 8 }}>Model</span>
-      <form
-        onSubmit={(e) => { e.preventDefault(); setModelQuery(modelDraft.trim()); }}
-        style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}
+      <select
+        value={modelQuery}
+        onChange={(e) => setModelQuery(e.target.value)}
+        disabled={!modelOptions.length}
+        style={{ fontSize: 13, padding: '6px 8px', minWidth: 190, borderRadius: 8, border: '0.5px solid #d3d1c7', background: 'white' }}
       >
-        <input
-          value={modelDraft}
-          onChange={(e) => setModelDraft(e.target.value)}
-          placeholder="e.g. XC40"
-          style={{ fontSize: 13, padding: '6px 8px', width: 130, borderRadius: 8, border: '0.5px solid #d3d1c7' }}
-        />
-        <button type="submit" className="btn" style={{ fontSize: 12, padding: '5px 10px' }}>Apply</button>
-        {modelQuery && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => { setModelDraft(''); setModelQuery(''); }}
-            style={{ fontSize: 12, padding: '5px 10px' }}
-          >Clear</button>
-        )}
-      </form>
+        {/* Picking from the fleet means a selection can never miss. The unit
+            count sits on each option so the reader knows how thin a model is
+            before reading a per-unit figure computed from three cars. */}
+        <option value="">All models</option>
+        {modelOptions.map((m) => (
+          <option key={m.label} value={m.label}>
+            {m.label}{m.units ? ` (${m.units})` : ''}
+          </option>
+        ))}
+      </select>
 
-      <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13, color: '#6f668f', marginLeft: 8 }}>
-        <input type="checkbox" checked={byModel} onChange={(e) => setByModel(e.target.checked)} />
-        Group by model
-      </label>
+      <span style={{ fontSize: 13, color: '#6f668f', marginLeft: 8 }}>Break down by</span>
+      <select
+        value={view}
+        onChange={(e) => setView(e.target.value)}
+        style={{ fontSize: 13, padding: '6px 8px', minWidth: 130, borderRadius: 8, border: '0.5px solid #d3d1c7', background: 'white' }}
+      >
+        <option value="type">Vehicle type</option>
+        <option value="model">Make and model</option>
+        <option value="vehicle">Individual car</option>
+      </select>
     </>
   );
 
@@ -157,9 +181,13 @@ function RevenueByVehicleType({ token, me, logout }) {
     }}>{value}</td>
   );
 
-  const HEADERS = byModel
-    ? ['Make & model', 'Class', 'Revenue', 'Share', 'Rentals', 'Days', 'Avg / rental', 'Per day', 'Units', 'Per unit']
-    : ['Code', 'Vehicle type', 'Revenue', 'Share', 'Rentals', 'Days', 'Avg / rental', 'Per day', 'Units', 'Per unit'];
+  const HEADERS = {
+    type: ['Code', 'Vehicle type', 'Revenue', 'Share', 'Rentals', 'Days', 'Avg / rental', 'Per day', 'Units', 'Per unit'],
+    model: ['Make & model', 'Class', 'Revenue', 'Share', 'Rentals', 'Days', 'Avg / rental', 'Per day', 'Units', 'Per unit'],
+    // No Units or Per-unit column here: the row IS one car, so per-unit would
+    // only repeat revenue. Days on rent takes their place.
+    vehicle: ['Unit', 'Plate', 'VIN', 'Vehicle', 'Year', 'Class', 'Revenue', 'Share', 'Rentals', 'Days', 'Per day'],
+  }[view];
 
   return (
     <AppShell me={me} logout={logout}>
@@ -172,7 +200,11 @@ function RevenueByVehicleType({ token, me, logout }) {
         range={range}
         onRangeChange={setRange}
         extraFilters={filters}
-        extraExportParams={{ locationId, model: modelQuery, groupBy: byModel ? 'model' : '' }}
+        extraExportParams={{
+          locationId,
+          vehicleModel: modelQuery,
+          groupBy: view === 'type' ? '' : view,
+        }}
       >
         {loading && !data ? (
           <div className="surface-note" style={{ margin: 16 }}>Loading…</div>
@@ -187,7 +219,9 @@ function RevenueByVehicleType({ token, me, logout }) {
                   {modelQuery ? ` · filtered to “${modelQuery}”` : ''}
                 </div>
                 <span className="label" style={{ textTransform: 'none' }}>
-                  {byModel ? `${fmtInt(t.modelCount)} models` : `${fmtInt(t.typeCount)} classes`}
+                  {view === 'vehicle' ? `${fmtInt(t.vehicleCount)} vehicles`
+                    : view === 'model' ? `${fmtInt(t.modelCount)} models`
+                    : `${fmtInt(t.typeCount)} classes`}
                 </span>
               </div>
 
@@ -196,10 +230,24 @@ function RevenueByVehicleType({ token, me, logout }) {
                   <table style={{ width: '100%' }}>
                     <thead><tr>{HEADERS.map((h, i) => th(h, i >= 2))}</tr></thead>
                     <tbody>
-                      {rows.map((r, i) => (
+                      {rows.map((r, i) => (view === 'vehicle' ? (
+                        <tr key={r.vehicleId || i}>
+                          {td(r.unit || '—', false, 'a')}
+                          {td(r.plate || '—', false, 'b')}
+                          {td(r.vin || '—', false, 'c')}
+                          {td([r.make, r.model].filter(Boolean).join(' ') || '—', false, 'd')}
+                          {td(r.year || '—', true, 'e')}
+                          {td(r.typeCode || '—', false, 'f')}
+                          {td(fmtMoney(r.revenue), true, 'g', true)}
+                          {td(r.sharePct == null ? '—' : `${r.sharePct}%`, true, 'h')}
+                          {td(fmtInt(r.rentals), true, 'i')}
+                          {td(fmtInt(r.days), true, 'j')}
+                          {td(fmtMoney(r.revenuePerDay), true, 'k')}
+                        </tr>
+                      ) : (
                         <tr key={`${r.typeId || r.label}-${i}`}>
-                          {td(byModel ? (r.label || '—') : (r.code || '—'), false, 'a')}
-                          {td(byModel ? (r.typeCode || '—') : r.name, false, 'b')}
+                          {td(view === 'model' ? (r.label || '—') : (r.code || '—'), false, 'a')}
+                          {td(view === 'model' ? (r.typeCode || '—') : r.name, false, 'b')}
                           {td(fmtMoney(r.revenue), true, 'c')}
                           {td(r.sharePct == null ? '—' : `${r.sharePct}%`, true, 'd')}
                           {td(fmtInt(r.rentals), true, 'e')}
@@ -209,7 +257,7 @@ function RevenueByVehicleType({ token, me, logout }) {
                           {td(r.units ? fmtInt(r.units) : '—', true, 'i')}
                           {td(fmtMoney(r.revenuePerUnit), true, 'j', true)}
                         </tr>
-                      ))}
+                      )))}
                     </tbody>
                   </table>
                 ) : (

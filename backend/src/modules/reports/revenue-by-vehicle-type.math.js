@@ -151,6 +151,82 @@ export function aggregateByModel(charges, fleetCounts = new Map()) {
   };
 }
 
+/**
+ * Revenue folded by INDIVIDUAL CAR.
+ *
+ * Hector: "que rompa el revenue también por carro, no nada más por type —
+ * vehicle id, license, vin, make, model, year and revenue generated."
+ *
+ * The deepest of the three views, and the only one that answers "is THIS car
+ * paying for itself". A class average hides both the unit that never leaves
+ * the lot and the one carrying the class.
+ *
+ * No fleet-count column here on purpose: the row IS one car, so revenue per
+ * unit would just repeat revenue. What replaces it is days on rent, which is
+ * the closest thing to utilisation this report can honestly compute from
+ * charges alone.
+ */
+export function aggregateByVehicle(charges) {
+  const cars = new Map();
+  const seen = new Set();
+
+  for (const c of charges) {
+    if (c.chargeType === TAX_CHARGE_TYPE || c.chargeType === DEPOSIT_CHARGE_TYPE) continue;
+    const ra = c.rentalAgreement || {};
+    const v = ra.vehicle || null;
+    // A charge with no vehicle cannot be attributed to a car at all. It is
+    // reported by the by-type view's `unassigned` block; silently bucketing it
+    // under some placeholder car would be worse than leaving it out of a view
+    // whose unit of account is a single vehicle.
+    if (!v?.id) continue;
+
+    if (!cars.has(v.id)) {
+      cars.set(v.id, {
+        vehicleId: v.id,
+        unit: v.internalNumber || null,
+        plate: v.plate || null,
+        vin: v.vin || null,
+        make: v.make || null,
+        model: v.model || null,
+        year: v.year || null,
+        typeCode: v.vehicleType?.code || null,
+        typeName: v.vehicleType?.name || null,
+        revenue: 0,
+        rentals: 0,
+        days: 0,
+      });
+    }
+    const row = cars.get(v.id);
+    row.revenue += num(c.total);
+    if (ra.id && !seen.has(ra.id)) {
+      seen.add(ra.id);
+      row.rentals += 1;
+      row.days += rentalDays(ra.pickupAt, ra.returnAt);
+    }
+  }
+
+  const rows = [...cars.values()].map((r) => ({
+    ...r,
+    revenue: money(r.revenue),
+    avgPerRental: r.rentals ? money(r.revenue / r.rentals) : null,
+    revenuePerDay: r.days ? money(r.revenue / r.days) : null,
+  }));
+
+  const total = money(rows.reduce((acc, r) => acc + r.revenue, 0));
+  for (const r of rows) r.sharePct = pct(r.revenue, total);
+  rows.sort((a, b) => b.revenue - a.revenue);
+
+  return {
+    rows,
+    totals: {
+      revenue: total,
+      rentals: rows.reduce((acc, r) => acc + r.rentals, 0),
+      days: rows.reduce((acc, r) => acc + r.days, 0),
+      vehicleCount: rows.length,
+    },
+  };
+}
+
 /** Key a vehicle the same way aggregateByModel does, so fleet counts line up. */
 export function modelKey(vehicle) {
   const make = (vehicle?.make || '').trim();
