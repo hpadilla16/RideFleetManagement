@@ -91,28 +91,34 @@ describe('marketPricingConfig.minSampleVendors setting', () => {
   beforeEach(() => { mock = installMock(); });
   afterEach(() => { mock.restore(); });
 
-  it('defaults to 1 when no AppSetting row exists (= pre-guard behavior)', async () => {
+  it('defaults to 3 when no AppSetting row exists', async () => {
+    // Raised from 1 on 2026-09-11. At 1 a single agency having a quiet night
+    // decided a live rate; three is the smallest sample where the 2nd-cheapest
+    // target these rules use has anything under it.
     const cfg = await settingsService.getMarketPricingSampleConfig({ tenantId: 'tenant-1' });
-    assert.deepEqual(cfg, { minSampleVendors: 1 });
+    assert.deepEqual(cfg, { minSampleVendors: 3 });
   });
 
-  it('defaults to 1 on junk values (0, negative, NaN, strings)', async () => {
+  it('falls back to the default on junk values (0, negative, NaN, strings)', async () => {
     for (const junk of [0, -3, 'nope', null, {}]) {
       mock.state.appSettings.set('tenant:tenant-1:marketPricingConfig', JSON.stringify({ minSampleVendors: junk }));
       const cfg = await settingsService.getMarketPricingSampleConfig({ tenantId: 'tenant-1' });
-      assert.equal(cfg.minSampleVendors, 1, `junk ${JSON.stringify(junk)} must fall back to 1`);
+      assert.equal(cfg.minSampleVendors, 3, `junk ${JSON.stringify(junk)} must fall back to the default`);
     }
   });
 
   it('update floors to an integer, is tenant-scoped, and round-trips', async () => {
-    const out = await settingsService.updateMarketPricingSampleConfig({ minSampleVendors: 3.9 }, { tenantId: 'tenant-1' });
-    assert.deepEqual(out, { minSampleVendors: 3 });
+    // 5.9 rather than 3.9 on purpose: 3 is now the DEFAULT, so a stored 3
+    // would be indistinguishable from no row at all and the scoping assertion
+    // below would pass without proving anything.
+    const out = await settingsService.updateMarketPricingSampleConfig({ minSampleVendors: 5.9 }, { tenantId: 'tenant-1' });
+    assert.deepEqual(out, { minSampleVendors: 5 });
     assert.ok(mock.state.appSettings.has('tenant:tenant-1:marketPricingConfig'), 'stored under the tenant-scoped key');
     const cfg = await settingsService.getMarketPricingSampleConfig({ tenantId: 'tenant-1' });
-    assert.equal(cfg.minSampleVendors, 3);
-    // Another tenant is untouched.
+    assert.equal(cfg.minSampleVendors, 5);
+    // Another tenant is untouched — it still reads the default, not tenant-1's 5.
     const other = await settingsService.getMarketPricingSampleConfig({ tenantId: 'tenant-2' });
-    assert.equal(other.minSampleVendors, 1);
+    assert.equal(other.minSampleVendors, 3);
   });
 
   it('update ignores invalid input and preserves unrelated keys in the JSON', async () => {
@@ -131,11 +137,24 @@ describe('evaluateRule — minimum-sample guard', () => {
   beforeEach(() => { mock = installMock(); });
   afterEach(() => { mock.restore(); });
 
-  it('DEFAULT floor 1: one single offer still produces a suggestion (today\'s behavior, config absent)', async () => {
+  it('DEFAULT floor 3: a single offer is NOT enough to move a live price', async () => {
+    // The point of the 2026-09-11 raise. One agency is an anecdote, and the
+    // rule cannot tell an anecdote from a market.
     mock.state.offers = [makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 })];
     const result = await evaluateRule(makeRule());
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'below_min_sample');
+    assert.equal(mock.state.suggestionCreates.length, 0, 'nothing written');
+  });
+
+  it('DEFAULT floor 3: three distinct agencies DO produce a suggestion', async () => {
+    mock.state.offers = [
+      makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 }),
+      makeOffer({ supplier: 'Avis', effectiveDailyPrice: 44 }),
+      makeOffer({ supplier: 'Sixt', effectiveDailyPrice: 48 }),
+    ];
+    const result = await evaluateRule(makeRule());
     assert.equal(result.skipped, false);
-    assert.equal(result.suggestedPrice, 40);
     assert.equal(mock.state.suggestionCreates.length, 1);
   });
 
@@ -187,13 +206,31 @@ describe('evaluateRule — minimum-sample guard', () => {
     assert.deepEqual(result, { skipped: true, reason: 'below_min_sample' });
   });
 
-  it('a failing config read falls back to floor 1 — the engine never goes dark on a settings hiccup', async () => {
+  it('a failing config read falls back to the DEFAULT floor, not to 1', async () => {
+    // This is the branch that matters most. A settings read that throws used
+    // to drop the guard to 1 — silently, exactly when nobody is watching — and
+    // a rule would then move a live price off a single quote. The fallback now
+    // matches settings.service.js's DEFAULT_MIN_SAMPLE_VENDORS.
     mock.state.offers = [makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 })];
     const result = await evaluateRule(makeRule(), {
       getMinSampleConfig: async () => { throw new Error('settings unavailable'); },
     });
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'below_min_sample');
+  });
+
+  it('a failing config read still lets a WELL-SAMPLED class through', async () => {
+    // The guard must not become a kill switch: settings being down should cost
+    // the thin classes, not every class.
+    mock.state.offers = [
+      makeOffer({ supplier: 'Hertz', effectiveDailyPrice: 40 }),
+      makeOffer({ supplier: 'Avis', effectiveDailyPrice: 44 }),
+      makeOffer({ supplier: 'Sixt', effectiveDailyPrice: 48 }),
+    ];
+    const result = await evaluateRule(makeRule(), {
+      getMinSampleConfig: async () => { throw new Error('settings unavailable'); },
+    });
     assert.equal(result.skipped, false);
-    assert.equal(result.suggestedPrice, 40);
   });
 });
 

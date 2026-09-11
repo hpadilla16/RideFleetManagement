@@ -72,6 +72,10 @@ const ALLOWED_KEYS = Object.keys(DEFAULTS);
 // the pre-check-in invite N hours before pickup, plus an optional reminder closer
 // to pickup if the customer hasn't completed it. Lead-time presets: 24/48/72h.
 const PRECHECKIN_LEAD_PRESETS = [24, 48, 72];
+
+// Minimum distinct agencies backing a class before a pricing rule may act.
+// See getMarketPricingSampleConfig for why this is 3 and not 1.
+const DEFAULT_MIN_SAMPLE_VENDORS = 3;
 function clampLead(v, fallback) {
   const n = Number(v);
   return PRECHECKIN_LEAD_PRESETS.includes(n) ? n : fallback;
@@ -2373,10 +2377,25 @@ export const settingsService = {
   // rule is skipped ('below_min_sample'). Default 1 = exactly the pre-guard
   // behavior (a single offer can still move a price) — Hector picks the real
   // floor later; this ships the mechanism only.
+  /**
+   * How many DISTINCT agencies must quote a class before a rule may move a
+   * live price.
+   *
+   * Default raised from 1 to 3 on 2026-09-11. At 1, a single agency having a
+   * quiet night decided a real rate: SJU's pickup class was backed by two
+   * agencies that day and proposed $78.33 off them. One quote is an anecdote,
+   * and the rule cannot tell an anecdote from a market.
+   *
+   * Three is not arbitrary — it is the smallest sample where the target used
+   * by these rules (2nd cheapest) has anything under it, so a single outlier
+   * cannot BE the answer. Deeper scraping made it affordable: SJU classes now
+   * carry 5-21 agencies each, where the pre-fix scrape read only the first
+   * page. A tenant may still lower it per-tenant through the config.
+   */
   async getMarketPricingSampleConfig(scope = {}) {
     const cfg = await readJsonSetting(scopedKey('marketPricingConfig', scope), null);
     const n = Number(cfg?.minSampleVendors);
-    return { minSampleVendors: Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1 };
+    return { minSampleVendors: Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MIN_SAMPLE_VENDORS };
   },
 
   async updateMarketPricingSampleConfig(payload = {}, scope = {}) {

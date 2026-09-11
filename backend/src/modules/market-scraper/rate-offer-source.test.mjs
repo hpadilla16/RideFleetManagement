@@ -10,9 +10,9 @@ import {
 // The adapter takes the prisma client as a parameter, so these tests pass a
 // fake client instead of monkey-patching the shared prisma instance (same
 // mock-prisma spirit as the other market suites, minus the global mutation).
-function fakeClient({ offers = [], observations = [] } = {}) {
-  const calls = { offerWhere: null, obsWhere: null };
-  return {
+function fakeClient({ offers = [], observations = [], ownBrands = null, tenantThrows = false } = {}) {
+  const calls = { offerWhere: null, obsWhere: null, tenantId: null };
+  const client = {
     calls,
     rateOffer: {
       findMany: async (args = {}) => { calls.offerWhere = args.where || null; return offers; }
@@ -21,6 +21,19 @@ function fakeClient({ offers = [], observations = [] } = {}) {
       findMany: async (args = {}) => { calls.obsWhere = args.where || null; return observations; }
     }
   };
+  // `tenant` is added only when a test cares: a client WITHOUT it exercises the
+  // same path as a caller that passes no tenantId, which is how every other
+  // test in this file still runs unchanged.
+  if (ownBrands || tenantThrows) {
+    client.tenant = {
+      findUnique: async (args = {}) => {
+        calls.tenantId = args?.where?.id ?? null;
+        if (tenantThrows) throw new Error('db unavailable');
+        return { marketExcludedVendors: ownBrands || [] };
+      }
+    };
+  }
+  return client;
 }
 
 function makeOffer(over = {}) {
@@ -349,6 +362,84 @@ describe('providers filter', () => {
   it('an empty list means "no filter", not "nothing"', async () => {
     const client = fakeClient({ offers });
     const { rows } = await loadCompetitorRows(client, { providers: [] }, { purpose: 'display' });
+    assert.equal(rows.length, 3);
+  });
+});
+
+// ----- own-brand exclusion ---------------------------------------------------
+
+describe('loadCompetitorRows — the tenant is not its own competitor', () => {
+  const pricing = { purpose: 'pricing' };
+  const filters = (tenantId) => ({ runId: 'run-1', profile: { tenantId, locationCode: 'SJU' } });
+
+  // Legacy observations, deliberately: they are EXPEDIA_DIRECT, which the
+  // pricing all-in gate always admits. Kayak rows would be dropped by that
+  // gate before the exclusion ran, and the test would pass for the wrong
+  // reason (an empty pool is trivially free of our own brand).
+  const rivalsAndSelf = () => [
+    makeObs({ id: 'x1', vendor: 'Hertz', dailyPrice: 40 }),
+    makeObs({ id: 'x2', vendor: 'ZezGo', dailyPrice: 20 }),
+    makeObs({ id: 'x3', vendor: 'Avis', dailyPrice: 44 }),
+  ];
+
+  it('drops our own brand from the PRICING pool', async () => {
+    const client = fakeClient({ observations: rivalsAndSelf(), ownBrands: ['ZezGo'] });
+    const { rows, totals } = await loadCompetitorRows(client, filters('t1'), pricing);
+    assert.deepEqual(rows.map((r) => r.vendor).sort(), ['Avis', 'Hertz']);
+    assert.equal(totals.ownBrandRows, 1, 'counted, not just dropped');
+    assert.equal(client.calls.tenantId, 't1', 'read the exclusion list for THIS tenant');
+  });
+
+  it('matches on the canonical vendor key, not a lowercased string', async () => {
+    // "ZezGo" configured, "  zezgo " observed. Comparing lower(supplier)
+    // against the canonical keys matches nothing and fails silently — that
+    // exact mistake cost a day earlier in this project, so it gets a test.
+    const client = fakeClient({
+      observations: [makeObs({ id: 'x1', vendor: '  zezgo ', dailyPrice: 20 }),
+                     makeObs({ id: 'x2', vendor: 'Hertz', dailyPrice: 40 })],
+      ownBrands: ['ZezGo'],
+    });
+    const { rows } = await loadCompetitorRows(client, filters('t1'), pricing);
+    assert.deepEqual(rows.map((r) => r.vendor), ['Hertz']);
+  });
+
+  it('leaves DISPLAY reads alone — seeing your own listing on the chart is useful', async () => {
+    const client = fakeClient({ observations: rivalsAndSelf(), ownBrands: ['ZezGo'] });
+    const { rows, totals } = await loadCompetitorRows(client, filters('t1'), { purpose: 'display' });
+    assert.equal(rows.length, 3, 'our own row survives a display read');
+    assert.equal(totals.ownBrandRows, 0);
+  });
+
+  it('excludes every brand a tenant owns, not just the first', async () => {
+    const client = fakeClient({
+      observations: [makeObs({ id: 'x1', vendor: 'MEXRENTACAR', dailyPrice: 21 }),
+                     makeObs({ id: 'x2', vendor: 'Economy Rent a Car', dailyPrice: 22 }),
+                     makeObs({ id: 'x3', vendor: 'Hertz', dailyPrice: 40 })],
+      ownBrands: ['MEXRENTACAR', 'ZezGo', 'Economy Rent a Car'],
+    });
+    const { rows, totals } = await loadCompetitorRows(client, filters('corpusa'), pricing);
+    assert.deepEqual(rows.map((r) => r.vendor), ['Hertz']);
+    assert.equal(totals.ownBrandRows, 2);
+  });
+
+  it('keeps every row when the tenant has declared no own brands', async () => {
+    const client = fakeClient({ observations: rivalsAndSelf(), ownBrands: [] });
+    const { rows } = await loadCompetitorRows(client, filters('t1'), pricing);
+    assert.equal(rows.length, 3);
+  });
+
+  it('a failed tenant read costs the exclusion, never the whole pool', async () => {
+    // Going dark over a database hiccup would be worse than pricing against
+    // ourselves for one night.
+    const client = fakeClient({ observations: rivalsAndSelf(), tenantThrows: true });
+    const { rows, totals } = await loadCompetitorRows(client, filters('t1'), pricing);
+    assert.equal(rows.length, 3);
+    assert.equal(totals.ownBrandRows, 0);
+  });
+
+  it('needs no tenantId to work at all (legacy callers)', async () => {
+    const client = fakeClient({ observations: rivalsAndSelf() });
+    const { rows } = await loadCompetitorRows(client, { runId: 'run-1' }, pricing);
     assert.equal(rows.length, 3);
   });
 });
