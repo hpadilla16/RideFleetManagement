@@ -40,14 +40,22 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
 
+// APPLIED was missing here until 2026-09-11, and the omission actively misled:
+// the API has always served it, but with no tab the 231 rate changes a PERSON
+// approved were invisible on the one screen that exists to show rate changes.
+// Hector read the Auto-applied queue, saw 9/8 as the newest row, and concluded
+// SJU had not moved since — while three rates had in fact changed that morning
+// from this very inbox. A queue you can act on but cannot then see is worse
+// than no queue.
 const STATUS_FILTERS = [
   { key: 'PENDING', label: 'Pending' },
+  { key: 'APPLIED', label: 'Applied' },
   { key: 'AUTO_APPLIED', label: 'Auto-applied' },
   { key: 'REJECTED', label: 'Rejected' },
   { key: 'EXPIRED', label: 'Expired' },
 ];
 
-const COUNT_STATUSES = ['PENDING', 'AUTO_APPLIED', 'REJECTED', 'EXPIRED'];
+const COUNT_STATUSES = ['PENDING', 'APPLIED', 'AUTO_APPLIED', 'REJECTED', 'EXPIRED'];
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -329,7 +337,7 @@ function Inner({ token, me, logout }) {
           <EmptyState status={status} onGoDashboard={() => router.push('/market')} />
         ) : (
           items.map((s) => (
-            status === 'AUTO_APPLIED'
+            status === 'AUTO_APPLIED' || status === 'APPLIED'
               ? <AutoAppliedRow key={s.id} suggestion={s} onUndo={() => goToRatePricing(s?.rate?.id)} />
               : <SuggestionCard
                   key={s.id}
@@ -585,7 +593,11 @@ function MarketMini({ reasonData }) {
 }
 
 // ---------------------------------------------------------------------------
-// Auto-applied row (collapsed style per mockup)
+// Already-happened row (collapsed style per mockup) — serves both the
+// auto-applied queue and the hand-approved one. The two differ in exactly one
+// thing the reader cares about: whether a person decided it. Saying
+// "Auto-applied" over a change someone approved by hand would be a lie on the
+// one screen meant to account for rate changes.
 // ---------------------------------------------------------------------------
 
 function AutoAppliedRow({ suggestion, onUndo }) {
@@ -596,12 +608,15 @@ function AutoAppliedRow({ suggestion, onUndo }) {
   const deltaPct = Number(suggestion?.deltaPct);
   const ruleLabel = ruleBadgeLabel(rule);
   const appliedAt = suggestion?.appliedAt || suggestion?.createdAt;
+  const byHand = suggestion?.status === 'APPLIED';
 
   return (
     <div style={{ ...cardStyle, ...autoCardStyle, gridTemplateColumns: '24px 1fr 80px', padding: '14px 18px', alignItems: 'center' }}>
       <div />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <Badge variant="auto">⚡ Auto-applied {fmtTimestamp(appliedAt)}</Badge>
+        <Badge variant="auto">
+          {byHand ? '✓ Applied' : '⚡ Auto-applied'} {fmtTimestamp(appliedAt)}
+        </Badge>
         <strong style={{ fontSize: 14, color: '#e7ebf2' }}>{rate?.name || rate?.rateCode || 'Unknown rate'}</strong>
         <span style={{ color: '#c8cfe0', fontSize: 14 }}>
           {fmtMoney(current)} → {fmtMoney(suggested)}
@@ -631,6 +646,7 @@ function AutoAppliedRow({ suggestion, onUndo }) {
 function EmptyState({ status, onGoDashboard }) {
   const msg = {
     PENDING: 'No pending suggestions. The pricing engine will queue new ones after tomorrow\'s 04:00 ET scrape.',
+    APPLIED: 'No rate changes approved by hand yet. Approving a pending suggestion moves it here.',
     AUTO_APPLIED: 'No auto-applied rate changes yet. Switch a pricing rule to AUTO mode to enable this queue.',
     REJECTED: 'No rejected suggestions in your inbox.',
     EXPIRED: 'No expired suggestions — your inbox is clean.',
