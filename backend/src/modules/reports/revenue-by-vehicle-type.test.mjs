@@ -9,7 +9,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { aggregate, rentalDays } from './revenue-by-vehicle-type.math.js';
+import { aggregate, aggregateByModel, modelKey, rentalDays } from './revenue-by-vehicle-type.math.js';
 
 const TYPE_A = { id: 'ta', code: 'CCAR', name: 'Compact' };
 const TYPE_B = { id: 'tb', code: 'MVAR', name: 'Minivan' };
@@ -22,7 +22,9 @@ function charge(agreementId, type, chargeType, total, opts = {}) {
       id: agreementId,
       pickupAt: opts.pickupAt || '2026-09-01T14:00:00Z',
       returnAt: opts.returnAt || '2026-09-04T14:00:00Z',
-      vehicle: type ? { id: `v-${type.id}`, vehicleType: type } : null,
+      vehicle: type
+        ? { id: opts.vehicleId || `v-${type.id}`, make: opts.make, model: opts.model, vehicleType: type }
+        : null,
     },
   };
 }
@@ -137,5 +139,69 @@ describe('aggregate — per-unit economics', () => {
     assert.deepEqual(out.rows, []);
     assert.equal(out.totals.revenue, 0);
     assert.equal(out.unassigned, null);
+  });
+});
+
+describe('aggregateByModel — "just show me the Volvo XC40"', () => {
+  it('separates two models that live in the same class', () => {
+    const out = aggregateByModel([
+      charge('a1', TYPE_A, 'UNIT', 400, { make: 'Volvo', model: 'XC40' }),
+      charge('a2', TYPE_A, 'UNIT', 100, { make: 'Nissan', model: 'Kicks' }),
+    ], new Map([['Volvo XC40||CCAR', 2], ['Nissan Kicks||CCAR', 5]]));
+
+    const volvo = out.rows.find((r) => r.model === 'XC40');
+    const nissan = out.rows.find((r) => r.model === 'Kicks');
+    assert.equal(volvo.revenue, 400);
+    assert.equal(nissan.revenue, 100);
+    // Both sit in Compact, so the type table could never have told them apart.
+    assert.equal(volvo.typeCode, 'CCAR');
+    assert.equal(nissan.typeCode, 'CCAR');
+    assert.equal(volvo.revenuePerUnit, 200);
+    assert.equal(nissan.revenuePerUnit, 20);
+    assert.equal(out.rows[0].model, 'XC40', 'sorted by revenue per unit');
+  });
+
+  it('keeps the same model apart when it sits in two classes', () => {
+    const out = aggregateByModel([
+      charge('a1', TYPE_A, 'UNIT', 100, { make: 'Volvo', model: 'XC40' }),
+      charge('a2', TYPE_B, 'UNIT', 300, { make: 'Volvo', model: 'XC40' }),
+    ]);
+    assert.equal(out.rows.length, 2, 'one row per model+class, not collapsed');
+  });
+
+  it('buckets a vehicle with no make or model on file instead of hiding it', () => {
+    const out = aggregateByModel([charge('a1', TYPE_A, 'UNIT', 90)]);
+    assert.equal(out.rows[0].label, 'Unspecified make/model');
+    assert.equal(out.rows[0].revenue, 90);
+  });
+
+  it('still keeps tax and deposits out', () => {
+    const out = aggregateByModel([
+      charge('a1', TYPE_A, 'UNIT', 100, { make: 'Volvo', model: 'XC40' }),
+      charge('a1', TYPE_A, 'TAX', 11, { make: 'Volvo', model: 'XC40' }),
+      charge('a1', TYPE_A, 'DEPOSIT', 200, { make: 'Volvo', model: 'XC40' }),
+    ]);
+    assert.equal(out.totals.revenue, 100);
+    assert.equal(out.rows[0].rentals, 1);
+  });
+
+  it('keys fleet counts the same way the rows are keyed', () => {
+    // If these two ever disagree, revenue-per-unit silently becomes null.
+    const key = modelKey({ make: 'Volvo', model: 'XC40', vehicleType: { code: 'CCAR' } });
+    const out = aggregateByModel(
+      [charge('a1', TYPE_A, 'UNIT', 500, { make: 'Volvo', model: 'XC40' })],
+      new Map([[key, 4]]),
+    );
+    assert.equal(out.rows[0].units, 4);
+    assert.equal(out.rows[0].revenuePerUnit, 125);
+  });
+
+  it('trims stray whitespace so " XC40 " is not a second model', () => {
+    const out = aggregateByModel([
+      charge('a1', TYPE_A, 'UNIT', 100, { make: 'Volvo', model: 'XC40' }),
+      charge('a2', TYPE_A, 'UNIT', 100, { make: ' Volvo ', model: ' XC40 ' }),
+    ]);
+    assert.equal(out.rows.length, 1);
+    assert.equal(out.rows[0].revenue, 200);
   });
 });

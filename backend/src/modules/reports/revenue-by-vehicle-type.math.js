@@ -71,6 +71,95 @@ export function rentalDays(pickupAt, returnAt) {
 }
 
 /**
+ * Revenue folded by MAKE + MODEL rather than by type.
+ *
+ * Hector: "que lo pueden especificar por vehicle model, por ejemplo si nada
+ * más quieren ver los Volvo XC40." A type is a commercial class -- "Compact
+ * SUV" -- and a tenant buying cars does not buy a class, they buy an XC40. Two
+ * models inside one class can earn very differently, and the type table cannot
+ * show that however it is sorted.
+ *
+ * Rows carry their type as well, because the same model can legitimately sit
+ * in two classes across branches and collapsing that would hide it.
+ */
+export function aggregateByModel(charges, fleetCounts = new Map()) {
+  const models = new Map();
+  const seen = new Set();
+
+  for (const c of charges) {
+    const ra = c.rentalAgreement || {};
+    const v = ra.vehicle || null;
+    if (c.chargeType === TAX_CHARGE_TYPE || c.chargeType === DEPOSIT_CHARGE_TYPE) continue;
+
+    const make = (v?.make || '').trim();
+    const model = (v?.model || '').trim();
+    // A vehicle with no make/model on file is its own visible bucket, for the
+    // same reason an agreement with no vehicle is: it is a data-entry finding,
+    // not a rounding error.
+    const label = make || model ? `${make} ${model}`.trim() : 'Unspecified make/model';
+    const typeCode = v?.vehicleType?.code || null;
+    const key = `${label}||${typeCode || ''}`;
+
+    if (!models.has(key)) {
+      models.set(key, {
+        make: make || null,
+        model: model || null,
+        label,
+        typeCode,
+        typeName: v?.vehicleType?.name || null,
+        revenue: 0,
+        rentals: 0,
+        days: 0,
+        units: 0,
+      });
+    }
+    const row = models.get(key);
+    row.revenue += num(c.total);
+
+    if (ra.id && !seen.has(ra.id)) {
+      seen.add(ra.id);
+      row.rentals += 1;
+      row.days += rentalDays(ra.pickupAt, ra.returnAt);
+    }
+  }
+
+  // Fleet counts arrive keyed the same way the caller grouped them.
+  for (const [key, row] of models) {
+    row.units = num(fleetCounts.get(key));
+  }
+
+  const rows = [...models.values()].map((r) => ({
+    ...r,
+    revenue: money(r.revenue),
+    avgPerRental: r.rentals ? money(r.revenue / r.rentals) : null,
+    revenuePerDay: r.days ? money(r.revenue / r.days) : null,
+    revenuePerUnit: r.units ? money(r.revenue / r.units) : null,
+  }));
+
+  const total = money(rows.reduce((acc, r) => acc + r.revenue, 0));
+  for (const r of rows) r.sharePct = pct(r.revenue, total);
+  rows.sort((a, b) => (b.revenuePerUnit ?? -1) - (a.revenuePerUnit ?? -1) || b.revenue - a.revenue);
+
+  return {
+    rows,
+    totals: {
+      revenue: total,
+      rentals: rows.reduce((acc, r) => acc + r.rentals, 0),
+      days: rows.reduce((acc, r) => acc + r.days, 0),
+      modelCount: rows.length,
+    },
+  };
+}
+
+/** Key a vehicle the same way aggregateByModel does, so fleet counts line up. */
+export function modelKey(vehicle) {
+  const make = (vehicle?.make || '').trim();
+  const model = (vehicle?.model || '').trim();
+  const label = make || model ? `${make} ${model}`.trim() : 'Unspecified make/model';
+  return `${label}||${vehicle?.vehicleType?.code || vehicle?.typeCode || ''}`;
+}
+
+/**
  * Fold charges into per-type rows.
  *
  * `charges` carry their parent agreement, so one pass builds both the money

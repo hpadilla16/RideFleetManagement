@@ -55,10 +55,10 @@ import {
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 import {
-  TAX_CHARGE_TYPE,
-  DEPOSIT_CHARGE_TYPE,
   EXCLUDED_AGREEMENT_STATUSES,
   aggregate,
+  aggregateByModel,
+  modelKey,
   num,
 } from './revenue-by-vehicle-type.math.js';
 
@@ -81,6 +81,13 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const now = deps.now || new Date();
   const locationId = (query && query.locationId) || null;
 
+  // Narrow to specific metal. `model=XC40` on its own is enough -- nobody
+  // types the make when they already know the model -- and both are a
+  // case-insensitive contains so "xc40", "XC40" and "XC40 Recharge" all land.
+  const makeFilter = (query?.make || '').trim();
+  const modelFilter = (query?.model || '').trim();
+  const groupByModel = String(query?.groupBy || '').toLowerCase() === 'model';
+
   const startOfDay = (d) => startOfDayInTz(d, tenantTz);
   const fromDate = from ? startOfDay(from) : startOfMonthInTz(now, tenantTz);
   const toDate = to ? startOfDay(to) : startOfDay(now);
@@ -94,6 +101,14 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   };
   if (locationId) rentalAgreement.pickupLocationId = locationId;
 
+  // The make/model filter is applied to the VEHICLE on the agreement, which
+  // also means an agreement with no vehicle drops out of a filtered run -- as
+  // it must: "show me the XC40s" cannot include a rental whose car is unknown.
+  const vehicleFilter = {};
+  if (makeFilter) vehicleFilter.make = { contains: makeFilter, mode: 'insensitive' };
+  if (modelFilter) vehicleFilter.model = { contains: modelFilter, mode: 'insensitive' };
+  if (makeFilter || modelFilter) rentalAgreement.vehicle = { is: vehicleFilter };
+
   const charges = await prisma.rentalAgreementCharge.findMany({
     where: { selected: true, rentalAgreement },
     select: {
@@ -104,23 +119,65 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
           id: true,
           pickupAt: true,
           returnAt: true,
-          vehicle: { select: { id: true, vehicleType: { select: { id: true, code: true, name: true } } } },
+          vehicle: {
+            select: {
+              id: true,
+              make: true,
+              model: true,
+              vehicleType: { select: { id: true, code: true, name: true } },
+            },
+          },
         },
       },
     },
   });
 
-  // Fleet size per type, so revenue-per-unit means something. SOLD cars are
-  // out of the fleet; scoping by branch when a branch filter is on keeps the
-  // denominator honest against the numerator.
+  // Fleet size, so revenue-per-unit means something. SOLD cars are out of the
+  // fleet; the branch and make/model filters apply here too, because a
+  // denominator counting cars the numerator excluded is worse than no ratio.
   const vehicleWhere = { tenantId, status: { not: 'SOLD' } };
   if (locationId) vehicleWhere.homeLocationId = locationId;
-  const fleet = await prisma.vehicle.groupBy({
-    by: ['vehicleTypeId'],
-    where: vehicleWhere,
-    _count: { _all: true },
-  });
-  const fleetCounts = new Map(fleet.map((f) => [f.vehicleTypeId, f._count._all]));
+  if (makeFilter) vehicleWhere.make = { contains: makeFilter, mode: 'insensitive' };
+  if (modelFilter) vehicleWhere.model = { contains: modelFilter, mode: 'insensitive' };
+
+  let fleetCounts;
+  if (groupByModel) {
+    // Counted per make+model+type, keyed exactly as aggregateByModel keys its
+    // rows, so the two halves cannot drift apart.
+    const cars = await prisma.vehicle.findMany({
+      where: vehicleWhere,
+      select: { make: true, model: true, vehicleType: { select: { code: true } } },
+    });
+    fleetCounts = new Map();
+    for (const v of cars) {
+      const k = modelKey(v);
+      fleetCounts.set(k, (fleetCounts.get(k) || 0) + 1);
+    }
+  } else {
+    const fleet = await prisma.vehicle.groupBy({
+      by: ['vehicleTypeId'],
+      where: vehicleWhere,
+      _count: { _all: true },
+    });
+    fleetCounts = new Map(fleet.map((f) => [f.vehicleTypeId, f._count._all]));
+  }
+
+  if (groupByModel) {
+    const byModel = aggregateByModel(charges, fleetCounts);
+    return {
+      range: {
+        from: fromDate.toISOString(),
+        to: addDaysInTz(windowEnd, -1, tenantTz).toISOString(),
+        label: `${dayLabelInTz(fromDate, tenantTz)} – ${dayLabelInTz(addDaysInTz(windowEnd, -1, tenantTz), tenantTz)}`,
+      },
+      groupBy: 'model',
+      totals: byModel.totals,
+      rows: byModel.rows,
+      unassigned: null,
+      idleTypes: [],
+      filters: { locationId, make: makeFilter || null, model: modelFilter || null, timezone: tenantTz },
+    };
+  }
 
   const agg = aggregate(charges, fleetCounts);
 
@@ -149,7 +206,8 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     rows: agg.rows,
     unassigned: agg.unassigned,
     idleTypes,
-    filters: { locationId, timezone: tenantTz },
+    groupBy: 'type',
+    filters: { locationId, make: makeFilter || null, model: modelFilter || null, timezone: tenantTz },
   };
 }
 
