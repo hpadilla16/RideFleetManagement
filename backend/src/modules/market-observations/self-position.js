@@ -213,11 +213,24 @@ export function measureLocationRatio(perClass = []) {
  *   ICAR   rivals on 30 days from 12 agencies, ours on 2, last 11 days ago.
  *   LFAR   rivals on 3 days from 1 agency, ours on 0.
  *
- * Those are three different statements. The first is conclusive. The second is
- * a fall OUT of the channel, which is worth knowing while it is fresh. The
- * third permits no conclusion at all, and saying "you are not visible" from a
- * three-day sample would be the same overconfidence this module exists to
- * refuse elsewhere.
+ * Those are three different statements. The second is a fall OUT of the channel,
+ * worth knowing while it is fresh. The third permits no conclusion at all.
+ *
+ * AND THE FIRST ONE WAS WRONG (retracted 2026-09-10, hours after shipping).
+ * Hector opened Kayak and found ZezGo -- IRC's own brand -- listing a Toyota
+ * Sienna as Minivan, a Ford F-150 as Pickup truck, a cargo van as Commercial
+ * and a Jeep Wrangler at $46, which are precisely the classes this had just
+ * declared absent from the channel. The verdict rested on an assumption nobody
+ * checked: that if the scraper sees RIVALS for a class it would see US too.
+ * That only holds if the scrape captures the whole result list, and it does
+ * not -- those listings sit far down a page that ends in "Show more results",
+ * and the profiles ask for 3-day rentals while that search was 7.
+ *
+ * Absence from our pool is not absence from the OTA. So NOT_VISIBLE is now
+ * gated behind `captureComplete`, which nothing sets yet: until the scraper can
+ * say it read the entire list, the honest verdict is INSUFFICIENT, and the
+ * counts still travel so the gap is visible to us without being asserted at a
+ * tenant.
  */
 export const VISIBILITY = {
   VISIBLE: 'VISIBLE',             // we appear, recently
@@ -236,6 +249,7 @@ export function describeChannelVisibility({
   rivalDays = 0, rivalSuppliers = 0, selfDays = 0, selfLastSeenAt = null,
   now = new Date(), minRivalDays = VISIBILITY_MIN_RIVAL_DAYS,
   minRivalSuppliers = VISIBILITY_MIN_RIVAL_SUPPLIERS, staleDays = VISIBILITY_STALE_DAYS,
+  captureComplete = false,
 } = {}) {
   const rd = Math.max(0, Number(rivalDays) || 0);
   const rs = Math.max(0, Number(rivalSuppliers) || 0);
@@ -251,6 +265,14 @@ export function describeChannelVisibility({
     return { ...base, state: VISIBILITY.INSUFFICIENT, label: `only ${rd} day${rd === 1 ? '' : 's'} of market data — not enough to tell` };
   }
   if (sd === 0) {
+    // Only a scrape that read the WHOLE list can turn our absence into a fact.
+    if (!captureComplete) {
+      return {
+        ...base,
+        state: VISIBILITY.INSUFFICIENT,
+        label: `${rs} agencies quoted this class on ${rd} days and we never captured your listing — the scrape reads part of the results page, so this is a capture gap, not proof you are absent`,
+      };
+    }
     return {
       ...base,
       state: VISIBILITY.NOT_VISIBLE,

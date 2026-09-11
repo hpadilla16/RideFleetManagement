@@ -286,12 +286,24 @@ test('measureLocationRatio never throws on junk', () => {
 // ---------------------------------------------------------------------------
 const NOW = new Date('2026-09-10T20:00:00Z');
 
-test('THE IFAR CASE: watched every day by eleven agencies, and we never appear', () => {
+test('RETRACTED: absence from our pool is NOT absence from the OTA', () => {
+  // Shipped as NOT_VISIBLE and retracted hours later. Hector opened Kayak and
+  // found ZezGo -- IRC's own brand -- listing a Sienna as Minivan, an F-150 as
+  // Pickup truck and a Jeep Wrangler at $46: the exact classes this had just
+  // declared absent. The scrape reads part of a results page that ends in
+  // "Show more results", so our not seeing them proves nothing about them.
   const v = describeChannelVisibility({ rivalDays: 30, rivalSuppliers: 11, selfDays: 0, now: NOW });
+  assert.equal(v.state, VISIBILITY.INSUFFICIENT, 'never assert absence we cannot support');
+  assert.match(v.label, /capture gap, not proof you are absent/);
+  // The counts still travel, so the gap stays visible to us.
+  assert.equal(v.rivalDays, 30);
+  assert.equal(v.selfDays, 0);
+});
+
+test('NOT_VISIBLE returns only once a scrape can say it read the WHOLE list', () => {
+  const v = describeChannelVisibility({ rivalDays: 30, rivalSuppliers: 11, selfDays: 0, now: NOW, captureComplete: true });
   assert.equal(v.state, VISIBILITY.NOT_VISIBLE);
   assert.match(v.label, /not appearing on the OTA/);
-  assert.match(v.label, /11 agencies/);
-  assert.match(v.label, /30 days/);
 });
 
 test('THE LFAR CASE: three days and one agency proves nothing, so it says nothing', () => {
@@ -326,9 +338,9 @@ test('appearing recently is simply VISIBLE', () => {
 test('both thresholds must be met before absence means anything', () => {
   // Many days but one agency, or many agencies on two days: neither is a
   // market being watched.
-  assert.equal(describeChannelVisibility({ rivalDays: 30, rivalSuppliers: 2, selfDays: 0 }).state, VISIBILITY.INSUFFICIENT);
-  assert.equal(describeChannelVisibility({ rivalDays: 2, rivalSuppliers: 20, selfDays: 0 }).state, VISIBILITY.INSUFFICIENT);
-  assert.equal(describeChannelVisibility({ rivalDays: 10, rivalSuppliers: 3, selfDays: 0 }).state, VISIBILITY.NOT_VISIBLE);
+  assert.equal(describeChannelVisibility({ rivalDays: 30, rivalSuppliers: 2, selfDays: 0, captureComplete: true }).state, VISIBILITY.INSUFFICIENT);
+  assert.equal(describeChannelVisibility({ rivalDays: 2, rivalSuppliers: 20, selfDays: 0, captureComplete: true }).state, VISIBILITY.INSUFFICIENT);
+  assert.equal(describeChannelVisibility({ rivalDays: 10, rivalSuppliers: 3, selfDays: 0, captureComplete: true }).state, VISIBILITY.NOT_VISIBLE);
 });
 
 test('a listing with no date cannot be stale, only present', () => {
