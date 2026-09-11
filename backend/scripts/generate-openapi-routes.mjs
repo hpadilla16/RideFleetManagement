@@ -17,6 +17,9 @@
  *   2. each router's file is found from main.js's own import statements.
  *   3. the file is scanned for `<routerName>.<method>('<path>' …)`, including
  *      the array form `.get(['/a','/b'], …)`.
+ *   4. and for `<routerName>.use('<prefix>', …, <childRouter>)` — a router
+ *      mounted inside another router — which is followed recursively, since
+ *      those routes are every bit as live as the rest.
  *
  * ── WHAT IT REFUSES TO THROW AWAY ───────────────────────────────────────────
  * The hand-written DESCRIPTIONS are the valuable part of the old file — they
@@ -31,6 +34,17 @@
  * silently removing a real endpoint is a lie about the API. Unmatched entries
  * are carried forward and counted, so the number is visible rather than
  * comfortable.
+ *
+ * ── WHY NESTED MOUNTS WERE WORTH CHASING (2026-09-10) ───────────────────────
+ * Following only main.js missed 33 live endpoints, and the carried-forward
+ * count was the clue: the five /api/host-app/messages entries had to be
+ * rescued by the no-drop rule precisely because they sit behind
+ * `hostAppRouter.use('/messages', hostMessagingRouter)`. The same shape hid the
+ * whole trip-chat surface, guest messaging, the location clause editor, and all
+ * thirteen tenant BILLING admin routes — cancel, suspend, apply-plan — which is
+ * the last surface that should be undocumented. The rescue rule meant nothing
+ * was wrong in the spec; it meant a third of a module could be missing from it
+ * without the report ever saying so.
  *
  *   node scripts/generate-openapi-routes.mjs            # report only
  *   node scripts/generate-openapi-routes.mjs --write
@@ -56,6 +70,85 @@ function joinPath(prefix, route) {
   const b = String(route || '');
   if (b === '/' || b === '') return a || '/';
   return `${a}${b.startsWith('/') ? '' : '/'}${b}`;
+}
+
+/**
+ * Router variable → the file it is imported from, for ANY file's imports.
+ *
+ * Node ESM specifiers in this tree carry their own extension, so this resolves
+ * by simple join; a specifier without one gets `.js` appended rather than
+ * guessed at, because a miss here silently drops a whole router.
+ */
+function readImportedRouters(src, fromFile) {
+  const out = new Map();
+  const re = /import\s*\{([^}]+)\}\s*from\s*'([^']+)'/g;
+  let m;
+  while ((m = re.exec(src))) {
+    const spec = m[2];
+    if (!spec.startsWith('.')) continue;
+    const target = resolve(dirname(fromFile), spec.endsWith('.js') ? spec : `${spec}.js`);
+    for (const raw of m[1].split(',')) {
+      const name = raw.trim().split(/\s+as\s+/).pop().trim();
+      if (name && /router/i.test(name)) out.set(name, target);
+    }
+  }
+  return out;
+}
+
+/**
+ * Every `<router>.use('<prefix>', …, <childRouter>)` in one file.
+ *
+ * The argument list is walked with a paren counter rather than matched with a
+ * regex, because express lets you inline middleware in the same call and
+ * `hostAppRouter.use('/messages', async (req, res, next) => { … next(); },
+ * hostMessagingRouter)` contains a `);` of its own. A lazy regex stops there,
+ * never sees the router at the end, and the five host-app message endpoints go
+ * missing -- which is exactly how they ended up surviving on the no-drop rule
+ * instead of being found. String and comment bodies are skipped so a `)` inside
+ * either cannot throw the count off.
+ */
+function readUseArgs(src, routerName) {
+  const esc = routerName.replace(/[$]/g, '\\$');
+  const head = new RegExp(`\\b${esc}\\s*\\.\\s*use\\s*\\(`, 'g');
+  const out = [];
+  let m;
+  while ((m = head.exec(src))) {
+    let i = head.lastIndex;
+    let depth = 1;
+    const start = i;
+    while (i < src.length && depth > 0) {
+      const c = src[i];
+      const two = src.slice(i, i + 2);
+      if (two === '//') { const nl = src.indexOf('\n', i); i = nl === -1 ? src.length : nl; continue; }
+      if (two === '/*') { const end = src.indexOf('*/', i + 2); i = end === -1 ? src.length : end + 2; continue; }
+      if (c === "'" || c === '"' || c === '`') {
+        i += 1;
+        while (i < src.length && src[i] !== c) i += src[i] === '\\' ? 2 : 1;
+        i += 1;
+        continue;
+      }
+      if (c === '(') depth += 1;
+      else if (c === ')') depth -= 1;
+      i += 1;
+    }
+    if (depth === 0) out.push(src.slice(start, i - 1));
+    head.lastIndex = i;
+  }
+  return out;
+}
+
+function readNestedMounts(src, routerName) {
+  const out = [];
+  for (const args of readUseArgs(src, routerName)) {
+    const lead = args.match(/^\s*'([^']+)'\s*,/);
+    if (!lead) continue; // `.use(middleware)` with no path mounts nothing new
+    const names = [...args.matchAll(/\b([A-Za-z_$][\w$]*[Rr]outer[\w$]*)\b/g)].map((x) => x[1]);
+    // Express takes the router as the LAST handler, so that is the one to
+    // follow; anything earlier is middleware.
+    const child = names[names.length - 1];
+    if (child && child !== routerName) out.push({ prefix: lead[1], child });
+  }
+  return out;
 }
 
 /** Router variable → the file that exports it, from main.js's imports. */
@@ -132,12 +225,21 @@ function readExisting() {
   // Capture the TODO marker too. Without it a second run reads its OWN output,
   // sees every derived description as hand-written, and quietly loses the only
   // signal saying which endpoints nobody has actually described yet.
+  // Each field tolerates an ESCAPED quote. The writer below escapes them, so a
+  // description as ordinary as "List the guest's conversations" round-trips
+  // through this file -- and a pattern of plain [^'] would fail to match that
+  // line, treat the route as new, and overwrite the sentence with derived text
+  // on the next run. Descriptions are the one thing here a human wrote; losing
+  // them quietly to an apostrophe is the worst failure this script has.
+  const FIELD = "'((?:[^'\\\\]|\\\\.)*)'";
+  const ROW = new RegExp(`\\[\\s*${FIELD}\\s*,\\s*${FIELD}\\s*,\\s*${FIELD}\\s*,\\s*${FIELD}\\s*\\]`);
+  const unq = (v) => String(v).replace(/\\(['\\\\])/g, '$1');
   for (const line of src.split(/\r?\n/)) {
-    const m = line.match(/\[\s*'([A-Z]+)'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*\]/);
+    const m = line.match(ROW);
     if (!m) continue;
-    out.set(`${m[1]} ${m[2]}`, {
-      tag: m[3],
-      description: m[4],
+    out.set(`${unq(m[1])} ${unq(m[2])}`, {
+      tag: unq(m[3]),
+      description: unq(m[4]),
       derived: /TODO\(describe\)/.test(line),
     });
   }
@@ -175,22 +277,51 @@ function main() {
 
   const rows = new Map(); // "METHOD path" -> [method, path, tag, description]
   let unmounted = 0;
+  let nestedFound = 0;
+
+  // Breadth-first over mounts, so a router mounted inside a router inside a
+  // router is reached the same way the first level is. `seen` is keyed by
+  // router AND prefix: the same child mounted under two parents is two
+  // different sets of URLs, and keying by router alone would drop one of them.
+  const queue = [];
   for (const [router, prefixes] of mounts) {
     const file = files.get(router);
     if (!file) { unmounted += 1; continue; }
-    const routes = readRoutes(file, router);
-    for (const prefix of prefixes) {
-      for (const r of routes) {
-        const full = toOpenApiPath(joinPath(prefix, r.path));
-        const key = `${r.method} ${full}`;
-        if (rows.has(key)) continue;
-        const prior = existing.get(key);
-        rows.set(key, [
-          r.method, full,
-          prior?.tag || tagFor(prefix),
-          prior?.description || deriveDescription(r.method, full),
-        ]);
-      }
+    for (const prefix of prefixes) queue.push({ router, file, prefix, depth: 0 });
+  }
+
+  const seen = new Set();
+  while (queue.length) {
+    const { router, file, prefix, depth } = queue.shift();
+    const seenKey = `${router} @ ${prefix}`;
+    if (seen.has(seenKey)) continue;
+    seen.add(seenKey);
+    if (depth > 0) nestedFound += 1;
+
+    let src;
+    try { src = readFileSync(file, 'utf8'); } catch { continue; }
+
+    for (const r of readRoutes(file, router)) {
+      const full = toOpenApiPath(joinPath(prefix, r.path));
+      const key = `${r.method} ${full}`;
+      if (rows.has(key)) continue;
+      const prior = existing.get(key);
+      rows.set(key, [
+        r.method, full,
+        prior?.tag || tagFor(prefix),
+        prior?.description || deriveDescription(r.method, full),
+      ]);
+    }
+
+    // Routers mounted inside this one. A depth cap keeps a cycle -- two files
+    // importing each other's routers -- from spinning forever; `seen` already
+    // blocks the simple case, and 6 is far deeper than this tree goes.
+    if (depth >= 6) continue;
+    const imported = readImportedRouters(src, file);
+    for (const { prefix: sub, child } of readNestedMounts(src, router)) {
+      const childFile = imported.get(child) || (new RegExp(`const\\s+${child}\\s*=\\s*Router\\(`).test(src) ? file : null);
+      if (!childFile) continue;
+      queue.push({ router: child, file: childFile, prefix: joinPath(prefix, sub), depth: depth + 1 });
     }
   }
 
@@ -224,6 +355,7 @@ function main() {
   const dropped = [];
 
   console.log(`routers mounted: ${mounts.size}  (files resolved: ${mounts.size - unmounted})`);
+  console.log(`  nested mounts followed:                               ${nestedFound}`);
   console.log(`routes found:    ${all.length}`);
   console.log(`  descriptions carried over from the hand-written file: ${kept}`);
   console.log(`  newly documented:                                      ${added}`);
