@@ -621,6 +621,11 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
   const tier = data.claim?.tier || null;
   const listedPrice = data.claim?.ourListed ?? null;
   const ratio = data.claim?.ratio || null;
+  // Not a data gap: a class we price, whose rivals are quoted daily, where our
+  // own listing never appears. The position is withdrawn rather than estimated.
+  const visibility = data.visibility || null;
+  const notVisible = visibility?.state === 'NOT_VISIBLE' && tier !== 'OBSERVED';
+  const fading = visibility?.state === 'FADING';
   const claimHeadline = claim
     ? (claim.verdict === 'CHEAPEST'
         ? `Cheapest of ${claim.of}`
@@ -706,6 +711,9 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: '#6e7587', fontSize: 11, textAlign: 'center' }}>
             <span>your price only — nothing to compare it against</span>
             <span style={{ color: '#3a4153' }}>the market has not quoted this class in the last 24h</span>
+            {notVisible && (
+              <span style={{ marginTop: 6, color: '#f87171' }}>{visibility.label}</span>
+            )}
             {lastOffer && (
               <span style={{ marginTop: 6, color: '#94a3b8' }}>
                 last rival seen: <span style={{ color: '#e2e8f5', fontWeight: 600 }}>{fmtMoney(lastOffer.price)}</span>
@@ -749,7 +757,11 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
                 forecast: the 24h window spans fifty pickup dates, so a rank over
                 all of them is not a position anybody can buy. Median/Low stay,
                 labelled as the range they are. */}
-            {claim ? (
+            {notVisible ? (
+              <span style={{ color: '#f87171', fontWeight: 600 }} title={visibility.label}>
+                NOT ON THE OTA
+              </span>
+            ) : claim ? (
               <span style={{ color: claimColor, fontWeight: 600 }} title={claim.sentence || ''}>
                 {claimHeadline}
                 {tier === 'OBSERVED' && (
@@ -758,7 +770,13 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
                     style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: '#4ade80', cursor: 'help' }}
                   >MEASURED</span>
                 )}
-                {tier === 'ESTIMATED' && (
+                {fading && (
+              <span
+                title={visibility.label}
+                style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: '#fb923c', cursor: 'help' }}
+              >DROPPED OUT {visibility.daysSinceSeen}d</span>
+            )}
+            {tier === 'ESTIMATED' && !notVisible && (
                   <span
                     title={ratio?.n
                       ? `Your listing was not in this scrape. Estimated from your base using the ratio measured from ${ratio.n} of your own past listings (${ratio.min}–${ratio.max}).`

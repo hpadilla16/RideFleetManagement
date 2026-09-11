@@ -202,6 +202,72 @@ export function measureLocationRatio(perClass = []) {
 }
 
 /**
+ * ARE WE EVEN ON THE SHELF? (2026-09-10, Hector: "dime cuando una clase no se
+ * esta mostrando en los OTA".)
+ *
+ * A class the tenant prices, whose rivals the scraper sees every day, where our
+ * own listing never appears, is not a data gap — it is a business fact, and
+ * estimating a rank for it is a fiction. Measured at SJU over 30 days:
+ *
+ *   IFAR   rivals on 30 days from 11 agencies, ours on 0.  Never once.
+ *   ICAR   rivals on 30 days from 12 agencies, ours on 2, last 11 days ago.
+ *   LFAR   rivals on 3 days from 1 agency, ours on 0.
+ *
+ * Those are three different statements. The first is conclusive. The second is
+ * a fall OUT of the channel, which is worth knowing while it is fresh. The
+ * third permits no conclusion at all, and saying "you are not visible" from a
+ * three-day sample would be the same overconfidence this module exists to
+ * refuse elsewhere.
+ */
+export const VISIBILITY = {
+  VISIBLE: 'VISIBLE',             // we appear, recently
+  FADING: 'FADING',               // we used to appear and have stopped
+  NOT_VISIBLE: 'NOT_VISIBLE',     // rivals are watched daily; we have never appeared
+  INSUFFICIENT: 'INSUFFICIENT',   // the class is barely scraped; no conclusion
+};
+
+/** The scrape must have watched the class this hard before absence means anything. */
+export const VISIBILITY_MIN_RIVAL_DAYS = 10;
+export const VISIBILITY_MIN_RIVAL_SUPPLIERS = 3;
+/** How stale our own last listing may be before "visible" becomes "fading". */
+export const VISIBILITY_STALE_DAYS = 7;
+
+export function describeChannelVisibility({
+  rivalDays = 0, rivalSuppliers = 0, selfDays = 0, selfLastSeenAt = null,
+  now = new Date(), minRivalDays = VISIBILITY_MIN_RIVAL_DAYS,
+  minRivalSuppliers = VISIBILITY_MIN_RIVAL_SUPPLIERS, staleDays = VISIBILITY_STALE_DAYS,
+} = {}) {
+  const rd = Math.max(0, Number(rivalDays) || 0);
+  const rs = Math.max(0, Number(rivalSuppliers) || 0);
+  const sd = Math.max(0, Number(selfDays) || 0);
+  const last = selfLastSeenAt ? new Date(selfLastSeenAt) : null;
+  const lastOk = last && !Number.isNaN(last.getTime()) ? last : null;
+  const daysSince = lastOk ? Math.floor((new Date(now) - lastOk) / 86400000) : null;
+
+  const watched = rd >= minRivalDays && rs >= minRivalSuppliers;
+  const base = { rivalDays: rd, rivalSuppliers: rs, selfDays: sd, daysSinceSeen: daysSince, watched };
+
+  if (!watched) {
+    return { ...base, state: VISIBILITY.INSUFFICIENT, label: `only ${rd} day${rd === 1 ? '' : 's'} of market data — not enough to tell` };
+  }
+  if (sd === 0) {
+    return {
+      ...base,
+      state: VISIBILITY.NOT_VISIBLE,
+      label: `not appearing on the OTA: ${rs} agencies quoted this class on ${rd} days and you never did`,
+    };
+  }
+  if (daysSince != null && daysSince > staleDays) {
+    return {
+      ...base,
+      state: VISIBILITY.FADING,
+      label: `last seen ${daysSince} days ago while rivals quoted on ${rd} days — you have dropped out of the channel`,
+    };
+  }
+  return { ...base, state: VISIBILITY.VISIBLE, label: `seen on ${sd} of ${rd} days` };
+}
+
+/**
  * Our position on ONE pickup date, at the highest tier the data supports.
  *
  * @param {object[]} selfRows  our own listings for that date  {supplier, price, observedAt}
